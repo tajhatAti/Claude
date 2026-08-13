@@ -1,7 +1,8 @@
 """
 Telegram Bot - Advanced RunSpace Controller (Pure requests)
 Features:
-- /code → Smart code collection (5 sec buffer)
+- /code <name> → create a new app (send code as text or a file next)
+- /update <name> → redeploy an existing app in place (text or a file next)
 - Inline buttons after deploy
 - Real logs, Uptime, Download DB
 """
@@ -24,20 +25,46 @@ from services import runner_client  # noqa: E402
 import logging
 logger = logging.getLogger("codenest-app")
 
-# CODE NEVER ARRIVES THROUGH CHAT.
+# CODE-VIA-CHAT — READ THIS BEFORE TOUCHING /code, /update, or _pending.
 #
-# The bot used to accept a pasted snippet and deploy it. That is removed: a
-# Telegram message caps at ~4096 characters, there is no editor, no syntax
-# help and no file tree, so it could only ever serve toy scripts while looking
-# like a real way to work. Writing, editing and deploying happen in the Mini
-# App and the website — which are the same UI.
-#
-# What the bot keeps is what a chat is actually good at: a launch button,
-# read-only status, and push notifications.
+# This used to accept a pasted snippet with no account check and deploy it
+# straight to the runner, bypassing the jobs table entirely — removed after
+# an unlinked chat was able to run arbitrary code on the server. /code and
+# /update are back by request, rebuilt with the hole closed:
+#   · Both commands are gated through _require_link() in poll_loop() below,
+#     the SAME gate /restart, /stop and /delete already use. Nothing here
+#     skips it.
+#   · The actual create/redeploy logic lives in services/bot_ops.py
+#     (create_app / update_code), which goes through the jobs table and
+#     MAX_JOBS_PER_USER cap exactly like the website's editor does — see
+#     that module's docstring for the full reasoning.
+#   · Code arrives in the message AFTER the command, as plain text (~4096
+#     char Telegram cap — fine for a quick one-line fix) or as an uploaded
+#     document (up to 20MB, enough for a real app), tracked per-chat in
+#     _pending{} with a 5-minute expiry so a stale "waiting for code" state
+#     can never quietly capture an unrelated later message.
 RUNNER_SECRET = os.getenv("RUNNER_SERVICE_SECRET", "")
 SITE_BASE = os.getenv("SITE_BASE_URL", "https://ahadorg.onrender.com").rstrip("/")
 
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
+TG_FILE_API = f"https://api.telegram.org/file/bot{BOT_TOKEN}" if BOT_TOKEN else ""
+
+# Extension -> runtime. Matches RS_EXT_LANG in static/pro.js — RunSpace can
+# only ever RUN these five languages, so anything else is rejected up front
+# with a clear reason instead of failing later inside the runner.
+_CODE_EXT_LANG = {
+    "py": "python", "pyw": "python",
+    "js": "javascript", "mjs": "javascript", "cjs": "javascript",
+    "sh": "bash", "bash": "bash",
+    "rb": "ruby",
+    "php": "php",
+}
+
+# chat_id -> {"mode": "create"|"update", "user_id", "ref"/"name", "expires"}
+# One pending slot per chat: sending a new /code or /update just overwrites
+# whatever was waiting, so there is never a stale slot fighting a fresh one.
+_pending = {}
+_PENDING_TTL_S = 300
 
 
 
@@ -234,21 +261,24 @@ def set_menu_button():
 
 
 def _help_text(user):
-    """What the bot can do — which is no longer "write code".
-
-    Every command here is read-only or a lifecycle action on an app that
-    already exists. Creating and editing happens in the Mini App.
-    """
+    """What the bot can do, including /code and /update — see the
+    "CODE-VIA-CHAT" comment near the top of this file for how those two are
+    kept safe (account-gated, same rails as the website's editor)."""
     return (
         f"👋 Hi *{user['username']}*!\n\n"
         "Tap *Open CodeNest* to write, edit and deploy — it opens right here "
         "in Telegram and signs you in automatically.\n\n"
         "*From chat you can also:*\n"
+        "`/code <new app name>` — create an app, then send the source "
+        "(text or a file)\n"
+        "`/update <name>` — push new code to an existing app, then send it "
+        "(auto-saves & restarts)\n"
         "`/apps` — everything you have, with live status\n"
         "`/status [name]` — account summary, or one app in full\n"
         "`/logs <name>` — the last lines it printed\n"
         "`/restart <name>`  `/stop <name>`  `/delete <name>`\n"
         "`/rename <name> <new>`\n"
+        "`/cancel` — stop a pending /code or /update\n"
         "`/ping [url]` — check a URL\n"
         "`/unlink` — disconnect this chat\n\n"
         "I message you if an app stops on its own."
@@ -383,7 +413,7 @@ _ICON = {"running": "🟢", "crashed": "🔴", "installing": "🟡",
 def cmd_apps(chat_id, user):
     apps = bot_ops.list_apps(user["id"])
     if not apps:
-        _send(chat_id, "You have no apps yet. Send /code with your source.")
+        _send(chat_id, "You have no apps yet. `/code <name>` to create one.")
         return
     lines = [f"*Your apps* ({len(apps)}/{bot_ops.MAX_JOBS_PER_USER} running slots)\n"]
     for a in apps:
@@ -493,6 +523,149 @@ def cmd_rename(chat_id, user, args):
           else f"❌ {res['error']}")
 
 
+# ==================== /code AND /update — see the module comment above ====
+
+def cmd_code_start(chat_id, user, name):
+    """/code <new app name> — the NEXT message from this chat becomes the
+    app's source (text or a file)."""
+    if not name:
+        _send(chat_id, "Usage: `/code <new app name>`, then send the source "
+                       "as a message or upload a file.")
+        return
+    clean = bot_ops.slugify_name(name)
+    if not clean:
+        _send(chat_id, "That name has no usable characters — letters, numbers, "
+                       "spaces, `-` and `_` only.")
+        return
+    if bot_ops.find_app(user["id"], clean):
+        _send(chat_id, f"You already have an app called “{clean}”. "
+                       f"Use `/update {clean}` to change its code instead.")
+        return
+    _pending[chat_id] = {
+        "mode": "create", "user_id": user["id"], "name": clean,
+        "expires": time.time() + _PENDING_TTL_S,
+    }
+    _send(chat_id, f"📦 Creating *{clean}*. Send its source now — paste it as "
+                   f"a message, or upload a file (.py/.js/.sh/.rb/.php). "
+                   f"Expires in 5 minutes. `/cancel` to stop.")
+
+
+def cmd_update_start(chat_id, user, ref):
+    """/update <existing app name> — the NEXT message becomes its new code,
+    redeployed in place (workspace data preserved)."""
+    if not ref:
+        _send(chat_id, "Usage: `/update <app name>`, then send the new "
+                       "source as a message or upload a file.")
+        return
+    row = bot_ops.find_app(user["id"], ref)
+    if not row:
+        _send(chat_id, f"No app called “{ref}”. `/apps` lists yours.")
+        return
+    _pending[chat_id] = {
+        "mode": "update", "user_id": user["id"], "ref": row["name"],
+        "expires": time.time() + _PENDING_TTL_S,
+    }
+    _send(chat_id, f"📦 Updating *{row['name']}*. Send the new source now — "
+                   f"paste it as a message, or upload a file. It will "
+                   f"auto-save and restart once received. Expires in 5 "
+                   f"minutes. `/cancel` to stop.")
+
+
+def cmd_cancel_pending(chat_id):
+    had = _pending.pop(chat_id, None)
+    _send(chat_id, "❎ Cancelled." if had else "Nothing pending.")
+
+
+def _get_pending(chat_id):
+    """The chat's pending /code or /update slot, or None if there isn't one
+    or it has expired (and is cleaned up on the way out either way)."""
+    p = _pending.get(chat_id)
+    if not p:
+        return None
+    if time.time() > p["expires"]:
+        _pending.pop(chat_id, None)
+        return None
+    return p
+
+
+TG_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024   # Telegram bot API download ceiling
+
+
+def _download_document(doc) -> tuple:
+    """Fetch an uploaded document's text content.
+
+    Returns (text, error). error is a user-facing string, or None on success.
+    Binary files (images, zips, compiled anything) are rejected here rather
+    than silently mangled — RunSpace runs source text, nothing else.
+    """
+    size = doc.get("file_size") or 0
+    if size > TG_MAX_DOWNLOAD_BYTES:
+        return None, f"That file is {size // (1024*1024)}MB — Telegram bots can only download up to 20MB."
+    try:
+        meta = _tg("getFile", file_id=doc["file_id"])
+        file_path = (meta.get("result") or {}).get("file_path")
+        if not file_path:
+            return None, "Telegram didn't return that file. Try sending it again."
+        r = requests.get(f"{TG_FILE_API}/{file_path}", timeout=60)
+        r.raise_for_status()
+        raw = r.content
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("bot document download failed: %s", exc)
+        return None, "Couldn't download that file from Telegram. Try again."
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, "That file isn't plain text (looks binary) — RunSpace runs source code, not compiled files or archives."
+
+
+def _lang_for_document(filename: str) -> str:
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    return _CODE_EXT_LANG.get(ext)
+
+
+def handle_pending_code(chat_id, msg, pending):
+    """A text or document message arrived while /code or /update was
+    waiting on this chat. Resolve it to source + language and deploy."""
+    doc = msg.get("document")
+    if doc:
+        code, err = _download_document(doc)
+        if err:
+            _send(chat_id, f"❌ {err}\nSend the file again, or `/cancel`.")
+            return  # slot stays open — let them retry without re-typing the command
+        doc_lang = _lang_for_document(doc.get("file_name", ""))
+    else:
+        code = (msg.get("text") or "").strip()
+        doc_lang = None
+        if not code:
+            _send(chat_id, "Send the source as text or a file, or `/cancel`.")
+            return
+
+    _pending.pop(chat_id, None)  # slot consumed either way from here on
+
+    if pending["mode"] == "create":
+        lang = doc_lang or "python"
+        res = bot_ops.create_app(pending["user_id"], pending["name"], lang, code)
+        if not res.get("ok"):
+            _send(chat_id, f"❌ {res['error']}")
+            return
+        url = res.get("web") or ""
+        _send(chat_id, f"✅ *{res['name']}* created and running ({lang}).\n"
+                       + (url + "\n" if url else "")
+                       + f"`/status {res['name']}` for details.")
+    else:
+        # /update never changes the runtime on its own — a .js file dropped
+        # onto a python app would silently swap what it runs. Only apply the
+        # inferred language if it MATCHES what's already there; otherwise
+        # keep the app's existing language and let the code speak for itself.
+        row = bot_ops.find_app(pending["user_id"], pending["ref"])
+        lang = doc_lang if (doc_lang and row and doc_lang == row.get("language")) else None
+        res = bot_ops.update_code(pending["user_id"], pending["ref"], code, lang)
+        if not res.get("ok"):
+            _send(chat_id, f"❌ {res['error']}")
+            return
+        _send(chat_id, f"✅ *{res['job']['name']}* updated, saved and restarted.")
+
+
 # ==================== CALLBACK HANDLER ====================
 def handle_callback(chat_id, data):
     """Inline buttons. Every action re-resolves the app FOR THIS USER.
@@ -592,7 +765,19 @@ def poll_loop():
                     msg = upd["message"]
                     chat_id = msg["chat"]["id"]
                     text = msg.get("text", "") or ""
+                    has_doc = "document" in msg
                     first_name = msg.get("from", {}).get("first_name", "user")
+
+                    # A /code or /update waiting on this chat claims the next
+                    # non-command message (text OR file) before anything else
+                    # gets a look — but a fresh slash command (e.g. /cancel,
+                    # or just changing their mind and running /apps) always
+                    # takes priority over a stale pending slot.
+                    if not text.startswith("/"):
+                        pending = _get_pending(chat_id)
+                        if pending:
+                            handle_pending_code(chat_id, msg, pending)
+                            continue
 
                     # /start and /link are the only commands an UNLINKED
                     # chat may use. Everything else needs an account, because
@@ -614,6 +799,9 @@ def poll_loop():
                     elif text.startswith("/ping"):
                         if _require_link(chat_id):
                             handle_ping(chat_id, text)
+
+                    elif text.startswith("/cancel"):
+                        cmd_cancel_pending(chat_id)
 
                     # Every command below acts on real apps, so each one is
                     # gated. _cmd_arg() splits off "/logs mybot" -> "mybot".
@@ -652,12 +840,30 @@ def poll_loop():
                         if _u:
                             cmd_rename(chat_id, _u, _cmd_arg(text))
 
+                    elif text.startswith("/code"):
+                        _u = _require_link(chat_id)
+                        if _u:
+                            cmd_code_start(chat_id, _u, _cmd_arg(text))
+
+                    elif text.startswith("/update"):
+                        _u = _require_link(chat_id)
+                        if _u:
+                            cmd_update_start(chat_id, _u, _cmd_arg(text))
+
                     elif text.startswith("/help"):
                         handle_start(chat_id, _tg_display(msg) or first_name)
 
-                    # No plain-text branch. A message that is not a command
-                    # used to become a deploy; now nothing does, so pasted
-                    # code cannot reach the runner by any path.
+                    # Not a command, and nothing was pending for this chat
+                    # (the pending check above already handled that case and
+                    # `continue`d). A stray file with no /code or /update
+                    # first is called out explicitly rather than silently
+                    # ignored, since "I sent a file and nothing happened" is
+                    # a confusing dead end otherwise.
+                    elif has_doc:
+                        _send(chat_id, "I wasn't expecting a file — send "
+                                       "`/code <new app name>` or "
+                                       "`/update <app name>` first, then "
+                                       "the file.")
                     else:
                         _send(chat_id, UNKNOWN_REPLY,
                               reply_markup=_open_kb())
