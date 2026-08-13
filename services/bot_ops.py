@@ -18,14 +18,32 @@ Everything here goes through the jobs table and runner_client, so an app acted
 on from Telegram behaves exactly as it does on the site — same worker routing,
 same admin visibility.
 
-CREATION AND CODE EDITING ARE DELIBERATELY ABSENT. deploy() and update_code()
-lived here while the bot accepted pasted snippets; both are gone. A Telegram
-message caps at ~4096 characters and offers no editor, so that path could only
-ever serve toy scripts while looking like a real way to work. Apps are created
-and edited in the Mini App and the website — one UI, one create path
-(POST /api/jobs). What remains here is lifecycle and read-only status, which
-is what a chat is actually good at.
+CREATION AND CODE EDITING WERE ONCE REMOVED FROM HERE, AND ARE NOW BACK — READ
+THIS BEFORE TOUCHING create_app() / update_code().
+deploy() and update_code() used to live here while the bot accepted pasted
+snippets directly in chat; both were deleted for two reasons: (1) a Telegram
+TEXT message caps at ~4096 characters with no editor, so pasted code could
+only ever be a toy script, and (2) pingbot.py's code-collection path ran
+BEFORE the account-link check existed, so an unlinked stranger's chat could
+execute code on the server (reproduced: os.system('whoami') ran unauthenticated).
+
+/code and /update are back for a genuine, requested use case — pushing a fix
+from a phone without opening the site — but neither weakness above is allowed
+to return:
+  · Every command that reaches create_app()/update_code() is gated on
+    services.telegram_link.user_for_chat() in pingbot.py's dispatcher, same
+    as /restart or /delete. There is no code path here that skips it.
+  · Code can arrive as an uploaded FILE (Telegram bot API allows up to 20MB
+    on download), not just a 4096-char text message, so a real app's source
+    can actually make the trip. Plain-text paste still works too, for quick
+    one-line fixes, and still caps out at ~4096 characters — long edits
+    should be sent as a file.
+  · create_app() and update_code() call the exact same jobs-table insert and
+    runner_client calls as POST /api/jobs and PATCH /api/jobs/{id} below —
+    same MAX_JOBS_PER_USER cap, same admin visibility. There is still only
+    ONE set of rules, just triggered from two UIs now instead of one.
 """
+import json
 import logging
 import re
 
@@ -33,6 +51,7 @@ from database import get_db_connection
 from routes.deps import now_utc_str
 from services import runner_client
 # Re-exported: pingbot reads bot_ops.MAX_JOBS_PER_USER when showing how many
+
 # slots an account has left, so there is one value, not two.
 from services.runner_client import MAX_JOBS_PER_USER  # noqa: F401
 
@@ -104,6 +123,18 @@ def _worker_of(row) -> str:
         return (dict(row).get("worker_url") or "") or None
     except Exception:
         return None
+
+
+def _row_env(row) -> dict:
+    """Env vars saved for a job row (empty when unset / unparsable). Same
+    logic as routes/runspace.py's private copy — duplicated rather than
+    imported because routes/ should not become an import target for
+    services/, but kept in sync deliberately."""
+    try:
+        raw = dict(row).get("env")
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
 
 
 def active_count(user_id: int) -> int:
@@ -213,3 +244,150 @@ def logs(user_id: int, ref: str, lines: int = 40) -> dict:
     return {"ok": True, "job": row, "info": info,
             "logs": "\n".join(text[-lines:]),
             "truncated": len(text) > lines}
+
+
+# ── /code and /update — see the module docstring before changing these ────
+
+def create_app(user_id: int, name: str, language: str, code: str) -> dict:
+    """Make a brand-new app from chat-supplied name + code. Identical rules
+    to POST /api/jobs: per-user name uniqueness, the MAX_JOBS_PER_USER cap,
+    and a real jobs-table row so the app shows up in the dashboard and
+    /admin/jobs exactly like one made on the site."""
+    clean = slugify_name(name)
+    if not clean:
+        return {"ok": False, "error": "That name has no usable characters."}
+
+    conn = get_db_connection()
+    try:
+        dup = conn.execute(
+            "SELECT id FROM jobs WHERE user_id = ? AND LOWER(name) = LOWER(?)",
+            (user_id, clean)).fetchone()
+        if dup:
+            return {"ok": False,
+                    "error": f"You already have an app called “{clean}”. Use /update {clean} instead."}
+        rows = conn.execute(
+            "SELECT runner_job_id FROM jobs WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    live = set(runner_client.fleet_jobs())
+    active = (sum(1 for r in rows if dict(r).get("runner_job_id") in live)
+              if live else len(rows))
+    if active >= MAX_JOBS_PER_USER:
+        return {"ok": False,
+                "error": (f"You already have {active} of {MAX_JOBS_PER_USER} RunSpace apps "
+                          f"running — stop one before making another.")}
+
+    body = {"language": language, "code": code, "name": f"u{user_id}-{clean}", "env": {}}
+    resp = runner_client._runner_http("POST", "/internal/jobs", body)
+    if resp.status_code != 201:
+        try:
+            detail = resp.json().get("detail", "Runner rejected the app.")
+        except Exception:
+            detail = "Runner rejected the app."
+        return {"ok": False, "error": detail}
+
+    info = resp.json()
+    now = now_utc_str()
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO jobs (user_id, name, language, code, runner_job_id, env, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, clean, language, code, info["id"], None, now, now))
+        conn.commit()
+        job_db_id = cursor.lastrowid
+    finally:
+        conn.close()
+
+    web = runner_client._job_web_fields(info, getattr(resp, "placed_on", None))
+    return {"ok": True, "name": clean, "job_db_id": job_db_id,
+            "web": web.get("web") or web.get("web_url")}
+
+
+def update_code(user_id: int, ref: str, code: str, language: str = None) -> dict:
+    """Redeploy an EXISTING app in place with new code — the chat equivalent
+    of PATCH /api/jobs/{id}. Same worker, same slug/URL, same persistent
+    workspace (SQLite files, session data): only the source changes. Falls
+    back to a cold create if the runner no longer holds the job, same as the
+    website's edit path does."""
+    row = find_app(user_id, ref)
+    if not row:
+        return {"ok": False, "error": f"No app called “{ref}”. /apps lists yours."}
+
+    rid = row.get("runner_job_id")
+    lang = language or row["language"]
+    now = now_utc_str()
+    conn = get_db_connection()
+    try:
+        conn.execute("UPDATE jobs SET code = ?, language = ?, updated_at = ? WHERE id = ?",
+                     (code, lang, now, row["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+
+    env = _row_env(row)
+
+    if not rid:
+        # Never actually deployed (e.g. imported but never started) — bring
+        # it up fresh instead of PATCHing a job the runner has never heard of.
+        body = {"language": lang, "code": code, "name": f"u{user_id}-{row['name']}", "env": env}
+        resp = runner_client._runner_http("POST", "/internal/jobs", body)
+        if resp.status_code != 201:
+            try:
+                detail = resp.json().get("detail", "Runner rejected the app.")
+            except Exception:
+                detail = "Runner rejected the app."
+            return {"ok": False, "error": detail}
+        info = resp.json()
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE jobs SET runner_job_id = ?, updated_at = ? WHERE id = ?",
+                         (info["id"], now_utc_str(), row["id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"ok": True, "job": row}
+
+    # Best-effort backup before touching the running job — mirrors the
+    # website's update_job(): an edit is the moment most likely to lose data
+    # if the runner has to cold-start.
+    try:
+        from services import snapshots
+        snapshots.save_snapshot(row["id"], rid)
+    except Exception as exc:
+        logger.warning("bot update_code: pre-update snapshot failed for job %s: %s", row["id"], exc)
+
+    patch_body = {"name": row["name"], "language": lang, "code": code, "env": env}
+    resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", patch_body,
+                                       worker=_worker_of(row))
+    if resp.status_code == 200:
+        return {"ok": True, "job": row}
+
+    if resp.status_code == 404:
+        # Runner restarted since — fall back to a cold create, same as
+        # routes/runspace.py's update_job().
+        create_body = {"language": lang, "code": code, "name": f"u{user_id}-{row['name']}", "env": env}
+        resp2 = runner_client._runner_http("POST", "/internal/jobs", create_body)
+        if resp2.status_code != 201:
+            try:
+                detail = resp2.json().get("detail", "Runner rejected the update.")
+            except Exception:
+                detail = "Runner rejected the update."
+            return {"ok": False, "error": detail}
+        info = resp2.json()
+        conn = get_db_connection()
+        try:
+            conn.execute("UPDATE jobs SET runner_job_id = ?, worker_url = ?, updated_at = ? WHERE id = ?",
+                         (info["id"], getattr(resp2, "placed_on", None), now_utc_str(), row["id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"ok": True, "job": row}
+
+    try:
+        detail = resp.json().get("detail", "Runner rejected the update.")
+    except Exception:
+        detail = "Runner rejected the update."
+    return {"ok": False, "error": detail}
