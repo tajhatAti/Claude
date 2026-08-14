@@ -439,12 +439,16 @@ st = c.get("/profile/telegram", headers=V2H).json()
 check("unlink clears the name as well as the id",
       st["linked"] is False and not st.get("telegram_name"), str(st))
 
-# Without a configured bot username there is no link to build; the UI must be
-# told that rather than handed a broken t.me URL.
-_saved_bot = TL.BOT_USERNAME
-TL.BOT_USERNAME = ""
+# Without a resolvable bot username there is no link to build; the UI must be
+# told that rather than handed a broken t.me URL. bot_username() now derives
+# from BOT_TOKEN via getMe (with TELEGRAM_BOT_USERNAME as an override), so the
+# empty case is forced by patching miniapp_auth.bot_username() itself rather
+# than a module-level TL.BOT_USERNAME constant, which no longer exists.
+from services import miniapp_auth as _MA
+_saved_bot_username = _MA.bot_username
+_MA.bot_username = lambda: ""
 check("no bot username means no deep link", TL.deep_link("123456") == "")
-TL.BOT_USERNAME = _saved_bot
+_MA.bot_username = _saved_bot_username
 check("a leading @ in the env var is tolerated",
       "t.me/Bot?start=1" in TL.deep_link.__doc__ or True)
 
