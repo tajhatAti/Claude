@@ -14,7 +14,8 @@ import time
 import requests
 from collections import defaultdict
 
-BOT_TOKEN = os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()
+BOT_TOKEN = (os.getenv("BOT_TOKEN", "").strip()
+             or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip())
 # Every command that DOES something is gated on this: the chat must be bound
 # to a CodeNest account. Before it existed, an unknown chat could deploy code
 # — reproduced, a stranger's os.system('whoami') ran on the server.
@@ -906,13 +907,13 @@ def start_bot():
             env_name = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
             if env_name and env_name.lower() != (who.get("username") or "").lower():
                 logger.error(
-                    "TELEGRAM MISCONFIGURED: TELEGRAM_BOT_USERNAME is @%s but the "
+                "TELEGRAM MISCONFIGURED: TELEGRAM_BOT_USERNAME is @%s but the "
                     "token belongs to @%s. These must be the same bot.",
                     env_name, who.get("username"))
         else:
             logger.error(
                 "TELEGRAM TOKEN REJECTED by getMe (%s). Sign-in will fail until "
-                "TELEGRAM_PING_BOT_TOKEN is a valid token: %s",
+                "BOT_TOKEN is a valid token: %s",
                 who.get("reason"), who.get("detail", ""))
     except Exception as exc:  # noqa: BLE001
         logger.warning("bot identity check skipped: %s", exc)
