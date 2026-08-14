@@ -44,10 +44,6 @@ logger = logging.getLogger("codenest-app")
 # screen is not a standing key to the account.
 LINK_CODE_TTL_MIN = int(os.getenv("TELEGRAM_LINK_TTL_MIN", "10"))
 LINK_CODE_DIGITS = 6
-# Telegram's own handle for the bot, e.g. "MyCodeNestBot" (no @). Needed to
-# build a t.me deep link; without it the site falls back to telling the user
-# to find the bot themselves.
-BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
 # A 6-digit code is 1e6 wide; without a cap a bot could walk it in minutes.
 MAX_ATTEMPTS = int(os.getenv("TELEGRAM_LINK_MAX_ATTEMPTS", "5"))
 
@@ -88,10 +84,28 @@ def deep_link(code: str) -> str:
     this adds a shortcut, not a second way in with weaker rules. Telegram
     allows A-Z a-z 0-9 _ - in a start payload; the code is digits only, so it
     passes through untouched.
+
+    The bot's @username used to be its OWN required env var
+    (TELEGRAM_BOT_USERNAME), set by hand alongside the token — and the two
+    could drift: point the token at a new bot and this stayed on the old
+    name, so the deep link opened the wrong bot with no error anywhere. It
+    now comes from miniapp_auth.bot_username(), which asks Telegram what the
+    token's bot is actually called — one value (BOT_TOKEN) to set, not two
+    to keep in sync.
     """
-    if not BOT_USERNAME or not code:
+    from services import miniapp_auth
+    username = miniapp_auth.bot_username()
+    if not username or not code:
         return ""
-    return f"https://t.me/{BOT_USERNAME}?start={code}"
+    return f"https://t.me/{username}?start={code}"
+
+
+def BOT_USERNAME() -> str:  # noqa: N802 — kept callable-but-named like the
+    # old constant so any other caller written against the old attribute
+    # style (BOT_USERNAME as a plain value) is easy to spot and update; new
+    # code should call miniapp_auth.bot_username() directly instead.
+    from services import miniapp_auth
+    return miniapp_auth.bot_username()
 
 
 def redeem_code(code: str, telegram_id: int, display_name: str = "") -> dict:
