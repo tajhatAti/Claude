@@ -684,7 +684,7 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             raise HTTPException(
                 status_code=503,
                 detail="Telegram sign-in is not configured on the server "
-                       "(TELEGRAM_PING_BOT_TOKEN is missing).")
+                       "(BOT_TOKEN is missing).")
         if reason == "bad_hash":
             # A rejected signature has exactly two causes and the server cannot
             # tell them apart: a forged payload, or the site verifying with a
@@ -703,7 +703,7 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             shape = miniapp_auth.token_shape()
             hint = ""
             if not shape.get("looks_valid"):
-                hint = (" The value in TELEGRAM_PING_BOT_TOKEN is not shaped "
+                hint = (" The value in BOT_TOKEN is not shaped "
                         "like a bot token — it should look like 123456:ABC-DEF.")
             else:
                 # Name the bot, not just its number. "bot ID 8719137492" still
@@ -759,14 +759,14 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
                     "TELEGRAM TOKEN IS STALE OR WRONG: the payload is %ss old and "
                     "its field set is normal, so the data is fine and the SECRET "
                     "does not match. Open @BotFather -> /mybots -> your bot -> "
-                    "API Token, copy it again, and set TELEGRAM_PING_BOT_TOKEN. "
+                    "API Token, copy it again, and set BOT_TOKEN. "
                     "A revoked token keeps the same bot id, so getMe still "
                     "passes while every sign-in fails.", _age)
                 raise HTTPException(
                     status_code=503,
                     detail="The server's Telegram token is out of date. If you "
                            "own this site: copy the API Token again from "
-                           "@BotFather and update TELEGRAM_PING_BOT_TOKEN.")
+                           "@BotFather and update BOT_TOKEN.")
             raise HTTPException(
                 status_code=400,
                 detail="Telegram could not verify this session." + hint)
@@ -835,7 +835,8 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
 def telegram_login(payload: TelegramAuthData, request: Request):
     rate_limit(f"{client_ip(request)}:telegram_login")
 
-    bot_token = os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()
+    bot_token = (os.getenv("BOT_TOKEN", "").strip()
+                 or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip())
     if not bot_token:
         raise HTTPException(status_code=500, detail="Telegram login not configured.")
 
