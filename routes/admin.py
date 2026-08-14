@@ -131,7 +131,7 @@ def admin_telegram_diagnostic(authorization: Optional[str] = Header(None)):
             f"bad_hash.")
     else:
         out["next_step"] = (
-            "Telegram did not accept TELEGRAM_PING_BOT_TOKEN. Copy it again "
+            "Telegram did not accept BOT_TOKEN. Copy it again "
             "from @BotFather for the bot whose Mini App you are opening.")
     # Also report what the site tells the browser, since a mismatch between
     # these two is its own bug: the login widget would point at one bot while
