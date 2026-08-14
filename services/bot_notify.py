@@ -163,7 +163,8 @@ def _loop():
 
 def start_watcher():
     """Start the state watcher, if the bot is configured at all."""
-    if not os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip():
+    if not (os.getenv("BOT_TOKEN", "").strip()
+            or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()):
         return False
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
