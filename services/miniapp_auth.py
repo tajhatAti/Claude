@@ -65,6 +65,11 @@ _FUTURE_SKEW_S = 300
 def _bot_token() -> str:
     """The bot token, cleaned of the ways a hosting UI mangles it.
 
+    Reads BOT_TOKEN first — the one variable meant to be set — and falls
+    back to TELEGRAM_PING_BOT_TOKEN so a deployment already using the old
+    name keeps working with no migration step. Both names mean the same
+    thing; BOT_TOKEN is the one to use going forward.
+
     Every one of these produced bad_hash with a token that was otherwise
     CORRECT, and none of them is distinguishable on a phone:
 
@@ -75,7 +80,8 @@ def _bot_token() -> str:
     leading @ are the two remaining paste accidents, so they are removed here
     rather than left to fail silently as a signature mismatch.
     """
-    raw = os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()
+    raw = (os.getenv("BOT_TOKEN", "").strip()
+           or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip())
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
         raw = raw[1:-1].strip()
     return raw.lstrip("@").strip()
@@ -288,3 +294,32 @@ def display_name(user: dict) -> str:
         return "@" + user["username"]
     name = " ".join(x for x in (user.get("first_name"), user.get("last_name")) if x)
     return name.strip()[:80]
+
+
+_username_cache = {"value": None, "checked": False}
+
+
+def bot_username() -> str:
+    """The bot's @username, WITHOUT needing a second env var to say so.
+
+    TELEGRAM_BOT_USERNAME used to be required alongside the token, and the
+    two had to be kept in sync by hand — set the token to bot A but leave
+    the username pointing at bot B (a stale value from before a token was
+    regenerated) and nothing failed loudly; the Login Widget and deep links
+    just quietly pointed at the wrong bot. The token already implies the
+    username (that's what whoami() below is for), so this asks Telegram once
+    and caches it, and TELEGRAM_BOT_USERNAME now only matters as a manual
+    override for the rare case getMe is unreachable.
+
+    Cached for the process lifetime: the token does not change without a
+    restart, so neither does the bot it belongs to.
+    """
+    override = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+    if override:
+        return override
+    if not _username_cache["checked"]:
+        _username_cache["checked"] = True
+        who = whoami()
+        if who.get("ok"):
+            _username_cache["value"] = who.get("username") or None
+    return _username_cache["value"] or ""
