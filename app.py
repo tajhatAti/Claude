@@ -311,9 +311,14 @@ def public_config():
     The Telegram login widget must be told the bot's @username, which differs
     per deployment — hardcoding it in index.html left a dead "YOUR_BOT_USERNAME"
     placeholder that never rendered a button.
+
+    Used to read TELEGRAM_BOT_USERNAME directly, a second env var that had to
+    be kept in sync with the token by hand. It now asks Telegram what the
+    configured BOT_TOKEN's bot is actually called — one variable to set.
     """
+    from services import miniapp_auth
     return {
-        "telegram_bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
+        "telegram_bot_username": miniapp_auth.bot_username(),
         # E-mail sign-in is shown by DEFAULT now.
         #
         # This used to default to "1", which HID the e-mail form whenever a bot
@@ -385,7 +390,8 @@ def health():
         "status": "ok",
         "database": DIALECT,
         "runner": "embedded" if EMBEDDED_RUNNER else "remote",
-        "ping_bot": "running" if bool(os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()) else "not configured",
+        "ping_bot": "running" if bool(os.getenv("BOT_TOKEN", "").strip()
+                                       or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()) else "not configured",
         # Which bot this server verifies Mini App sign-ins for. The bot ID half
         # of a token is PUBLIC — anyone who can message the bot can see it — so
         # this is safe, and it is the one fact needed to diagnose a bad_hash:
