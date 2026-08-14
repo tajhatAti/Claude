@@ -305,7 +305,7 @@ def telegram_link_status(authorization: Optional[str] = Header(None)):
         # The chat id is shown so the owner can tell WHICH Telegram account is
         # bound without having to unlink to find out.
         "telegram_id": tg,
-        "bot_username": telegram_link.BOT_USERNAME,
+        "bot_username": telegram_link.BOT_USERNAME(),
     }
     if tg:
         # WHO is connected, not just that something is. A bare numeric id
@@ -328,7 +328,7 @@ def telegram_link_code(request: Request, authorization: Optional[str] = Header(N
     return {
         "code": out["code"],
         "expires_in_min": out["ttl_min"],
-        "bot_username": telegram_link.BOT_USERNAME,
+        "bot_username": telegram_link.BOT_USERNAME(),
         # The whole point of this route now. Tapping it opens the bot with the
         # code already loaded, so the user never reads or retypes it — the
         # three steps of the old flow where a person could actually fail.
