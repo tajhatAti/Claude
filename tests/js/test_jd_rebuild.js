@@ -73,7 +73,14 @@ ok('JS writes the pill class', /"jd-pill "/.test(JS));
 ok('exactly ONE primary button in the header',
    !!head && head.querySelectorAll('.jd-primary').length === 1,
    head && String(head.querySelectorAll('.jd-primary').length));
-ok('theme toggle present', !!d.getElementById('jdThemeToggle'));
+/* The theme toggle is GONE, and its absence is the fix. It set data-theme and
+   swapped its own icon; app.css maps both values to the same dark palette
+   ("One product, one theme") because RunSpace and Code Studio are hardcoded
+   dark surfaces. Resolving --bg/--fg/--card under each value gives identical
+   results, so pressing it changed nothing a user could see — which reads as a
+   broken app, not a design choice. Assert it stays gone until a real light
+   theme exists to switch to. */
+ok('no dead theme toggle in the header', !d.getElementById('jdThemeToggle'));
 ok('overflow menu present', !!d.getElementById('jdMoreBtn') && !!d.getElementById('jdMoreMenu'));
 ['jdRestart', 'jdStop', 'jdDelete'].forEach(id => {
   const el = d.getElementById(id);

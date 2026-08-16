@@ -1865,15 +1865,13 @@ function openSearchResult(i) {
 }
 
 /* ==================== THEME ==================== */
+/* Writes the attribute the inline boot script and app.css both read. The
+   icon swap it used to do is gone with the button; a stored "light" value
+   from before the toggle was removed is still honoured here rather than
+   ignored, so nothing changes under a returning user's feet. */
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  const slot = document.getElementById("themeIcon");
-  if (slot) slot.innerHTML = ic(theme === "light" ? "sun" : "moon");
   try { localStorage.setItem("ahad_theme", theme); } catch (e) {}
-}
-function toggleTheme() {
-  const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
-  applyTheme(cur === "light" ? "dark" : "light");
 }
 (function initTheme() {
   // Dark is the product's identity: the landing page, RunSpace and the code
@@ -2802,9 +2800,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Theme toggle wiring
-  const themeBtn = document.getElementById("themeBtn");
-  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+  // The theme toggle is gone from the markup — see the note in index.html.
+  // Both buttons only ever swapped their own icon: app.css maps light and
+  // dark to the same palette on purpose, so the control was inert.
 
   // Reveal-on-scroll (Stripe-style entrance animations)
   const revealEls = document.querySelectorAll(".reveal");
@@ -5198,12 +5196,6 @@ function _initJdTabs() {
     });
   }
 
-  // Theme toggle in the detail header reuses the app-wide toggle.
-  const th = document.getElementById("jdThemeToggle");
-  if (th) th.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (typeof toggleTheme === "function") toggleTheme();
-  });
 }
 
 function _initDetailWiring() {

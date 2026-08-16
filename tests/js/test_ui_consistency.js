@@ -237,5 +237,34 @@ const spacing = [...css.matchAll(/\b(?:gap|padding|column-gap|row-gap)(?:-\w+)?:
 ok('few off-grid spacing literals remain', spacing.length <= 6,
    [...new Set(spacing)].sort((a, b) => a - b).join(', ') + ` (${spacing.length} uses)`);
 
+// ---------------------------------------------------------------------------
+console.log('[11] no control that visibly does nothing');
+// ---------------------------------------------------------------------------
+/* The dashboard and the job-detail header each carried a theme toggle. Both
+   set data-theme and swapped their own icon — and nothing else happened,
+   because app.css states "One product, one theme" and maps BOTH values to the
+   same palette (RunSpace and Code Studio are hardcoded dark surfaces with no
+   data-theme rules at all). Proven by resolving the surface tokens under each
+   value: identical.
+   A button that responds to a press but changes nothing is read as a bug in
+   the app, so it is worse than not offering it. */
+const themeMapsToOnePalette = (() => {
+  const dark = /html\[data-theme="dark"\][^{]*\{([^}]*)\}/.exec(css);
+  const light = /html\[data-theme="light"\][^{]*\{([^}]*)\}/.exec(css);
+  // Either there is no per-theme surface palette at all, or both exist.
+  const surfaces = /--bg:|--card:|--fg:/;
+  return !(light && surfaces.test(light[1])) || !!(dark && surfaces.test(dark[1]));
+})();
+ok('the two data-theme values are not pretending to differ', themeMapsToOnePalette);
+ok('no dashboard theme toggle while there is one palette',
+   !/id="themeBtn"/.test(html));
+ok('no job-detail theme toggle either', !/id="jdThemeToggle"/.test(html));
+
+const proJs = fs.readFileSync(path.join(ROOT, 'static/pro.js'), 'utf8');
+ok('and no orphaned handler left behind', !/toggleTheme/.test(proJs),
+   'a listener for a button that no longer exists');
+ok('but the boot path can still write the attribute', /function applyTheme/.test(proJs),
+   'index.html sets data-theme before first paint and pro.js must agree');
+
 console.log(`\ntest_ui_consistency: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -510,7 +510,15 @@
     </nav>
     <div class="dash-user">
       <button class="icon-btn" id="cmdBtn" title="Search (Ctrl+K)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>
-      <button class="icon-btn" id="themeBtn" title="Toggle theme"><span id="themeIcon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2 19 19M5 19l1.8-1.8M17.2 6.8 19 5"/></svg></span></button>
+      <!-- THEME TOGGLE REMOVED. It set data-theme and swapped its own icon,
+           and nothing else happened: app.css states "One product, one theme"
+           and maps BOTH data-theme values to the same dark palette, because
+           RunSpace and Code Studio are hardcoded dark surfaces with zero
+           data-theme rules. Verified by resolving --bg/--fg/--card under each
+           value: identical. A control that visibly does nothing is worse than
+           no control — the user presses it, sees the icon change, and
+           concludes the app is broken. When every surface can honour a light
+           theme, the button comes back with it. -->
       <span class="user-name" id="dashUsername">User</span>
       <button class="btn-ghost sm" id="btnLogout">Sign out</button>
     </div>
@@ -1039,9 +1047,7 @@
                     <svg viewBox="0 0 16 16" class="jd-i" fill="currentColor" aria-hidden="true"><path d="M4.5 3.3v9.4c0 .3.3.5.6.3l7.4-4.7a.4.4 0 0 0 0-.6L5.1 3a.4.4 0 0 0-.6.3Z"/></svg>
                     <span>Deploy</span>
                   </button>
-                  <button class="jd-icon-btn" id="jdThemeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">
-                    <svg viewBox="0 0 16 16" class="jd-i" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.05 3.05l1.13 1.13M11.82 11.82l1.13 1.13M12.95 3.05l-1.13 1.13M4.18 11.82l-1.13 1.13"/></svg>
-                  </button>
+                  <!-- Theme toggle removed here too; see the note in the dash bar. -->
                   <!-- Overflow: secondary + destructive actions live here so
                        they never compete with the one primary button. -->
                   <div class="jd-more-wrap">
