@@ -384,6 +384,15 @@ def _bot_identity():
     return out
 
 
+def _token_fingerprint():
+    """A comparable digest of the deployed token; never the token itself."""
+    try:
+        from services import miniapp_auth
+        return miniapp_auth.token_fingerprint()
+    except Exception:
+        return {"configured": None}
+
+
 def _token_live():
     """Re-test the configured token against Telegram, not the boot cache."""
     try:
@@ -450,6 +459,16 @@ def health():
         # ok:true = the token is valid right now; ok:false = Telegram rejects
         # it; ok:null = Telegram unreachable, which is not a verdict.
         "telegram_token_live": _token_live(),
+        # THE ONE THING THAT WAS STILL UNCHECKABLE. Diagnosis can now show
+        # that the running token is not the one BotFather holds — but the
+        # owner could not verify that themselves, because the secret must
+        # never be printed. This is a salted-free one-way digest of the whole
+        # token: run the printed command on the token BotFather shows you and
+        # compare sha256_12. Equal -> the right value is deployed. Different
+        # -> this process is running something else (a second variable, an
+        # environment group, a stale build, a truncated paste), and revoking
+        # the token again will not help.
+        "telegram_token_fingerprint": _token_fingerprint(),
         # THE URL THE BOT'S BUTTON ACTUALLY OPENS. A deployment that never set
         # SITE_BASE_URL used to fall back to a hardcoded host belonging to a
         # different install, so the button opened someone else's site and

@@ -753,32 +753,77 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             # healthy while every sign-in failed. This re-checks, live, and
             # miniapp_auth.token_live() caches only briefly so a failing
             # sign-in cannot turn into a request storm against Telegram.
+            # RUN THIS EVEN WHEN THE SIGNATURE ALREADY PROVED THE POINT.
+            #
+            # It used to be skipped whenever the Ed25519 check succeeded,
+            # because that check had already established the secret is wrong.
+            # Reported from production:
+            #
+            #     tg_signature=VALID token_live=None
+            #
+            # and None is not an answer — it means the question was never
+            # asked. But it is the question whose two answers demand
+            # completely different actions from the owner:
+            #
+            #   token_live=False -> Telegram rejects this token outright. It
+            #                       is revoked/dead. Copy the current one.
+            #   token_live=True  -> Telegram accepts it as a live token, yet
+            #                       signs initData with a different secret.
+            #                       Telegram keeps exactly ONE valid token per
+            #                       bot, so both cannot describe the same
+            #                       string: what is deployed is not the value
+            #                       that is in BotFather right now (a second
+            #                       env var, an old value pinned in a Blueprint
+            #                       or env group, a stale build, a truncated
+            #                       paste).
+            #
+            # Leaving it unasked sent the owner to "Revoke current token" —
+            # which is right for the first case and useless for the second.
+            # One extra getMe on an ALREADY-FAILING request, cached 60s, is a
+            # trivial price for telling those apart.
             _live = {"ok": None}
-            if not _tp.get("ok") and _tp.get("reason") in (
-                    "no_signature", "unavailable"):
-                try:
-                    _live = miniapp_auth.token_live()
-                except Exception:
-                    _live = {"ok": None}
+            try:
+                _live = miniapp_auth.token_live()
+            except Exception:
+                _live = {"ok": None}
 
             hint = ""
             if not shape.get("looks_valid"):
                 hint = (" The value in BOT_TOKEN is not shaped "
                         "like a bot token — it should look like 123456:ABC-DEF.")
-            elif _tp.get("ok") or _live.get("ok") is False:
-                # PROVEN, not guessed, by either of two independent routes:
-                #   * Telegram's Ed25519 signature validates this payload for
-                #     our bot id, yet our HMAC fails -> our secret is wrong;
-                #   * or Telegram just rejected our token outright (401).
-                # The old code tried to reach this conclusion by comparing a
-                # token's bot id against itself, which proved nothing. Now it
-                # is only said when it has actually been established.
-                hint = (f" The sign-in data is genuinely from Telegram for "
-                        f"bot ID {shape.get('bot_id')}, but this server's copy "
-                        f"of the token does not match it. If you own this "
-                        f"site: open @BotFather, /mybots, this bot, API Token, "
-                        f"press 'Revoke current token', and paste the NEW "
-                        f"token into BOT_TOKEN.")
+            elif _live.get("ok") is False:
+                # TELEGRAM ITSELF REJECTS THE TOKEN. The plainest case, and
+                # the only one where "revoke and copy again" is the right
+                # instruction: the deployed value is dead.
+                hint = (f" This server's bot token is no longer valid — "
+                        f"Telegram rejects it. Open @BotFather, /mybots, this "
+                        f"bot, API Token, and copy the CURRENT token into "
+                        f"BOT_TOKEN, then redeploy.")
+            elif _tp.get("ok"):
+                # TELEGRAM ACCEPTS THE TOKEN, YET SIGNED WITH A DIFFERENT
+                # SECRET. Telegram keeps exactly ONE valid token per bot, so
+                # these two facts cannot describe the same string: the value
+                # this process is running with is not the value BotFather has
+                # right now.
+                #
+                # Telling this owner to "revoke" would be wrong, and it is the
+                # mistake the earlier version made: revoking issues a THIRD
+                # token, and if the deployment is reading its value from
+                # somewhere other than the field being edited — a second env
+                # var, an env group or Blueprint that re-applies an old value,
+                # a service that was never actually restarted — the new token
+                # lands in the same place the last one did and nothing
+                # changes. Reported exactly that way: a new bot was created,
+                # the token was saved, the error did not move.
+                hint = (f" Telegram accepts this server's token as valid, but "
+                        f"it is signing sign-ins for bot ID "
+                        f"{shape.get('bot_id')} with a DIFFERENT secret. Only "
+                        f"one token per bot is ever valid, so the value this "
+                        f"deployment is actually running with is not the one "
+                        f"in @BotFather now. Re-copy the API Token, confirm "
+                        f"no other variable or environment group is "
+                        f"overriding it, and make sure the service really "
+                        f"restarted.")
             else:
                 # Name the bot, not just its number. "bot ID 8719137492" still
                 # left the owner comparing digits by hand against BotFather;
@@ -841,16 +886,57 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             # authentic and addressed to our bot id; our HMAC disagrees; the
             # only remaining variable is the secret we hold.
             if _tp.get("ok"):
-                logger.error(
-                    "TELEGRAM'S OWN SIGNATURE VALIDATES THIS PAYLOAD FOR BOT "
-                    "ID %s, BUT OUR HMAC DOES NOT. The data is authentic, so "
-                    "the SECRET half of the configured token is wrong — it is "
-                    "a different (usually older, revoked) token for the same "
-                    "bot. getMe cannot see this: a revoked token's replacement "
-                    "keeps the same bot id, and our getMe result is cached at "
-                    "boot. FIX: @BotFather -> /mybots -> this bot -> API Token "
-                    "-> Revoke current token, then put the NEW value in "
-                    "BOT_TOKEN and redeploy.", shape.get("bot_id"))
+                if _live.get("ok"):
+                    # THE TWO FACTS TOGETHER NARROW IT TO ONE THING.
+                    #
+                    #   Ed25519 valid  -> the payload is authentic, issued for
+                    #                     THIS bot id, and byte-identical to
+                    #                     what Telegram signed. (The Ed25519
+                    #                     and HMAC data-check strings are the
+                    #                     same bytes apart from a bot-id
+                    #                     prefix, and both are built from the
+                    #                     same parse, so this also clears the
+                    #                     whole family of decoding bugs.)
+                    #   getMe ok       -> the token this process holds is a
+                    #                     VALID token for that same bot.
+                    #
+                    # Telegram keeps exactly one valid token per bot. A valid
+                    # token that nonetheless does not verify a payload signed
+                    # for its own bot cannot be the token Telegram is signing
+                    # with — so the process is holding a value that is no
+                    # longer the one in BotFather, even though it was valid
+                    # when it was captured.
+                    #
+                    # Which means the fix is NOT "revoke again". It is to find
+                    # out why the running process disagrees with the field the
+                    # owner is editing.
+                    logger.error(
+                        "TOKEN IS VALID BUT IS NOT THE SIGNING TOKEN (bot id "
+                        "%s). Telegram's own Ed25519 signature validates this "
+                        "payload for this bot, AND getMe accepts the token "
+                        "this process is using — but the HMAC does not match, "
+                        "so Telegram signed with a different secret. Only one "
+                        "token per bot is valid at a time, therefore the value "
+                        "THIS PROCESS loaded is not the one BotFather holds "
+                        "now. Do NOT revoke again; that just adds a third "
+                        "token. Check, in this order: (1) another env var or "
+                        "environment group overriding BOT_TOKEN — see "
+                        "/health telegram_token_source; (2) an old value "
+                        "pinned in render.yaml / a Blueprint / an env group "
+                        "that is re-applied on deploy; (3) the service not "
+                        "actually restarted after the edit (this process reads "
+                        "BOT_TOKEN once, at import); (4) a truncated or "
+                        "partially-selected paste. Configured bot id: %s.",
+                        shape.get("bot_id"), shape.get("bot_id"))
+                else:
+                    logger.error(
+                        "TELEGRAM'S OWN SIGNATURE VALIDATES THIS PAYLOAD FOR "
+                        "BOT ID %s, BUT OUR HMAC DOES NOT, and getMe could not "
+                        "confirm the token (%s). The data is authentic, so the "
+                        "SECRET half of the configured token is wrong. FIX: "
+                        "@BotFather -> /mybots -> this bot -> API Token, copy "
+                        "the CURRENT value into BOT_TOKEN and redeploy.",
+                        shape.get("bot_id"), _live.get("reason"))
                 raise HTTPException(
                     status_code=400,
                     detail="Telegram could not verify this session." + hint)

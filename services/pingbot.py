@@ -1043,10 +1043,31 @@ def start_bot():
 
         who = miniapp_auth.whoami()
         if who.get("ok"):
+            # PRINT THE FINGERPRINT AT BOOT, so the value this process is
+            # actually running with can be compared against BotFather BEFORE
+            # anyone fails to sign in. Every diagnosis so far had to wait for
+            # a user to hit the error and then reason backwards; this puts the
+            # decisive fact in the deploy log. It is a one-way digest — the
+            # secret is never written anywhere.
+            fp = miniapp_auth.token_fingerprint()
             logger.warning(
-                "TELEGRAM BOT: this server is @%s (id %s). The Mini App must be "
-                "opened from THIS bot, or sign-in fails with bad_hash.",
-                who.get("username"), who.get("bot_id"))
+                "TELEGRAM BOT: this server is @%s (id %s), token sha256:%s "
+                "(secret %d chars). The Mini App must be opened from THIS bot. "
+                "To confirm the deployed token matches BotFather, run: "
+                "printf '%%s' '<token>' | sha256sum  — the first 12 characters "
+                "must equal %s.",
+                who.get("username"), who.get("bot_id"), fp.get("sha256_12"),
+                fp.get("secret_length", 0), fp.get("sha256_12"))
+            # A truncated or partially-selected paste is invisible in a
+            # dashboard field and produces exactly this failure, so measure it.
+            _sl = fp.get("secret_length")
+            if _sl and _sl != fp.get("secret_length_expected"):
+                logger.error(
+                    "TELEGRAM TOKEN LOOKS TRUNCATED: the secret half is %d "
+                    "characters, expected %d. A partial paste still passes "
+                    "getMe in some cases but can never verify a Mini App "
+                    "sign-in. Re-copy the whole token.",
+                    _sl, fp.get("secret_length_expected"))
             env_name = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
             if env_name and env_name.lower() != (who.get("username") or "").lower():
                 logger.error(

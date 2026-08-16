@@ -196,10 +196,14 @@ if HAVE_CRYPTO:
     w = wire(fields(), CURRENT_TOKEN, ed_priv=tg)
     r = c.post("/auth/telegram/miniapp", json={"init_data": w})
     d = r.json().get("detail", "")
-    check("a stale SECRET is named, once it is proven",
-          "does not match" in d and str(BOT_ID) in d, d)
-    check("and the fix names Revoke current token",
-          "Revoke current token" in d, d)
+    check("a secret mismatch is named, once it is proven",
+          "DIFFERENT secret" in d and str(BOT_ID) in d, d)
+    # NOT "revoke". whoami() is mocked ok here, so Telegram accepts the token
+    # we hold — and a valid token that is not the signing token means the
+    # DEPLOYED VALUE is not BotFather's current one. Revoking would mint a
+    # third token into the same wrong place. See tests/test_token_mismatch.py.
+    check("and it does not tell the owner to revoke a valid token",
+          "Revoke current token" not in d, d)
     check("it is still a 400 — the request is what failed", r.status_code == 400)
 
     # CONTROL: a genuinely different bot must NOT get that message, even
@@ -232,7 +236,7 @@ r3 = c.post("/auth/telegram/miniapp",
             json={"init_data": wire(fields(), CURRENT_TOKEN)})
 d3 = r3.json().get("detail", "")
 check("a revoked token is named as the cause",
-      "does not match" in d3 and "BotFather" in d3, d3)
+      "no longer valid" in d3 and "BotFather" in d3, d3)
 
 # Telegram being unreachable must NEVER be reported as a bad token.
 M.whoami = lambda timeout_s=6.0: {"ok": False, "reason": "unreachable"}

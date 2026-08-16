@@ -131,6 +131,47 @@ def token_sources() -> dict:
     }
 
 
+def token_fingerprint() -> dict:
+    """A safe way to compare the DEPLOYED token against the one in BotFather.
+
+    WHY THIS HAD TO EXIST. A sign-in can now be narrowed all the way down to
+    "the value this process is running with is not the one BotFather has" —
+    but the owner still cannot SEE that, because the secret must never be
+    printed. So the two sides could not be compared, and the only remaining
+    advice was to re-paste and hope. Reported twice in exactly that shape: a
+    token was replaced, the deploy went green, the error did not move.
+
+    A short salted digest fixes it without revealing anything. The owner runs
+    the same one-liner on the token BotFather shows them:
+
+        printf '%s' '<token>' | sha256sum
+
+    and compares the first 12 characters against `sha256_12` here. Equal means
+    the right value is deployed and the fault is elsewhere; different means
+    the process is running something else — a second variable, an env group,
+    a stale build, a truncated paste — and no amount of revoking will help.
+
+    sha256 of the whole token is a one-way digest: 12 hex characters (48 bits)
+    is far too little to reverse or brute-force a 35-character secret, and it
+    is only ever exposed on an admin-visible diagnostic. `length` is included
+    because a truncated paste is the one corruption a digest alone cannot
+    describe helpfully — a real token's secret half is 35 characters.
+    """
+    tok = _bot_token()
+    if not tok:
+        return {"configured": False}
+    bot_id, sep, secret = tok.partition(":")
+    return {
+        "configured": True,
+        "bot_id": bot_id if (sep and bot_id.isdigit()) else None,
+        "length": len(tok),
+        "secret_length": len(secret),
+        "secret_length_expected": 35,
+        "sha256_12": hashlib.sha256(tok.encode()).hexdigest()[:12],
+        "compare_with": "printf '%s' '<token from BotFather>' | sha256sum",
+    }
+
+
 def token_shape() -> dict:
     """A description of the configured token that reveals nothing secret.
 
