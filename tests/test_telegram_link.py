@@ -37,6 +37,14 @@ os.environ["DB_PATH"] = os.path.join(_tmp, "tglink.db")
 os.environ.setdefault("RUNNER_SERVICE_SECRET", "test-secret")
 os.environ.setdefault("TELEGRAM_PING_BOT_TOKEN", "fake-token")
 os.environ.setdefault("TELEGRAM_BOT_USERNAME", "MyCodeNestBot")
+# The Mini App button needs an https URL — Telegram refuses web_app on
+# anything else. This used to be supplied by a hardcoded fallback inside
+# pingbot.py ("https://ahadorg.onrender.com"), so the test passed without ever
+# setting it. That fallback was REMOVED because it silently pointed every
+# unconfigured deployment at one particular person's host; the value now comes
+# from SITE_BASE_URL / RENDER_EXTERNAL_URL. A test that asserts the button
+# exists has to configure the thing the button is built from.
+os.environ.setdefault("SITE_BASE_URL", "https://codenest.test")
 os.environ.setdefault("LIVE_PORT_MIN", "17600")
 os.environ.setdefault("LIVE_PORT_MAX", "17699")
 

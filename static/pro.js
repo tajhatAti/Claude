@@ -25,6 +25,13 @@ let _livePreviewTimer = null;
 const _TG_FORBIDDEN_SCREENS = {
   "screen-signin": 1, "screen-signup": 1, "screen-otp": 1,
   "screen-forgot1": 1, "screen-forgot2": 1, "screen-forgot3": 1,
+  // The password-reset confirmation belongs here too. It was missed because
+  // nothing routes to it inside Telegram — but it did not need to be routed
+  // to: it is a plain .auth div with no `hidden` class, so until showScreen()
+  // ran for the very first time it was simply still visible from the initial
+  // markup, and "Password updated! Redirecting in 3…" sat on top of the
+  // dashboard during every slow boot.
+  "screen-forgot-success": 1,
   "screen-landing": 1,
 };
 
@@ -2832,6 +2839,44 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.__inTelegram) {
     document.documentElement.classList.add("booting");
 
+    /* KEEP THE SPLASH UP UNTIL SIGN-IN ACTUALLY FINISHES.
+     *
+     * index.html ends with a 4-second safety net that force-hides the splash
+     * "whatever went wrong". In a browser that is right — there is always a
+     * page underneath. Inside Telegram there is not: the dashboard cannot be
+     * drawn until a token exists, so at t=4s the net uncovered a dashboard
+     * with no data in it and the user was left looking at "Hello, User" with
+     * every panel empty. Measured on a cold-starting server, that state
+     * lasted 26 more seconds.
+     *
+     * The Mini App owns its own splash lifetime: it stays until done() or
+     * fail() runs, and _tgFatal() (which replaces it with a real message and
+     * a Try again button) is the backstop if neither ever does. */
+    window.__tgBootOwned = true;
+
+    /* Say what the wait IS. A spinner that never changes is indistinguishable
+     * from a frozen app, and "Securing your session…" is a lie once we are
+     * really waiting on a free-tier cold start. miniapp.js calls this. */
+    window.__tgBootNote = function (msg) {
+      const el = document.querySelector("#bootSplash .boot-text");
+      if (el) el.textContent = msg;
+    };
+
+    /* LAST RESORT, AND IT MUST NOT BE THE 4s ONE. If sign-in has neither
+     * succeeded nor failed after 70s, something is wrong in a way no retry
+     * inside miniapp.js has covered. Show a message with a button rather
+     * than an empty dashboard — the user can always act on a button. */
+    var _tgBootGuard = setTimeout(function () {
+      if (_bootOk) return;
+      document.documentElement.classList.remove("booting");
+      var sp = document.getElementById("bootSplash");
+      if (sp) sp.style.display = "none";
+      showScreen("screen-dashboard");
+      _tgFatal("The server is not responding. It may be waking up — tap Try "
+               + "again.");
+      _bootOk = true;
+    }, 70000);
+
     // NEVER an auth screen inside Telegram. A Mini App user has already
     // proven who they are by opening it; asking them to sign in is the exact
     // friction the Mini App exists to remove.
@@ -2843,6 +2888,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // who is already inside Telegram. Neither can now.
     const done = () => {
       _bootOk = true;
+      clearTimeout(_tgBootGuard);
       document.documentElement.classList.remove("booting");
       const sp = document.getElementById("bootSplash");
       if (sp) sp.style.display = "none";
@@ -2921,7 +2967,7 @@ document.addEventListener("DOMContentLoaded", () => {
 /* The ONLY thing a Mini App user ever sees instead of the dashboard.
    Not a login form — an error with a retry, because a new Telegram id is
    supposed to create an account silently rather than fail. */
-function _tgFatal(message) {
+function _tgFatal(message, opts) {
   let el = document.getElementById("tgFatal");
   if (!el) {
     el = document.createElement("div");
@@ -2930,13 +2976,55 @@ function _tgFatal(message) {
     const p = document.createElement("p");
     p.id = "tgFatalMsg";
     const b = document.createElement("button");
+    b.id = "tgFatalBtn";
     b.className = "btn-primary";
     b.textContent = "Try again";
     b.onclick = () => location.reload();
-    el.append(p, b);
+    /* THE SECOND BUTTON EXISTS FOR ONE FAILURE THAT RELOADING CANNOT FIX.
+     *
+     * When the Mini App was opened from the WRONG bot — overwhelmingly, an
+     * old message from a bot that has since been replaced — the payload is
+     * signed with that bot's token and this server can never verify it.
+     * "Try again" re-runs the identical request from the identical button
+     * and fails identically, forever. The only exit is to open the CURRENT
+     * bot, and the server already knows which one that is, so the app can
+     * offer it as a link instead of describing it. */
+    const a = document.createElement("a");
+    a.id = "tgFatalGo";
+    a.className = "btn-primary";
+    a.hidden = true;
+    a.textContent = "Open the right bot";
+    el.append(p, b, a);
     document.body.appendChild(el);
   }
   document.getElementById("tgFatalMsg").textContent = message;
+
+  /* Pull the bot's @username out of the server's own wording rather than
+   * adding a second source of truth that could disagree with it. */
+  const go = document.getElementById("tgFatalGo");
+  const btn = document.getElementById("tgFatalBtn");
+  const at = (opts && opts.bot) || (String(message).match(/@([A-Za-z0-9_]{4,})/) || [])[1];
+  if (at) {
+    go.href = "https://t.me/" + at;
+    go.textContent = "Open @" + at;
+    go.hidden = false;
+    go.onclick = function (e) {
+      // Inside Telegram, openTelegramLink switches to the chat in-app; a
+      // plain navigation would try to load t.me INSIDE the webview.
+      const TG = window.Telegram && window.Telegram.WebApp;
+      if (TG && typeof TG.openTelegramLink === "function") {
+        e.preventDefault();
+        try { TG.openTelegramLink(go.href); } catch (err) {}
+        try { if (typeof TG.close === "function") TG.close(); } catch (err) {}
+      }
+    };
+    // Reloading is the WRONG default here, so it stops looking like the
+    // primary action.
+    btn.className = "btn-ghost";
+  } else {
+    go.hidden = true;
+    btn.className = "btn-primary";
+  }
   el.hidden = false;
 }
 

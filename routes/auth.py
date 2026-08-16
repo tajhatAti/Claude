@@ -681,10 +681,18 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             # Hiding it behind a generic message meant a missing env var looked
             # identical to a forged payload, and the Mini App just said
             # "Couldn't connect" forever with no way to tell which it was.
+            # NAME BOTH VARIABLES. The code reads BOT_TOKEN first and falls
+            # back to TELEGRAM_PING_BOT_TOKEN, and render.yaml documents only
+            # the second — so an owner told to "set BOT_TOKEN" may be looking
+            # at a dashboard whose field is called something else, and an
+            # owner who already set the documented one is left wondering why
+            # it was not enough. Either name works; saying so removes the
+            # guess.
             raise HTTPException(
                 status_code=503,
-                detail="Telegram sign-in is not configured on the server "
-                       "(BOT_TOKEN is missing).")
+                detail="Telegram sign-in is not configured on the server. Set "
+                       "BOT_TOKEN (or TELEGRAM_PING_BOT_TOKEN) to the token "
+                       "from @BotFather and redeploy.")
         if reason == "bad_hash":
             # A rejected signature has exactly two causes and the server cannot
             # tell them apart: a forged payload, or the site verifying with a
@@ -701,10 +709,76 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             # between four causes that all look identical on a phone. The
             # secret half is never read here.
             shape = miniapp_auth.token_shape()
+
+            # ASK TELEGRAM'S OWN SIGNATURE WHO IS AT FAULT.
+            #
+            # Everything above this line is inference, and inference is what
+            # kept getting it wrong. Telegram also signs initData with its own
+            # Ed25519 key, verifiable with nothing but the PUBLIC bot id — so
+            # it is independent of whatever is in BOT_TOKEN, and it answers
+            # the one question the HMAC cannot:
+            #
+            #   signature VALID  -> the payload really is from Telegram and
+            #                       really is for THIS bot id. The data is
+            #                       fine, so the SECRET half of our token is
+            #                       the thing that does not match.
+            #   signature INVALID-> it was not signed for this bot id at all.
+            #
+            # getMe cannot distinguish these: it only proves the token is *a*
+            # live token, and its answer is cached at boot. That gap is
+            # exactly how a deployment could show a healthy /health, a correct
+            # @username and a correct bot id while every sign-in failed.
+            _tp = {"ok": False, "reason": "unavailable"}
+            try:
+                _tp = miniapp_auth.third_party_check(
+                    payload.init_data, shape.get("bot_id"))
+            except Exception:
+                pass
+
+            # WHEN THERE IS NO SIGNATURE, ASK TELEGRAM DIRECTLY — AND DO NOT
+            # TRUST THE BOOT-TIME CACHE TO ANSWER IT.
+            #
+            # Older clients omit the Ed25519 `signature`, so the check above
+            # returns "no_signature" and cannot decide anything. The remaining
+            # question is simply: is the token we hold still a valid token?
+            # Telegram keeps exactly ONE valid token per bot — revoking issues
+            # a new one and kills the old one immediately — so a 401 from
+            # getMe IS the stale-token answer, and a success rules it out.
+            #
+            # _bot_identity() cannot be used for this: it caches the result of
+            # a single getMe at boot and never refreshes. A token replaced in
+            # the hosting dashboard after boot, or a boot that ran while
+            # Telegram was briefly unreachable, leaves it reporting a stale
+            # "ok" — which is precisely how /health could look perfectly
+            # healthy while every sign-in failed. This re-checks, live, and
+            # miniapp_auth.token_live() caches only briefly so a failing
+            # sign-in cannot turn into a request storm against Telegram.
+            _live = {"ok": None}
+            if not _tp.get("ok") and _tp.get("reason") in (
+                    "no_signature", "unavailable"):
+                try:
+                    _live = miniapp_auth.token_live()
+                except Exception:
+                    _live = {"ok": None}
+
             hint = ""
             if not shape.get("looks_valid"):
                 hint = (" The value in BOT_TOKEN is not shaped "
                         "like a bot token — it should look like 123456:ABC-DEF.")
+            elif _tp.get("ok") or _live.get("ok") is False:
+                # PROVEN, not guessed, by either of two independent routes:
+                #   * Telegram's Ed25519 signature validates this payload for
+                #     our bot id, yet our HMAC fails -> our secret is wrong;
+                #   * or Telegram just rejected our token outright (401).
+                # The old code tried to reach this conclusion by comparing a
+                # token's bot id against itself, which proved nothing. Now it
+                # is only said when it has actually been established.
+                hint = (f" The sign-in data is genuinely from Telegram for "
+                        f"bot ID {shape.get('bot_id')}, but this server's copy "
+                        f"of the token does not match it. If you own this "
+                        f"site: open @BotFather, /mybots, this bot, API Token, "
+                        f"press 'Revoke current token', and paste the NEW "
+                        f"token into BOT_TOKEN.")
             else:
                 # Name the bot, not just its number. "bot ID 8719137492" still
                 # left the owner comparing digits by hand against BotFather;
@@ -712,14 +786,29 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
                 # identity is cached from a single getMe at boot, so this adds
                 # no network call to a failing request.
                 ident = _bot_identity_safe()
+                # SAY WHAT TO DO, NOT JUST WHAT IS WRONG. "Open the Mini App
+                # from that bot" is true but assumes the user knows they are
+                # not already doing so — and the commonest way to get here is
+                # tapping a button in an OLD message from a PREVIOUS bot,
+                # which looks identical to the right one. Naming the action
+                # ("send /start to @X and use the new button") is what makes
+                # it fixable without understanding any of the above.
                 if ident and ident.get("username"):
-                    hint = (f" This server only accepts sign-ins from "
-                            f"@{ident['username']}. Open the Mini App from "
-                            f"that bot.")
+                    # The bot ID is kept alongside the @username: the username
+                    # is what a human recognises, the ID is what matches
+                    # BotFather and the /health output character for
+                    # character. Dropping either costs a check somebody needs.
+                    hint = (f" This site signs you in through "
+                            f"@{ident['username']} (bot ID "
+                            f"{shape.get('bot_id')}). Send /start to "
+                            f"@{ident['username']} and open the Mini App from "
+                            f"that message — an older bot's button cannot "
+                            f"work here.")
                 elif shape.get("bot_id"):
-                    hint = (f" This server is configured for bot ID "
-                            f"{shape['bot_id']}; check that matches the bot "
-                            f"you opened this from.")
+                    hint = (f" This site signs you in through bot ID "
+                            f"{shape['bot_id']}. Send /start to that bot and "
+                            f"open the Mini App from its message — an older "
+                            f"bot's button cannot work here.")
             # Log the payload's SHAPE. A token that getMe confirms is the right
             # bot, plus a hash that still does not match, means the bytes we
             # signed differ from the bytes Telegram signed — and the field list
@@ -727,46 +816,118 @@ def telegram_miniapp_login(payload: MiniAppAuth, request: Request):
             _age = getattr(exc, "age_s", None)
             _culprit = getattr(exc, "culprit", None)
             logger.warning(
-                "miniapp bad_hash: bot_id=%s fields=%s lengths=%s culprit=%s age_s=%s",
+                "miniapp bad_hash: bot_id=%s fields=%s lengths=%s culprit=%s "
+                "age_s=%s tg_signature=%s token_live=%s",
                 shape.get("bot_id"), getattr(exc, "fields", "?"),
-                getattr(exc, "lengths", "?"), _culprit, _age)
+                getattr(exc, "lengths", "?"), _culprit, _age,
+                _tp.get("reason") if not _tp.get("ok") else "VALID",
+                _live.get("ok"))
 
-            # culprit=None on a FRESH payload is not ambiguous. The field set
-            # was ordinary and no field's decoding differs, so the data is
-            # right and the KEY is wrong: the token in TELEGRAM_PING_BOT_TOKEN
-            # is not the one Telegram signed with. The commonest cause is a
-            # token that was revoked and reissued in BotFather — the bot id
-            # stays the same, so getMe still succeeds and every id comparison
-            # still looks correct, which is exactly why this took so long to
-            # pin down.
-            # Only when the token is otherwise CREDIBLE. A username pasted in
-            # place of a token, or a token whose bot id does not match the one
-            # Telegram accepts, has a better explanation already — and the
-            # existing messages say it more precisely. This branch is for the
-            # one case nothing else can see: a well-formed, live token whose
-            # SECRET has been rotated out from under it.
-            _tok_ok = bool(shape.get("looks_valid"))
-            try:
-                _ident = _bot_identity_safe()
-            except Exception:
-                _ident = None
-            _id_agrees = bool(
-                _ident and _ident.get("id")
-                and str(_ident["id"]) == str(shape.get("bot_id")))
-            if (_tok_ok and _id_agrees
-                    and _culprit is None and _age is not None and _age < 300):
+            # Telegram rejecting our token is the plainest possible answer,
+            # and it is now CHECKED at the moment of failure rather than
+            # inherited from a boot-time cache that may predate the problem.
+            if _live.get("ok") is False and _live.get("reason") != "not_configured":
                 logger.error(
-                    "TELEGRAM TOKEN IS STALE OR WRONG: the payload is %ss old and "
-                    "its field set is normal, so the data is fine and the SECRET "
-                    "does not match. Open @BotFather -> /mybots -> your bot -> "
-                    "API Token, copy it again, and set BOT_TOKEN. "
-                    "A revoked token keeps the same bot id, so getMe still "
-                    "passes while every sign-in fails.", _age)
+                    "TELEGRAM REJECTED THIS SERVER'S BOT TOKEN (getMe: %s), "
+                    "checked just now — not from the boot-time cache. The "
+                    "token in BOT_TOKEN is dead, which is why every sign-in "
+                    "fails while the bot id still looks correct. FIX: "
+                    "@BotFather -> /mybots -> this bot -> API Token, copy the "
+                    "CURRENT value into BOT_TOKEN and redeploy.",
+                    _live.get("detail", ""))
+
+            # THE PROVEN CASE COMES FIRST, because it is the only one that is
+            # not an inference. Telegram's own signature says the payload is
+            # authentic and addressed to our bot id; our HMAC disagrees; the
+            # only remaining variable is the secret we hold.
+            if _tp.get("ok"):
+                logger.error(
+                    "TELEGRAM'S OWN SIGNATURE VALIDATES THIS PAYLOAD FOR BOT "
+                    "ID %s, BUT OUR HMAC DOES NOT. The data is authentic, so "
+                    "the SECRET half of the configured token is wrong — it is "
+                    "a different (usually older, revoked) token for the same "
+                    "bot. getMe cannot see this: a revoked token's replacement "
+                    "keeps the same bot id, and our getMe result is cached at "
+                    "boot. FIX: @BotFather -> /mybots -> this bot -> API Token "
+                    "-> Revoke current token, then put the NEW value in "
+                    "BOT_TOKEN and redeploy.", shape.get("bot_id"))
                 raise HTTPException(
-                    status_code=503,
-                    detail="The server's Telegram token is out of date. If you "
-                           "own this site: copy the API Token again from "
-                           "@BotFather and update BOT_TOKEN.")
+                    status_code=400,
+                    detail="Telegram could not verify this session." + hint)
+
+            # THE "YOUR TOKEN IS STALE" VERDICT USED TO LIVE HERE, AND IT WAS
+            # WRONG — not occasionally, but STRUCTURALLY. Removed after being
+            # reproduced end to end.
+            #
+            # It fired when `_tok_ok and _id_agrees and culprit is None and
+            # age < 300`, where
+            #
+            #     _tok_ok    = the token is shaped like a token
+            #     _id_agrees = str(getMe(OUR token).id) == id parsed from OUR token
+            #
+            # Both sides of _id_agrees come from the SAME token, and Telegram
+            # can only ever answer getMe with the id inside the token it was
+            # called with. So _id_agrees is a TAUTOLOGY: it is True for every
+            # live token and the comparison can detect nothing. Verified by
+            # running it against a live token and a substituted id — the only
+            # way to make it False is an answer Telegram never gives.
+            #
+            # The consequence is the bug the owner actually hit. Any fresh
+            # bad_hash from a well-formed, live token — including the ordinary
+            # case of the Mini App being opened from a DIFFERENT bot — took
+            # this branch and was reported as "your token is out of date". So:
+            #
+            #   * the advice was to re-copy the token, which changes nothing,
+            #   * the `hint` built directly above, which NAMES the bot this
+            #     server accepts, was unreachable — the one sentence that
+            #     would have solved it,
+            #   * and getMe had just returned ok=True, i.e. Telegram had just
+            #     confirmed the token is live, while we told the owner it was
+            #     revoked. A genuinely revoked token answers getMe with 401,
+            #     which whoami() already reports as rejected_by_telegram, and
+            #     start_bot() already logs loudly at boot. That real case was
+            #     never the one reaching this branch.
+            #
+            # Reproduced: server holding bot B's live token, payload signed by
+            # bot A -> HTTP 503 "The server's Telegram token is out of date",
+            # while the same payload verified perfectly under bot A's token.
+            # Nothing was stale. Only the two bots differed.
+            #
+            # What the server can honestly say is exactly what `hint` says:
+            # which bot it accepts. That is a fact, it is public, and it is
+            # actionable in one tap. So the specific-but-false 503 is gone and
+            # the true 400 is what every bad_hash now returns.
+            #
+            # ONE MORE FACT WORTH REPORTING: the field set. Telegram includes
+            # query_id when the Mini App is launched from a button inside a
+            # chat message, and chat_type/chat_instance when it is opened from
+            # the menu button or a direct t.me link. A failing open carrying
+            # query_id therefore came from a MESSAGE BUTTON — and after
+            # switching bots, the likeliest such button is an old message from
+            # the old bot, still sitting in the chat and still tappable. That
+            # is a five-second check the owner can make, so the log says it.
+            _from_message_button = "query_id" in (getattr(exc, "fields", None) or [])
+            if _from_message_button:
+                logger.error(
+                    "MINI APP OPENED FROM AN OLD MESSAGE BUTTON. This payload "
+                    "carries query_id, which Telegram only sends when the app "
+                    "is launched from a button inside a chat message (the menu "
+                    "button and t.me links send chat_type/chat_instance "
+                    "instead). If you recently switched bots, an old message "
+                    "from the OLD bot still has a working button that opens "
+                    "this same URL — and it is signed with the OLD bot's "
+                    "token, so it can never verify here. Send /start to the "
+                    "CURRENT bot and use the button in the NEW message, or the "
+                    "menu button beside the input box.")
+            else:
+                logger.error(
+                    "MINI APP SIGNED BY A DIFFERENT BOT. This server verifies "
+                    "with bot id %s. The payload is %ss old and its fields "
+                    "decode cleanly, so the data is intact — it was simply "
+                    "signed with another bot's token. Open the Mini App from "
+                    "the bot whose token is in BOT_TOKEN.",
+                    shape.get("bot_id"), _age)
+
             raise HTTPException(
                 status_code=400,
                 detail="Telegram could not verify this session." + hint)

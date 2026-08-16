@@ -384,6 +384,47 @@ def _bot_identity():
     return out
 
 
+def _token_live():
+    """Re-test the configured token against Telegram, not the boot cache."""
+    try:
+        from services import miniapp_auth
+        return miniapp_auth.token_live()
+    except Exception:
+        return {"ok": None, "reason": "unavailable"}
+
+
+def _token_sources():
+    """Which env var the bot token came from, and whether a second disagrees.
+
+    A conflict here is invisible from a hosting dashboard — both variables
+    look set and correct — while only one of them is in force. Reporting it
+    turns "I replaced the token and nothing changed" into one glance. Only
+    the public bot-id half of each token is ever shown.
+    """
+    try:
+        from services import miniapp_auth
+        return miniapp_auth.token_sources()
+    except Exception:
+        return {"error": "unavailable"}
+
+
+def _miniapp_url():
+    """Where the bot's 'Open CodeNest' button points, or why it cannot."""
+    try:
+        from services.pingbot import SITE_BASE
+    except Exception:
+        return {"ok": False, "reason": "unavailable"}
+    if not SITE_BASE:
+        return {"ok": False, "reason": "not_configured",
+                "fix": "Set SITE_BASE_URL to this service's public https URL."}
+    if not SITE_BASE.startswith("https://"):
+        # Telegram refuses a web_app button on a non-https URL, so the Mini
+        # App cannot open at all — it silently degrades to a browser link.
+        return {"ok": False, "reason": "not_https", "url": SITE_BASE,
+                "fix": "Telegram requires https:// for a Mini App button."}
+    return {"ok": True, "url": f"{SITE_BASE}/dashboard"}
+
+
 @app.get("/health")
 def health():
     return {
@@ -401,6 +442,26 @@ def health():
         # Open the Mini App from THIS bot or sign-in fails with bad_hash.
         # Public information, and the one thing needed to diagnose it.
         "telegram_bot": _bot_identity(),
+        # THE SAME QUESTION, ASKED FRESH. telegram_bot above is cached from a
+        # single getMe at boot, so it keeps reporting the bot it saw then —
+        # even if the token was replaced in the dashboard afterwards, or the
+        # boot-time check never reached Telegram. That gap is how this page
+        # could look completely healthy while every Mini App sign-in failed.
+        # ok:true = the token is valid right now; ok:false = Telegram rejects
+        # it; ok:null = Telegram unreachable, which is not a verdict.
+        "telegram_token_live": _token_live(),
+        # THE URL THE BOT'S BUTTON ACTUALLY OPENS. A deployment that never set
+        # SITE_BASE_URL used to fall back to a hardcoded host belonging to a
+        # different install, so the button opened someone else's site and
+        # sign-in failed there with a bot mismatch — while every check here
+        # said "ok". Reporting the resolved value makes that visible in one
+        # request instead of being invisible until a user complains.
+        "miniapp_url": _miniapp_url(),
+        # WHICH env var is actually in force. BOT_TOKEN silently outranks
+        # TELEGRAM_PING_BOT_TOKEN, so two names holding two different bots
+        # looked fine from the dashboard while sign-ins were checked against
+        # the one the owner thought they had replaced.
+        "telegram_token_source": _token_sources(),
         "brevo_api_key_set": bool(os.getenv("BREVO_API_KEY", "").strip()),
         "sender_email_set": bool(os.getenv("SENDER_EMAIL", "").strip()),
     }

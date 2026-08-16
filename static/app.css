@@ -1258,13 +1258,48 @@ html.tg-hide-signout #btnLogout { display: none; }
 /* 100vh is wrong in a Telegram webview; the SDK reports the real height. */
 html.in-telegram body { min-height: var(--tg-vh, 100vh); height: var(--tg-vh, 100vh); }
 /* Auth screens are unreachable inside the Mini App: it is already signed in,
-   and a login form there is a dead end. */
+   and a login form there is a dead end.
+
+   THE LIST WAS AN ALLOW-LIST BY OMISSION, AND IT LEAKED. Reproduced by
+   running the real boot in a Telegram webview against a slow server: while
+   the login request was in flight, the visible elements were
+
+       how, features, section, foot, screen-forgot-success, screen-dashboard
+
+   — the marketing page ("HOW IT WORKS", "Put your bot online tonight",
+   "Sign in with Telegram") and a stray "Password updated! Redirecting in 3…"
+   card, stacked above the dashboard. Nothing in the app ever ASKED for those:
+   showScreen() only unhides its target, and until it runs for the first time
+   every .section/.foot/.auth element is simply still at its document default.
+   html.booting hid them, and pro.js drops that class the moment boot finishes
+   — which is BEFORE the network answers.
+
+   Naming screens one by one could only ever fix the ones already known:
+   #screen-forgot-success was never in the list because nobody thought to add
+   it. Inside Telegram the app is the dashboard and nothing else, so the rule
+   is inverted — hide every top-level surface by CLASS. A screen added later
+   is then covered on the day it is added, not on the day it is reported. */
+html.tg-no-auth .hero,
+html.tg-no-auth .section,
+html.tg-no-auth .foot,
+html.tg-no-auth .auth { display: none !important; }
+
+/* The per-id rules are KEPT, and not as belt-and-braces.
+   They are the written half of a contract: every id listed here must also
+   appear in _TG_FORBIDDEN_SCREENS in pro.js, so that showScreen() REFUSES the
+   screen instead of hiding the dashboard and then "showing" something the
+   stylesheet keeps at display:none — a blank phone. tests/js/
+   test_miniapp_session.js reads these ids straight out of this file and fails
+   if any one of them is missing from that list, which a class selector cannot
+   express. #screen-forgot-success is in both now; it was in neither, which is
+   how a "Password updated!" card ended up on screen inside Telegram. */
 html.tg-no-auth #screen-signin,
 html.tg-no-auth #screen-signup,
 html.tg-no-auth #screen-otp,
 html.tg-no-auth #screen-forgot1,
 html.tg-no-auth #screen-forgot2,
 html.tg-no-auth #screen-forgot3,
+html.tg-no-auth #screen-forgot-success,
 html.tg-no-auth #screen-landing { display: none !important; }
 
 /* THE MINI APP'S ONLY ERROR SURFACE.
@@ -1296,7 +1331,19 @@ html.tg-no-auth #screen-landing { display: none !important; }
   font-size: 14px;
   line-height: 1.55;
 }
-.tg-fatal .btn-primary { min-width: 160px; }
+.tg-fatal .btn-primary,
+.tg-fatal .btn-ghost { min-width: 160px; }
+/* The "Open @thebot" escape is an <a>, not a <button>: the button styles are
+   written for form controls, so without these it renders as bare blue text
+   under the message — the same invisibility that once hid this whole panel. */
+.tg-fatal a.btn-primary,
+.tg-fatal a.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.tg-fatal [hidden] { display: none !important; }
 /* ── Links inside dark surfaces ────────────────────────────────────────── */
 /* A link must never paint its own background here: on a dark card an
    inherited highlight reads as a broken selection. Underline carries it. */

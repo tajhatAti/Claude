@@ -45,7 +45,45 @@ logger = logging.getLogger("codenest-app")
 #     _pending{} with a 5-minute expiry so a stale "waiting for code" state
 #     can never quietly capture an unrelated later message.
 RUNNER_SECRET = os.getenv("RUNNER_SERVICE_SECRET", "")
-SITE_BASE = os.getenv("SITE_BASE_URL", "https://ahadorg.onrender.com").rstrip("/")
+
+
+def _site_base() -> str:
+    """The URL the Mini App button opens — THIS deployment's own URL.
+
+    THE HARDCODED DEFAULT WAS A TRAP, and it is the single most likely reason
+    a working deployment still shows "nothing happens" on tap.
+
+    It used to be:
+
+        SITE_BASE = os.getenv("SITE_BASE_URL", "https://ahadorg.onrender.com")
+
+    SITE_BASE_URL is `sync: false` in render.yaml, i.e. it is NOT set for you
+    — a fresh deploy has to add it by hand. Miss that one step and the button
+    is still built, still rendered, and still tappable, but it opens somebody
+    else's host. What happens then depends on what lives there:
+
+      * host gone / renamed  -> Telegram opens a webview on a dead URL and
+                                closes it. Tap, flicker, nothing.
+      * host alive           -> a DIFFERENT server verifies the initData with
+                                a DIFFERENT bot token, so sign-in fails with
+                                bad_hash and the phone shows an error naming
+                                a bot the user has never heard of.
+
+    Neither says "your SITE_BASE_URL is wrong", and the deploy is green
+    throughout. Render sets RENDER_EXTERNAL_URL to the service's own public
+    URL automatically, so the right default is knowable without asking: use
+    it, and treat an explicit SITE_BASE_URL as an override for a custom
+    domain. Falling back to a literal host that belongs to one particular
+    deployment can only ever be right for that one deployment.
+    """
+    for name in ("SITE_BASE_URL", "PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL"):
+        val = os.getenv(name, "").strip().rstrip("/")
+        if val:
+            return val
+    return ""
+
+
+SITE_BASE = _site_base()
 
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 TG_FILE_API = f"https://api.telegram.org/file/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -248,7 +286,19 @@ def set_menu_button():
     This is the always-available entry point — it does not depend on the user
     finding an old message with an inline button in it.
     """
-    if not BOT_TOKEN or not _miniapp_ok():
+    if not BOT_TOKEN:
+        return False
+    if not _miniapp_ok():
+        # SAY WHY THE BUTTON IS MISSING. This returned False in silence, so a
+        # deployment with no SITE_BASE_URL (or an http:// one, which Telegram
+        # refuses for web_app) produced a bot with no Open button and no
+        # explanation anywhere — indistinguishable from a broken Mini App.
+        logger.error(
+            "TELEGRAM: no 'Open CodeNest' button — the Mini App URL is %s. "
+            "Telegram only accepts an https:// URL for a web_app button. Set "
+            "SITE_BASE_URL to this service's public https URL and redeploy.",
+            f"'{SITE_BASE}'" if SITE_BASE else "not configured (SITE_BASE_URL "
+            "and RENDER_EXTERNAL_URL are both unset)")
         return False
     res = _tg("setChatMenuButton", menu_button={
         "type": "web_app",
@@ -320,11 +370,24 @@ def handle_start(chat_id, first_name, payload=""):
     # the account straight after. So the button IS the connect step, and a
     # printed URL would only offer a worse route to the same place (a browser,
     # where the user would have to log in by hand).
+    kb = _open_kb()
+    if not kb:
+        # A MESSAGE THAT SAYS "TAP BELOW" WITH NOTHING BELOW IT IS THE BUG,
+        # NOT A COSMETIC ISSUE. _open_kb() returns None whenever the Mini App
+        # URL is unusable, and the old code sent the invitation anyway — so
+        # the very first thing a new user saw was an instruction pointing at
+        # a button that was not there. Reproduced with SITE_BASE_URL unset.
+        _send(chat_id,
+              f"👋 Hi {first_name}!\n\n"
+              "⚠️ CodeNest is not finished setting up: the owner still has to "
+              "set `SITE_BASE_URL` to this site's public https address. "
+              "Until then I cannot open the app for you.")
+        return
     _send(chat_id,
           f"👋 Hi {first_name}!\n\n"
           "Tap below to open CodeNest — writing, editing and deploying all "
           "happen there, and you are signed in automatically.",
-          reply_markup=_open_kb())
+          reply_markup=kb)
 
 
 def handle_unlink(chat_id):
@@ -752,12 +815,76 @@ def poll_loop():
     print("🤖 Advanced Bot starting...")
     offset = 0
 
+    _fail_streak = 0
+    _webhook_cleared = False
+
     while True:
         try:
             updates = _tg("getUpdates", offset=offset, timeout=40)
+
+            # A REJECTED getUpdates USED TO BE INVISIBLE.
+            #
+            # This branch was `time.sleep(1); continue` with no logging at
+            # all, and it is the branch Telegram takes for the two failures
+            # that actually stop a bot dead:
+            #
+            #   409 "can't use getUpdates method while webhook is active"
+            #       — someone (often a hosting UI or an old deploy) left a
+            #         webhook registered on this token. Polling can NEVER
+            #         work until it is deleted.
+            #   409 "terminated by other getUpdates request"
+            #       — a second instance is polling the same token: a stale
+            #         Render service, or a local run left open. The two
+            #         steal each other's updates and both look broken.
+            #
+            # Reproduced against a fake Telegram API: in both cases the loop
+            # spun forever, wrote NOTHING to the log, and the bot answered no
+            # message. From the outside "the bot is dead" — with a healthy
+            # /health endpoint and a green deploy.
             if not updates or not updates.get("ok"):
-                time.sleep(1)
+                _fail_streak += 1
+                desc = str((updates or {}).get("description") or
+                           "no response from Telegram")
+
+                if "webhook is active" in desc.lower() and not _webhook_cleared:
+                    # Self-heal, once. This service polls; a webhook on the
+                    # same token is always wrong for it, and deleting it is
+                    # the documented remedy. Once only, so a genuine webhook
+                    # deployment is not fought over in a loop.
+                    _webhook_cleared = True
+                    logger.error(
+                        "TELEGRAM: a webhook is registered on this bot token, so "
+                        "getUpdates is refused and the bot receives NOTHING. "
+                        "Deleting it automatically (this service polls).")
+                    res = _tg("deleteWebhook", drop_pending_updates=False)
+                    if (res or {}).get("ok"):
+                        logger.warning("TELEGRAM: webhook deleted — polling resumes.")
+                        _fail_streak = 0
+                        continue
+                    logger.error("TELEGRAM: deleteWebhook failed: %s", res)
+
+                elif "terminated by other getupdates" in desc.lower():
+                    logger.error(
+                        "TELEGRAM: another instance is polling this same bot "
+                        "token — updates are being split between them and both "
+                        "look broken. Run ONE service per token, or give this "
+                        "deployment its own bot.")
+
+                # Never silent again, but never a flood either: the first few
+                # failures are logged, then one line a minute.
+                elif _fail_streak <= 3 or _fail_streak % 60 == 0:
+                    logger.error("TELEGRAM getUpdates failed (%d in a row): %s",
+                                 _fail_streak, desc)
+
+                # Back off so a hard failure is not a hot loop against
+                # Telegram's API — the old code retried every second forever.
+                time.sleep(min(2 * _fail_streak, 30))
                 continue
+
+            if _fail_streak:
+                logger.warning("TELEGRAM: polling recovered after %d failures.",
+                               _fail_streak)
+                _fail_streak = 0
 
             for upd in updates.get("result", []):
                 offset = upd["update_id"] + 1
@@ -898,6 +1025,22 @@ def start_bot():
     # before anyone tries to sign in.
     try:
         from services import miniapp_auth
+
+        # TWO TOKEN NAMES, ONE WINNER, AND NOTHING SAID WHICH. BOT_TOKEN
+        # silently outranks TELEGRAM_PING_BOT_TOKEN — but render.yaml only
+        # documents the latter, so an owner who replaced their bot by editing
+        # the documented name, while a stale BOT_TOKEN sat above it, kept
+        # running the OLD bot and had no way to see that. Reproduced.
+        src = miniapp_auth.token_sources()
+        if src.get("conflict"):
+            logger.error(
+                "TWO DIFFERENT BOT TOKENS ARE CONFIGURED: %s. Only %s is used "
+                "(it takes priority), so every Mini App sign-in is checked "
+                "against bot %s. If that is not the bot you are opening, "
+                "DELETE the unused variable and redeploy.",
+                ", ".join(f"{k}=bot {v}" for k, v in src["bot_ids"].items()),
+                src["used"], src["bot_ids"].get(src["used"]))
+
         who = miniapp_auth.whoami()
         if who.get("ok"):
             logger.warning(

@@ -1553,7 +1553,20 @@
 <script>
   // Safety net: never leave the user stuck on the splash — remove the
   // booting class AND hard-hide the splash element, whatever went wrong.
+  //
+  // NOT INSIDE TELEGRAM, THOUGH. In a browser there is always a page under
+  // the splash, so uncovering it after 4s is strictly better than a spinner.
+  // In the Mini App there is nothing under it until sign-in returns a token,
+  // and on Render's free tier that takes 30-60s on a cold start. This timer
+  // was therefore uncovering an EMPTY dashboard ("Hello, User", no data) and
+  // leaving it there for the rest of the wait — the "I open it and nothing
+  // happens" report, reproduced exactly.
+  //
+  // pro.js sets __tgBootOwned when it takes charge of the splash; it clears
+  // it on success, on failure, and from its own 70s backstop, so the splash
+  // still cannot become permanent.
   setTimeout(function () {
+    if (window.__tgBootOwned) return;
     var h = document.documentElement;
     if (h.classList.contains('booting')) h.classList.remove('booting');
     var s = document.getElementById('bootSplash');

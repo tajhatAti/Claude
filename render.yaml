@@ -46,7 +46,19 @@ services:
         sync: false
 
       # ── Public URLs ──────────────────────────────────────
-      - key: SITE_BASE_URL       # THIS service's public URL (e.g. https://ahad-co-auth.onrender.com)
+      # THIS service's public URL (e.g. https://ahad-co-auth.onrender.com).
+      #
+      # ⚠️ It is what the Telegram bot's "Open CodeNest" button opens. If it is
+      # wrong the button still appears and still taps, but it opens a
+      # DIFFERENT site — which verifies the sign-in with a different bot token
+      # and fails, or is simply gone and the webview closes on an empty page.
+      # Either way the deploy stays green and nothing reports a problem.
+      #
+      # Left unset, the code now falls back to RENDER_EXTERNAL_URL (which
+      # Render sets to this service's own URL), so the Mini App works out of
+      # the box. Set this only for a custom domain.
+      # Verify the running value: GET /health -> miniapp_url
+      - key: SITE_BASE_URL
         sync: false
 
       # ── Auth / admin ─────────────────────────────────────

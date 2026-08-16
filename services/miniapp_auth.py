@@ -23,6 +23,7 @@ Every field except `hash` (and `signature`, which is Ed25519 for third-party
 validation and explicitly excluded) goes into the data-check string as
 "key=value" lines sorted by key and joined with \n.
 """
+import base64
 import hashlib
 import hmac
 import json
@@ -82,9 +83,52 @@ def _bot_token() -> str:
     """
     raw = (os.getenv("BOT_TOKEN", "").strip()
            or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip())
+    return _clean_token(raw)
+
+
+def _clean_token(raw: str) -> str:
+    """Strip the wrappers a hosting UI adds to a pasted value."""
+    raw = (raw or "").strip()
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
         raw = raw[1:-1].strip()
     return raw.lstrip("@").strip()
+
+
+def token_sources() -> dict:
+    """Which env var supplied the token, and whether a SECOND one disagrees.
+
+    THE TRAP THIS EXPOSES, reproduced: BOT_TOKEN silently outranks
+    TELEGRAM_PING_BOT_TOKEN, but render.yaml documents only the LATTER. So an
+    owner who follows render.yaml, pastes a NEW bot's token into
+    TELEGRAM_PING_BOT_TOKEN, and leaves an OLD BOT_TOKEN behind from an
+    earlier attempt keeps running on the OLD bot:
+
+        only TELEGRAM_PING_BOT_TOKEN = NEW            -> NEW  ok
+        only BOT_TOKEN               = NEW            -> NEW  ok
+        BOT_TOKEN=OLD + TELEGRAM_PING_BOT_TOKEN=NEW   -> OLD  <- silent
+
+    Nothing reported that two different tokens were configured, so the site
+    looked correctly reconfigured while every sign-in was still checked
+    against the bot the owner thought they had replaced. Only the bot ID half
+    is ever exposed here; it is public.
+    """
+    names = ("BOT_TOKEN", "TELEGRAM_PING_BOT_TOKEN")
+    found = {}
+    for n in names:
+        tok = _clean_token(os.getenv(n, ""))
+        if tok:
+            found[n] = tok.partition(":")[0] or None
+    used = "BOT_TOKEN" if "BOT_TOKEN" in found else (
+        "TELEGRAM_PING_BOT_TOKEN" if found else None)
+    ids = set(found.values())
+    return {
+        "set": sorted(found),
+        "used": used,
+        "bot_ids": {k: v for k, v in found.items()},
+        # Two names holding DIFFERENT bots is always a mistake, and it is the
+        # one an owner cannot see from the dashboard.
+        "conflict": len(ids) > 1,
+    }
 
 
 def token_shape() -> dict:
@@ -251,6 +295,136 @@ def verify_init_data(init_data: str, token: str = None) -> dict:
         "auth_date": auth_date,
         "raw": user,
     }
+
+
+# Telegram's Ed25519 public keys for THIRD-PARTY validation. Published by
+# Telegram; not secret.
+_TG_PUBKEY_PROD = "e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d"
+_TG_PUBKEY_TEST = "40055058a4ee38156a06562e52eece92a771bcd8346a8c4615cb7376eddf72ec"
+
+
+def third_party_check(init_data: str, bot_id) -> dict:
+    """Is this payload genuinely from Telegram, judged WITHOUT our bot token?
+
+    THIS IS THE CHECK THAT ENDS THE GUESSING, and it is why it was added.
+
+    Telegram signs initData twice:
+
+        hash       HMAC-SHA256 keyed with the BOT TOKEN   (verify_init_data)
+        signature  Ed25519 with TELEGRAM'S OWN key        (this function)
+
+    The Ed25519 half needs only the PUBLIC bot id, so it is independent of
+    whatever value sits in BOT_TOKEN. That independence is the whole point:
+
+        signature VALID  + hash invalid  -> the payload is authentic and
+                                            issued for THIS bot id, so the
+                                            fault is the SECRET half of our
+                                            token. Nothing else fits.
+        signature INVALID                -> the payload was not signed for
+                                            this bot id (another bot, or a
+                                            forgery).
+
+    Until now the server could not tell those apart. getMe cannot do it: it
+    only proves the token is *a* live token, its result is cached at boot, and
+    a token that is live can still be the wrong one for the payload in hand.
+    Every previous verdict was therefore inferred, and one of them ("your
+    token is out of date") was wrong often enough to send an owner round in
+    circles replacing a bot that was never the problem.
+
+    Never used to ACCEPT a login — only to explain a rejection. A payload that
+    fails the HMAC is refused whatever this returns.
+
+    Returns {"ok": bool, "reason": str}; "unavailable" when the optional
+    cryptography dependency or the signature field is absent, which must never
+    be read as a verdict either way.
+    """
+    if not init_data or bot_id in (None, ""):
+        return {"ok": False, "reason": "unavailable"}
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey)
+        from cryptography.exceptions import InvalidSignature
+    except Exception:
+        return {"ok": False, "reason": "unavailable"}
+
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+    except Exception:
+        return {"ok": False, "reason": "unavailable"}
+    sig_b64 = pairs.pop("signature", "")
+    pairs.pop("hash", None)
+    if not sig_b64:
+        # Older clients do not send it. Absence proves nothing.
+        return {"ok": False, "reason": "no_signature"}
+
+    # Telegram omits base64 padding; some decoders reject that.
+    try:
+        sig = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+    except Exception:
+        return {"ok": False, "reason": "bad_signature_encoding"}
+
+    dcs = (f"{bot_id}:WebAppData\n"
+           + "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs)))
+    for key_hex, env in ((_TG_PUBKEY_PROD, "prod"), (_TG_PUBKEY_TEST, "test")):
+        try:
+            Ed25519PublicKey.from_public_bytes(
+                bytes.fromhex(key_hex)).verify(sig, dcs.encode())
+            return {"ok": True, "reason": f"telegram_{env}"}
+        except InvalidSignature:
+            continue
+        except Exception:
+            return {"ok": False, "reason": "unavailable"}
+    return {"ok": False, "reason": "not_signed_for_this_bot"}
+
+
+_LIVE_CACHE = {"token": None, "at": 0.0, "value": None}
+_LIVE_TTL_S = 60
+
+
+def token_live(timeout_s: float = 4.0) -> dict:
+    """Is the CONFIGURED token still valid, checked NOW rather than at boot?
+
+    whoami()/_bot_identity() answer a similar question but cache the result
+    for the life of the process, and that cache is load-bearing in the wrong
+    direction: a token replaced in the hosting dashboard after boot, or a boot
+    that happened while api.telegram.org was briefly unreachable, leaves the
+    server confidently reporting an identity it has not re-tested. That is how
+    /health can show a healthy bot while every Mini App sign-in fails.
+
+    Telegram keeps exactly ONE valid token per bot — revoking issues a new one
+    and invalidates the old one immediately — so this is decisive:
+
+        ok=True   the token we hold is current; a bad_hash is NOT a stale
+                  secret and must be explained some other way.
+        ok=False  Telegram rejects it (401). That IS the stale/wrong token,
+                  established rather than guessed.
+        ok=None   Telegram unreachable; no verdict, and none is reported.
+
+    Cached for 60s and keyed on the token itself, so a burst of failing
+    sign-ins costs one request, and changing the token invalidates it at once.
+    """
+    tok = _bot_token()
+    if not tok:
+        return {"ok": False, "reason": "not_configured"}
+    now = time.time()
+    if (_LIVE_CACHE["token"] == tok
+            and now - _LIVE_CACHE["at"] < _LIVE_TTL_S
+            and _LIVE_CACHE["value"] is not None):
+        return _LIVE_CACHE["value"]
+
+    who = whoami(timeout_s=timeout_s)
+    if who.get("ok"):
+        out = {"ok": True, "bot_id": who.get("bot_id"),
+               "username": who.get("username")}
+    elif who.get("reason") == "rejected_by_telegram":
+        out = {"ok": False, "reason": "rejected_by_telegram",
+               "detail": who.get("detail", "")}
+    else:
+        # Unreachable is NOT a verdict. Reporting it as one would blame the
+        # owner's token for our own network trouble.
+        out = {"ok": None, "reason": who.get("reason", "unreachable")}
+    _LIVE_CACHE.update(token=tok, at=now, value=out)
+    return out
 
 
 def whoami(timeout_s: float = 6.0) -> dict:
