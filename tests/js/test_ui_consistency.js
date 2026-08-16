@@ -199,5 +199,43 @@ ok('the labels are distinct, so a reader can say which digit',
    new Set(otp.map(i => i.getAttribute('aria-label'))).size === otp.length);
 ok('the OS can autofill the code', otp.every(i => i.getAttribute('autocomplete') === 'one-time-code'));
 
+// ---------------------------------------------------------------------------
+console.log('[9] weights that the font actually ships');
+// ---------------------------------------------------------------------------
+/* index.html loads Inter at 400;500;600;700;800. The sheet asked for 550,
+   570, 650, 680, 750, 760 and 780 as well — 11 distinct weights in all. A
+   browser cannot render a face it never downloaded, so each of those was
+   silently rounded to the nearest one that exists: 550 rendered as 500, 570
+   as 600, and so on. They read as fine-grained typographic control and were
+   nothing of the kind, while making two elements that were meant to match
+   (600 and 570, say) resolve to the same weight by accident rather than by
+   intent. */
+const loaded = (/Inter:wght@([\d;]+)/.exec(html) || [, ''])[1].split(';').filter(Boolean);
+const used = [...new Set([...css.matchAll(/font-weight:\s*(\d+)/g)].map(m => m[1]))];
+ok('the font declares the weights it uses', loaded.length > 0, loaded.join(';'));
+ok('every weight in the sheet is actually downloaded',
+   used.every(w => loaded.includes(w)),
+   'not loaded: ' + used.filter(w => !loaded.includes(w)).join(', '));
+ok('the ladder is small enough to be deliberate', used.length <= 5,
+   used.sort().join(', '));
+
+// ---------------------------------------------------------------------------
+console.log('[10] spacing sits on the 4px grid');
+// ---------------------------------------------------------------------------
+/* The file header calls the rhythm a 4px grid and every --s token obeys it,
+   but padding/gap carried 2, 5, 6, 7, 9, 10, 11, 13 and 14px literals — 6px
+   and 10px fourteen times each. That is what makes two rows that should share
+   a rhythm sit a pixel or two apart: not obviously wrong, just never quite
+   aligned. A few off-grid values remain on purpose (a select's arrow
+   clearance, the bottom nav's deliberately tight 3px), so the check allows a
+   small budget rather than demanding zero. */
+const spacing = [...css.matchAll(/\b(?:gap|padding|column-gap|row-gap)(?:-\w+)?:\s*([^;{}]+);/g)]
+  .flatMap(m => m[1].split(/\s+/))
+  .filter(v => /^\d+px$/.test(v))
+  .map(v => parseInt(v, 10))
+  .filter(n => n > 0 && n % 4 !== 0);
+ok('few off-grid spacing literals remain', spacing.length <= 6,
+   [...new Set(spacing)].sort((a, b) => a - b).join(', ') + ` (${spacing.length} uses)`);
+
 console.log(`\ntest_ui_consistency: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
