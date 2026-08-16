@@ -236,10 +236,41 @@ def verify_init_data(init_data: str, token: str = None) -> dict:
     received_hash = pairs.pop("hash", "")
     if not received_hash:
         raise ValueError("no_hash")
-    # `signature` is Telegram's Ed25519 field for THIRD-PARTY validation. It is
-    # not part of the HMAC data-check string, and leaving it in makes every
-    # verification fail once Telegram starts sending it.
-    pairs.pop("signature", None)
+
+    # `signature` STAYS IN. THIS LINE WAS THE BUG.
+    #
+    # It used to be popped here, with the comment "signature is Telegram's
+    # Ed25519 field for third-party validation, it is not part of the HMAC
+    # data-check string". That is true of the ED25519 check and false of this
+    # one, and conflating the two broke every sign-in from any client new
+    # enough to send the field.
+    #
+    # Telegram's docs spell out the exclusion only for third-party validation:
+    #
+    #   HMAC (this function)   exclude `hash`
+    #   Ed25519 (third party)  exclude `hash` AND `signature`
+    #
+    # Verified against Telegram's own @telegram-apps/init-data-node: sign a
+    # payload containing `signature`, then recompute both ways —
+    #
+    #   HMAC WITH    signature -> bb7b679dc007...  == the library's hash
+    #   HMAC WITHOUT signature -> 981c1132292c...  != the library's hash
+    #
+    # so the field is part of the signed string. Dropping it changed the bytes
+    # and produced bad_hash for a payload that was perfectly valid.
+    #
+    # WHY IT SURVIVED THIS LONG. The pop happened BEFORE the diagnostics were
+    # built, so `signature` was missing from the recorded field list too:
+    # every log line read fields=['auth_date','query_id','user'] — an
+    # ordinary-looking set with nothing dropped or extra — which is exactly
+    # what sent the investigation towards the token instead of the payload.
+    # The culprit finder could not see it either: it substitutes each field's
+    # raw form one at a time and never re-adds a field that is gone, so it
+    # reported culprit=None. Reproduced end to end before this change.
+    #
+    # The older `pop` was also self-fulfilling: it was added on the reasoning
+    # that leaving the field in "makes every verification fail once Telegram
+    # starts sending it". The opposite is the case.
 
     data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
     secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
@@ -300,7 +331,64 @@ def verify_init_data(init_data: str, token: str = None) -> dict:
                     break
         except Exception:
             pass
-        raise BadHash(sorted(pairs.keys()),
+
+        # DOES THE HASH MATCH IF A FIELD IS DROPPED OR RESTORED?
+        #
+        # The probe above only ever SUBSTITUTES a field's value. It cannot see
+        # the failure that actually happened here: a field being excluded from
+        # the data-check string entirely. `signature` was popped before this
+        # code ran, so it was invisible to the substitution loop AND absent
+        # from the reported field list — every log line looked like an
+        # ordinary payload with nothing wrong, which is precisely why the
+        # investigation kept pointing at the bot token instead.
+        #
+        # Trying each single-field omission, and the whole raw string, costs a
+        # handful of HMACs on an already-failing request and turns "culprit
+        # unknown" into a named field. Diagnosis only — the result is reported,
+        # never accepted.
+        set_error = None
+        try:
+            all_pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+            all_pairs.pop("hash", None)
+            for k in sorted(all_pairs):
+                probe = {kk: vv for kk, vv in all_pairs.items() if kk != k}
+                pc = "\n".join(f"{kk}={probe[kk]}" for kk in sorted(probe))
+                if hmac.compare_digest(
+                        hmac.new(secret, pc.encode(), hashlib.sha256).hexdigest(),
+                        received_hash):
+                    set_error = f"hash matches when '{k}' is EXCLUDED"
+                    break
+            if set_error is None:
+                # And the reverse: the string we hashed is missing a field the
+                # signer included. `pairs` is what we used; all_pairs is
+                # everything that arrived.
+                extra = sorted(set(all_pairs) - set(pairs))
+                if extra:
+                    pc = "\n".join(f"{kk}={all_pairs[kk]}"
+                                   for kk in sorted(all_pairs))
+                    if hmac.compare_digest(
+                            hmac.new(secret, pc.encode(),
+                                     hashlib.sha256).hexdigest(),
+                            received_hash):
+                        set_error = ("hash matches when these are INCLUDED: "
+                                     + ",".join(extra))
+        except Exception:
+            pass
+        if set_error:
+            logger.error(
+                "MINIAPP DATA-CHECK STRING IS WRONG: %s. This is a bug in the "
+                "verifier, not a bad token — the payload is correctly signed "
+                "and we hashed the wrong set of fields.", set_error)
+        # Report the field list AS IT ARRIVED, not as we chose to hash it.
+        # Reporting the post-pop view is what hid `signature` from every log
+        # line for three rounds of investigation.
+        try:
+            _arrived = sorted(
+                k for k in dict(parse_qsl(init_data, keep_blank_values=True))
+                if k != "hash")
+        except Exception:
+            _arrived = sorted(pairs.keys())
+        raise BadHash(_arrived,
                       {k: len(str(v)) for k, v in sorted(pairs.items())},
                       culprit, age_s)
 

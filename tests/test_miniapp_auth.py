@@ -617,17 +617,43 @@ except ValueError as e:
     ok = str(e) == "no_user"
 check("initData with no user (inline/channel open) is refused", ok)
 
-# Telegram is rolling out a `signature` field for third-party validation. It
-# is NOT part of the HMAC data-check string; leaving it in breaks every login.
-signed = init_data(extra=None)
-pairs = dict(x.split("=", 1) for x in signed.split("&"))
-with_sig = signed + "&signature=" + "abc123"
+# THIS BLOCK ASSERTED THE BUG, AND IS WHY THE BUG SHIPPED.
+#
+# It took a payload signed WITHOUT `signature`, glued `signature=abc123` on
+# afterwards, and required that to still verify. Telegram never produces such
+# a string — when it sends `signature`, that field is part of what it signed.
+# The only way to satisfy this test was to pop `signature` before hashing,
+# which is exactly the line that broke every real sign-in from a client new
+# enough to send the field. A test that can only be passed by breaking
+# production is worse than no test.
+#
+# Proven with Telegram's own @telegram-apps/init-data-node: sign a payload
+# containing `signature`, then recompute the hash both ways —
+#     HMAC WITH    signature -> bb7b679dc007...  == the library's hash
+#     HMAC WITHOUT signature -> 981c1132292c...  != the library's hash
+# The field belongs in the HMAC data-check string. It is excluded only from
+# the ED25519 third-party check, and conflating the two rules was the error.
+#
+# Rewritten to test the real contract, both directions.
+_sig = "zL-ucjNyREiHDE8aihFwpfR9aggP2xiAo3NSpfe-p7Ib"
+
+# 1. As Telegram actually sends it: signature present AND covered by the hash.
+_real = init_data(extra={"signature": _sig})
 try:
-    got = MA.verify_init_data(with_sig)
-    sig_ok = got["id"] == 555
-except ValueError as e:
-    sig_ok = False
-check("an added `signature` field does not break verification", sig_ok)
+    _got = MA.verify_init_data(_real)
+    _sig_ok = _got["id"] == 555
+except ValueError:
+    _sig_ok = False
+check("initData whose hash COVERS `signature` verifies", _sig_ok)
+
+# 2. The old test's own fixture — a signature bolted on after signing — is a
+# payload Telegram never emits, and must be refused.
+try:
+    MA.verify_init_data(init_data(extra=None) + "&signature=abc123")
+    _bolt_ok = False
+except ValueError:
+    _bolt_ok = True
+check("a `signature` glued on after signing is refused", _bolt_ok)
 
 def _reason(data, token=None):
     """The ValueError reason verify_init_data raises, or None on success."""
