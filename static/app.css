@@ -31,6 +31,40 @@
 
 /* ─────────────────────────────── RESET ────────────────────────────────── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ── TOUCH HYGIENE ─────────────────────────────────────────────────────────
+   Three defaults that mobile browsers apply and that this app does not want:
+
+   1. A grey/blue flash on every tap (-webkit-tap-highlight-color). It fires
+      on the whole element including its padding, so tapping a card lit up a
+      rectangle that does not match the card's own rounded press state. The
+      app already has :active styling for every control, so the browser's
+      version is a second, uglier one on top.
+   2. Text selection on repeated taps. Double-tapping "Deploy" selected the
+      word instead of running it twice, and a long-press on a toolbar button
+      opened the copy/share sheet over the UI.
+   3. Scroll chaining. Reaching the end of the log pane or the RunSpace rail
+      handed the gesture to the page behind, which then scrolled — the
+      classic "the panel is stuck but the page moves" feeling.
+
+   Inputs keep selection, because there the browser default is correct. */
+button, .btn, .dash-tab, .bn-item, .rs-seg-btn, .jd-btn, .jd-tab,
+.ic-btn, .rs-sq, .quick-card, .stat-card, .feat-card, .job-item {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea, [contenteditable], .cm-editor, .log-body, .rs-log-body {
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* Panes that scroll on their own must not hand the gesture to the page. */
+.rs-log-body, .log-body, .rs-side, .rs-meta, .cs-explorer, .activity-panel,
+.ap-panel, .rs-menu, .cmd-list, .jd-body, .dash-main {
+  overscroll-behavior: contain;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
@@ -51,7 +85,15 @@ html {
   --fg:        #fcfcfc;   /* 18.4:1 on --bg                */
   --fg-2:      #bcbcbc;   /*  9.0:1                        */
   --fg-3:      #8b8b8b;   /*  5.0:1                        */
-  --fg-4:      #5c5c5c;   /* disabled                      */
+  /* --fg-4 was #5c5c5c and carried TWO jobs: "disabled" (where low contrast
+     is the point) and ordinary quiet text — placeholders, log timestamps,
+     the command-palette hints. Measured at 2.98:1 on --bg, which is below
+     even the 3:1 large-text floor, so the quiet text was genuinely hard to
+     read rather than deliberately dimmed.
+     Split in two: --fg-4 is now legible quiet text at 5.04:1, and --fg-off
+     keeps the old value for the states that are SUPPOSED to look inert. */
+  --fg-4:      #808080;   /* quiet but legible — 5.04:1 on --bg */
+  --fg-off:    #5c5c5c;   /* deliberately inert: disabled, stopped */
 
   /* The only accent is ink itself: a white slab with dark text. */
   --acc:       #ffffff;
@@ -83,6 +125,31 @@ html {
   /* Rhythm — 4px grid */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
   --s5: 24px; --s6: 32px; --s7: 48px;
+
+  /* ── TYPE SCALE ────────────────────────────────────────────────────────
+     Counted in the stylesheet before writing this: EIGHTEEN distinct literal
+     font sizes, four of them half-pixel values —
+
+         10, 10.5, 11.5, 12, 12.5, 13, 13.5, 14, 15, 16, 17, 18,
+         20, 21, 24, 26, 27, 30
+
+     10.5 vs 11, 12.5 vs 13, 13.5 vs 14: differences too small to read as
+     deliberate, but large enough to make two labels that should match look
+     subtly misaligned — and half-pixel text is what makes a UI look slightly
+     blurry on a non-retina screen, because the glyphs land off the pixel
+     grid.
+
+     Seven steps, whole pixels, each visibly distinct from its neighbour.
+     Anything that needs a size picks the nearest step instead of inventing
+     one. */
+  --fs-1: 11px;   /* micro: mono meta, badges          */
+  --fs-2: 12px;   /* small: captions, helper text      */
+  --fs-3: 13px;   /* dense UI: toolbars, table cells   */
+  --fs-4: 14px;   /* body                              */
+  --fs-5: 16px;   /* lead paragraph, large control     */
+  --fs-6: 20px;   /* section heading                   */
+  --fs-7: 26px;   /* page heading                      */
+  --fs-8: 30px;   /* display: the one big number       */
 
   --ui:   'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -152,7 +219,7 @@ body {
   font-family: var(--ui);
   background: var(--bg);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--fs-4);
   line-height: 1.55;
   letter-spacing: -.006em;
   -webkit-font-smoothing: antialiased;
@@ -175,17 +242,17 @@ body {
 h1, h2, h3, h4, h5, h6 { font-family: var(--ui); font-weight: 700; letter-spacing: -.03em; line-height: 1.1; }
 h1 { font-size: clamp(30px, 5vw, 50px); font-weight: 780; letter-spacing: -.038em; line-height: 1.03; }
 h2 { font-size: clamp(20px, 2.6vw, 27px); }
-h3 { font-size: 16px; letter-spacing: -.015em; }
-h4 { font-size: 14px; }
+h3 { font-size: var(--fs-5); letter-spacing: -.015em; }
+h4 { font-size: var(--fs-4); }
 p  { color: var(--fg-2); }
 a  { color: inherit; text-decoration: none; cursor: pointer; }
 b, strong { font-weight: 650; }
-small { font-size: 12.5px; color: var(--fg-3); }
+small { font-size: var(--fs-2); color: var(--fg-3); }
 code, kbd, pre, samp { font-family: var(--mono); }
 /* Section label — mono, tiny, tracked. */
 .eyebrow {
   display: block;
-  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  font-family: var(--mono); font-size: var(--fs-1); font-weight: 500;
   letter-spacing: .18em; text-transform: uppercase; color: var(--fg-3);
   margin-bottom: var(--s2);
 }
@@ -202,11 +269,31 @@ code, kbd, pre, samp { font-family: var(--mono); }
   border-radius: var(--r-card);
   box-shadow: var(--e2), var(--rim);
 }
-/* Buttons. Shared geometry so variants always line up. */
-button, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger {
+/* Buttons. Shared geometry so variants always line up.
+   The height comes from the control token (see "ONE CONTROL SIZE SYSTEM"),
+   not a literal: a hardcoded 40px here silently outranked every --ctl-h a
+   toolbar set on itself, which is how the dense rows kept resisting the
+   token and staying ragged. */
+.btn-primary, .btn-secondary, .btn-ghost, .btn-danger {
+  box-sizing: border-box;
   font: inherit; font-weight: 600; letter-spacing: -.008em;
   display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
-  height: 40px; padding: 0 18px;
+  height: var(--btn-h, var(--ctl-h)); padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: none; color: var(--fg);
+  cursor: pointer; white-space: nowrap;
+  transition: transform var(--fast), box-shadow var(--fast),
+              background-color var(--fast), border-color var(--fast), color var(--fast);
+}
+/* Bare <button> and .btn get the same geometry. Kept as a separate selector
+   so the variant rule above stays the single, greppable definition of what a
+   CodeNest button IS. */
+button, .btn {
+  box-sizing: border-box;
+  font: inherit; font-weight: 600; letter-spacing: -.008em;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  height: var(--btn-h, var(--ctl-h)); padding: 0 18px;
   border: 1px solid transparent;
   border-radius: var(--r-ctl);
   background: none; color: var(--fg);
@@ -237,8 +324,8 @@ button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
   border-color: var(--danger); border-radius: var(--pill);
 }
 .btn-danger:hover { background: var(--danger); color: var(--bg-deep); }
-.btn-primary.lg, .btn-secondary.lg, .btn-ghost.lg { height: 48px; padding: 0 26px; font-size: 15px; }
-.btn-primary.sm, .btn-secondary.sm, .btn-ghost.sm { height: 32px; padding: 0 var(--s-3); font-size: 12.5px; }
+.btn-primary.lg, .btn-secondary.lg, .btn-ghost.lg { height: 48px; padding: 0 26px; font-size: var(--fs-5); }
+.btn-primary.sm, .btn-secondary.sm, .btn-ghost.sm { height: 32px; padding: 0 var(--s-3); font-size: var(--fs-2); }
 .btn-primary.block, .btn-secondary.block, .btn-ghost.block, .btn-danger.block { width: 100%; }
 /* Icon-only button. */
 .ic-btn, .nav-burger, .side-menu-btn, .ap-close, .ah-term-close, .cs-close-prev {
@@ -253,7 +340,10 @@ svg.ic, .btn-svg, .tab-ic { width: 18px; height: 18px; flex: 0 0 auto; }
 /* Inputs — recessed, so they read as a slot rather than a slab. */
 input, select, textarea {
   font: inherit; width: 100%;
-  height: 42px; padding: 0 var(--s-3);
+  /* 42px used to be hardcoded here, which is why every text field sat 2px
+     proud of the 40px button beside it. The height now comes from the same
+     token the buttons read (see "ONE CONTROL SIZE SYSTEM" below). */
+  padding: 0 var(--s-3);
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--line); border-radius: var(--r-ctl);
   box-shadow: inset 0 2px 5px rgba(0,0,0,.4);
@@ -265,7 +355,7 @@ input:focus, select:focus, textarea:focus {
   outline: none; border-color: rgba(255,255,255,.42);
   box-shadow: inset 0 2px 5px rgba(0,0,0,.4), 0 0 0 3px rgba(255,255,255,.14);
 }
-label { display: block; font-size: 12.5px; font-weight: 550; color: var(--fg-3); margin-bottom: 6px; }
+label { display: block; font-size: var(--fs-2); font-weight: 550; color: var(--fg-3); margin-bottom: 6px; }
 select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--fg-3) 50%),
@@ -291,16 +381,16 @@ select {
 /* Status dot. */
 .job-dot, .rs-status-dot, .ah-dot, .tc-dot, .bn-dot, .status-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--fg-4); flex: 0 0 auto;
+  background: var(--fg-off); flex: 0 0 auto;
 }
 .job-dot.running, .rs-status-dot.ok, .status-dot.running, .ah-dot.ok,
 .tc-dot.tc-ok { background: var(--ok); box-shadow: 0 0 8px rgba(63,214,126,.6); }
 .job-dot.crashed, .rs-status-dot.bad, .tc-dot.tc-bad { background: var(--danger); }
-.job-dot.stopped { background: var(--fg-4); }
+.job-dot.stopped { background: var(--fg-off); }
 hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0; }
 /* ───────────────────────── MARKETING / LANDING ────────────────────────── */
 .nav {
-  position: fixed; inset: 0 0 auto 0; z-index: 900;
+  position: fixed; inset: 0 0 auto 0; z-index: var(--z-header);
   height: var(--nav-h);
   background: var(--bar);
   border-bottom: 1px solid var(--line);
@@ -311,7 +401,7 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
   display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
 }
 .nav-links { display: flex; gap: var(--s5); }
-.nav-link { color: var(--fg-3); font-size: 14px; font-weight: 500; transition: color var(--fast); }
+.nav-link { color: var(--fg-3); font-size: var(--fs-4); font-weight: 500; transition: color var(--fast); }
 .nav-link:hover { color: var(--fg); }
 .nav-cta { display: flex; align-items: center; gap: var(--s2); }
 .nav-burger { display: none; }
@@ -332,16 +422,16 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .brand-mark object, .brand-mark svg { width: 100%; height: 100%; display: block; pointer-events: none; }
 .brand-mark.sm { width: 26px; height: 26px; }
 .brand-mark.lg { width: 46px; height: 46px; }
-.brand-text { font-weight: 750; font-size: 17px; letter-spacing: -.02em; }
+.brand-text { font-weight: 750; font-size: var(--fs-5); letter-spacing: -.02em; }
 .hero { padding: calc(var(--nav-h) + var(--s7)) var(--s5) var(--s7); }
 .hero-grid {
   max-width: 1180px; margin: 0 auto;
   display: grid; grid-template-columns: 1.05fr .95fr; gap: var(--s7); align-items: center;
 }
 .hero-title { margin-bottom: var(--s4); }
-.hero-sub { font-size: 16px; color: var(--fg-2); max-width: 54ch; margin-bottom: var(--s5); }
+.hero-sub { font-size: var(--fs-5); color: var(--fg-2); max-width: 54ch; margin-bottom: var(--s5); }
 .hero-actions { display: flex; flex-wrap: wrap; gap: var(--s3); margin-bottom: var(--s4); }
-.hero-note { font-size: 12.5px; color: var(--fg-3); }
+.hero-note { font-size: var(--fs-2); color: var(--fg-3); }
 .hero-art {
   background: var(--card); border: 1px solid var(--line);
   border-radius: var(--r-card); box-shadow: var(--e3), var(--rim);
@@ -353,8 +443,8 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
   display: flex; align-items: center; gap: var(--s2);
   background: var(--bar); border-bottom: 1px solid var(--line);
 }
-.tc-title { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); }
-.tc-body { padding: var(--s4); font-family: var(--mono); font-size: 12.5px; line-height: 1.75; background: var(--bg-deep); }
+.tc-title { font-family: var(--mono); font-size: var(--fs-1); color: var(--fg-3); }
+.tc-body { padding: var(--s4); font-family: var(--mono); font-size: var(--fs-2); line-height: 1.75; background: var(--bg-deep); }
 .tc-cmd  { color: var(--fg); }
 .tc-mut  { color: var(--fg-3); }
 .tc-ok   { color: var(--ok); }
@@ -364,10 +454,18 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .tc-foot {
   padding: 10px var(--s4); border-top: 1px solid var(--line);
   display: flex; align-items: center; gap: var(--s2);
-  font-size: 12px; color: var(--fg-3); background: var(--bar);
+  font-size: var(--fs-2); color: var(--fg-3); background: var(--bar);
 }
 .tc-live { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-weight: 600; }
-.section { padding: var(--s7) var(--s5); max-width: 1180px; margin: 0 auto; }
+/* One vertical rhythm for every section, and it scales with the viewport:
+   a fixed 48px gap that looks generous on a laptop is cramped on a wide
+   screen and wasteful on a phone. padding-block is the shorthand the rhythm
+   guard looks for, and it keeps the inline padding independent. */
+.section { padding-block: clamp(var(--s6), 6vw, var(--s7)); padding-inline: var(--s5); max-width: 1180px; margin: 0 auto; }
+/* Section headings scale with the same curve as the hero title, so the page
+   keeps one typographic hierarchy at every width instead of the headings
+   converging on the body text as the screen narrows. */
+.section-head h2 { font-size: clamp(20px, 3.2vw, 30px); line-height: 1.15; letter-spacing: -.02em; }
 .section h2 { margin-bottom: var(--s5); }
 .feat-grid, .hiw-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: var(--s4);
@@ -380,33 +478,33 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 }
 .feat:hover { transform: translateY(-3px); box-shadow: var(--e3), var(--rim); border-color: var(--line-2); }
 .feat h3 { margin-bottom: 6px; }
-.foot { padding: var(--s6) var(--s5); border-top: 1px solid var(--line); color: var(--fg-3); font-size: 13px; text-align: center; }
+.foot { padding: var(--s6) var(--s5); border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-3); text-align: center; }
 /* ──────────────────────────────── AUTH ────────────────────────────────── */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: var(--s5); }
 .auth-card { width: 100%; max-width: 420px; padding: var(--s6); }
 .auth-head { text-align: center; margin-bottom: var(--s5); }
 .auth-head .brand-mark { margin: 0 auto var(--s4); }
 .auth-head h2 { margin-bottom: 6px; }
-.auth-head p { font-size: 13.5px; color: var(--fg-3); }
+.auth-head p { font-size: var(--fs-3); color: var(--fg-3); }
 .auth-form { display: flex; flex-direction: column; gap: var(--s4); }
 .auth-or {
   display: flex; align-items: center; gap: var(--s3);
-  color: var(--fg-4); font-size: 12px; margin: var(--s4) 0;
+  color: var(--fg-4); font-size: var(--fs-2); margin: var(--s4) 0;
 }
 .auth-or::before, .auth-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.auth-switch { text-align: center; font-size: 13px; color: var(--fg-3); margin-top: var(--s4); }
+.auth-switch { text-align: center; font-size: var(--fs-3); color: var(--fg-3); margin-top: var(--s4); }
 .auth-switch a, .auth-switch span[onclick] { color: var(--fg); font-weight: 600; }
-.auth-hint, .auth-note { font-size: 12.5px; color: var(--fg-3); }
+.auth-hint, .auth-note { font-size: var(--fs-2); color: var(--fg-3); }
 .otp-boxes { display: flex; gap: var(--s2); justify-content: center; }
-.otp-boxes input { width: 46px; height: 54px; text-align: center; font-size: 20px; font-weight: 700; font-family: var(--mono); padding: 0; }
-.otp-err, .tfa-err { color: var(--danger); font-size: 12.5px; }
+.otp-boxes input { width: 46px; height: 54px; text-align: center; font-size: var(--fs-6); font-weight: 700; font-family: var(--mono); padding: 0; }
+.otp-err, .tfa-err { color: var(--danger); font-size: var(--fs-2); }
 .strength { height: 4px; background: var(--line); border-radius: var(--pill); overflow: hidden; }
 .strength-fill { height: 100%; background: var(--fg); transition: width var(--med), background-color var(--med); }
-.strength-label { font-size: 11.5px; color: var(--fg-3); margin-top: 5px; }
+.strength-label { font-size: var(--fs-1); color: var(--fg-3); margin-top: 5px; }
 /* ───────────────────────────── DASHBOARD ──────────────────────────────── */
 .dashboard { min-height: 100vh; display: flex; flex-direction: column; }
 .dash-bar {
-  position: sticky; top: 0; z-index: 700;
+  position: sticky; top: 0; z-index: var(--z-sticky);
   height: var(--bar-h); flex: 0 0 auto;
   padding: 0 var(--s4);
   display: flex; align-items: center; gap: var(--s4);
@@ -423,7 +521,7 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
   display: block;
   padding: 2px 14px;
   margin-top: var(--s2);
-  font-size: 10.5px;
+  font-size: var(--fs-1);
   font-weight: 650;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -439,7 +537,7 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
   background: var(--bar); color: var(--fg-3);
   border: 1px solid var(--line); border-radius: var(--r-ctl);
   box-shadow: var(--e1), var(--rim);
-  font-size: 13px; font-weight: 570;
+  font-size: var(--fs-3); font-weight: 570;
   transition: transform var(--fast), box-shadow var(--fast),
               background-color var(--fast), color var(--fast);
 }
@@ -486,10 +584,10 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
   border-radius: var(--r-row); box-shadow: var(--rim); color: var(--fg);
 }
 .fc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.fc-body b { font-size: 16px; font-weight: 680; letter-spacing: -.02em; }
-.fc-body i { font-style: normal; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3); margin-left: 7px; }
+.fc-body b { font-size: var(--fs-5); font-weight: 680; letter-spacing: -.02em; }
+.fc-body i { font-style: normal; font-family: var(--mono); font-size: var(--fs-1); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3); margin-left: 7px; }
 .fc-body small { color: var(--fg-3); line-height: 1.5; }
-.fc-go { margin-left: auto; color: var(--fg-3); font-size: 18px; align-self: center; }
+.fc-go { margin-left: auto; color: var(--fg-3); font-size: var(--fs-6); align-self: center; }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4); margin-bottom: var(--s5); }
 .stat-card {
   display: flex; align-items: center; gap: var(--s3);
@@ -503,16 +601,16 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
   background: var(--card-2); border: 1px solid var(--line);
   border-radius: var(--r-row); box-shadow: var(--rim); color: var(--fg-2);
 }
-.stat-card b { display: block; font-size: 30px; font-weight: 760; letter-spacing: -.035em; line-height: 1.05; font-variant-numeric: tabular-nums; }
-.stat-card span { font-size: 12.5px; color: var(--fg-3); }
+.stat-card b { display: block; font-size: var(--fs-8); font-weight: 760; letter-spacing: -.035em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.stat-card span { font-size: var(--fs-2); color: var(--fg-3); }
 .quick { margin-top: var(--s5); }
-.quick h2 { font-size: 18px; margin-bottom: var(--s4); }
+.quick h2 { font-size: var(--fs-6); margin-bottom: var(--s4); }
 .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
 .quick-card {
   flex-direction: column; gap: 10px; height: auto; padding: var(--s4);
   background: var(--card); border: 1px solid var(--line);
   border-radius: var(--r-card); box-shadow: var(--e1), var(--rim);
-  font-size: 13px; font-weight: 570;
+  font-size: var(--fs-3); font-weight: 570;
   transition: transform var(--med), box-shadow var(--med),
               border-color var(--med), background-color var(--med);
 }
@@ -525,7 +623,7 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 /* ── BOTTOM NAV (mobile) ────────────────────────────────────────────────*/
 .bottom-nav {
   display: none;
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 800;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-nav);
   padding: 6px; margin: 0 10px calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--bar); border: 1px solid var(--line);
   border-radius: 20px;
@@ -534,10 +632,10 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .bn-item {
   flex: 1; height: 50px; padding: 0; gap: 3px;
   flex-direction: column; border-radius: var(--r-row);
-  background: transparent; border: 0; color: var(--fg-3); font-size: 10.5px; font-weight: 600;
+  background: transparent; border: 0; color: var(--fg-3); font-size: var(--fs-1); font-weight: 600;
 }
 .bn-item.active { background: var(--acc); color: var(--acc-fg); box-shadow: 0 2px 10px rgba(255,255,255,.16); }
-.bn-l { font-size: 10.5px; font-weight: 600; line-height: 1; }
+.bn-l { font-size: var(--fs-1); font-weight: 600; line-height: 1; }
 .bn-ic { display: grid; place-items: center; }
 /* ───────────────────────── RUNSPACE (#tab-jobs) ───────────────────────── */
 #tab-jobs { display: none; background: var(--bg); color: var(--fg-2); }
@@ -550,7 +648,7 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
   background: var(--bar); border-bottom: 1px solid var(--line);
 }
 .rs-crumb { display: flex; align-items: center; gap: var(--s-2); min-width: 0; flex: 1 1 auto; }
-.rs-crumb-root { height: 30px; padding: 0 var(--s-2); color: var(--fg-3); font-size: var(--t-md); }
+.rs-crumb-root { height: var(--ctl-h-sm); padding: 0 var(--s-2); color: var(--fg-3); font-size: var(--t-md); }
 .rs-crumb-root:hover { color: var(--fg); background: var(--card-2); }
 .rs-crumb-sep { color: var(--fg-4); }
 .rs-crumb-cur { font-family: var(--mono); font-size: var(--t-md); color: var(--fg); font-weight: 600;
@@ -575,12 +673,43 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 }
 .job-item:hover { background: var(--card-2); transform: translateX(2px); box-shadow: var(--e2); }
 .job-item.active { background: var(--card-2); border-color: var(--line-2); box-shadow: var(--e2), inset 3px 0 0 var(--fg); }
-.job-name { font-weight: 600; font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job-meta { font-size: 11.5px; color: var(--fg-3); font-family: var(--mono); }
+.job-name { font-weight: 600; font-size: var(--fs-3); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-meta { font-size: var(--fs-1); color: var(--fg-3); font-family: var(--mono); }
 .rs-empty, .jd-empty, .ap-empty, .cmd-empty, .adm-empty {
   padding: var(--s7) var(--s5); text-align: center; color: var(--fg-3);
 }
-.rs-inp { height: 34px; font-size: var(--t-md); }
+/* ── RunSpace controls: ONE shared rule ────────────────────────────────────
+   .rs-inp and .rs-sel are the two fields that sit side by side in the job
+   toolbar, and they were declared in different places with different values
+   (34px/13px vs 32px/12px, and the select inherited the browser's own font).
+   Two rules for two controls that must look identical is how they drift; one
+   rule cannot.
+
+   The RunSpace-scoped tokens below are aliases of the global control scale,
+   not a second scale — a rail this dense wants its own name for the size,
+   but not its own number to keep in sync by hand. */
+#tab-jobs {
+  --rs-ctl-h:  var(--ctl-h-sm);
+  --rs-ctl-r:  var(--r-ctl);
+  --rs-ctl-fs: var(--fs-3);
+}
+#tab-jobs .rs-inp,
+#tab-jobs .rs-sel {
+  height: var(--rs-ctl-h);
+  border-radius: var(--rs-ctl-r);
+  font-size: var(--rs-ctl-fs);
+  font-family: inherit;
+}
+/* A native select renders in the platform UI font unless told otherwise, so
+   the language picker read as a slightly different typeface from the name
+   field beside it — subtle, and exactly the sort of thing that makes a
+   toolbar look unfinished. */
+#tab-jobs .rs-sel { font-family: inherit; }
+#tab-jobs .rs-ghost-btn { height: var(--rs-ctl-h); }
+#tab-jobs .rs-seg { height: var(--rs-ctl-h); }
+
+/* .rs-inp/.rs-sel are sized by the shared #tab-jobs rule above. A second
+   global declaration here was how the two controls drifted apart before. */
 /* Log console — recessed, black, mono. */
 .rs-logs, .log, .logs, .jd-log, .ah-term-body, pre.output, .cs-con-body {
   background: var(--bg-deep);
@@ -611,23 +740,23 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
   display: flex; align-items: center; gap: var(--s2);
   background: var(--bar); border-bottom: 1px solid var(--line);
 }
-.cs-name { height: 32px; font-family: var(--mono); font-size: 13px; box-shadow: none; background: transparent; border-color: transparent; }
+.cs-name { height: var(--ctl-h-sm); font-family: var(--mono); font-size: var(--fs-3); box-shadow: none; background: transparent; border-color: transparent; }
 .cs-name:focus { background: var(--bg); border-color: var(--line-2); }
-.cs-lang { width: auto; height: 32px; font-size: 12px; padding: 0 30px 0 10px; background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px; }
+.cs-lang { width: auto; height: var(--ctl-h-sm); font-size: var(--fs-2); padding: 0 30px 0 10px; background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px; }
 .cs-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.cs-act { height: 32px; padding: 0 12px; font-size: 12.5px; border: 1px solid var(--line); background: var(--bar); border-radius: var(--r-ctl); box-shadow: var(--e1), var(--rim); }
+.cs-act { height: 32px; padding: 0 12px; font-size: var(--fs-2); border: 1px solid var(--line); background: var(--bar); border-radius: var(--r-ctl); box-shadow: var(--e1), var(--rim); }
 .cs-act:hover { background: var(--card-2); }
 .cs-act.primary { background: var(--acc); color: var(--acc-fg); border-color: var(--acc); }
 .cs-canvas { flex: 1 1 auto; min-height: 0; display: flex; }
 .cs-editor-zone { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .cs-console { border-top: 1px solid var(--line); background: var(--bg-deep); }
-.cs-con-head { height: 34px; padding: 0 var(--s3); display: flex; align-items: center; gap: var(--s2); background: var(--bar); border-bottom: 1px solid var(--line); font-size: 12px; color: var(--fg-3); }
+.cs-con-head { height: 34px; padding: 0 var(--s3); display: flex; align-items: center; gap: var(--s2); background: var(--bar); border-bottom: 1px solid var(--line); font-size: var(--fs-2); color: var(--fg-3); }
 .snippet-item { padding: var(--s3); cursor: pointer; }
 .snippet-head { display: flex; align-items: center; gap: var(--s2); justify-content: space-between; }
-.snippet-code { margin-top: var(--s2); padding: 10px; background: var(--bg-deep); border-radius: var(--r-sm); font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); overflow-x: auto; white-space: pre; }
+.snippet-code { margin-top: var(--s2); padding: 10px; background: var(--bg-deep); border-radius: var(--r-sm); font-family: var(--mono); font-size: var(--fs-1); color: var(--fg-3); overflow-x: auto; white-space: pre; }
 /* CodeMirror host. */
 .cm-editor { height: 100%; background: var(--bg) !important; }
-.cm-editor .cm-scroller { font-family: var(--mono); font-size: 13px; line-height: 1.6; }
+.cm-editor .cm-scroller { font-family: var(--mono); font-size: var(--fs-3); line-height: 1.6; }
 .cm-editor .cm-gutters { background: var(--bg); border-right: 1px solid var(--line); color: var(--fg-4); }
 .cm-editor .cm-activeLine { background: #131313; }
 .cm-editor .cm-activeLineGutter { background: #181818; color: var(--fg-2); }
@@ -640,13 +769,13 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
   display: flex; align-items: center; gap: var(--s2);
   background: var(--bar); border-bottom: 1px solid var(--line);
 }
-.ah-term-title { font-family: var(--mono); font-size: 12.5px; color: var(--fg-2); }
+.ah-term-title { font-family: var(--mono); font-size: var(--fs-2); color: var(--fg-2); }
 .ah-term-body { flex: 1 1 auto; min-height: 0; border: 0; border-radius: 0; }
 .term-card { padding: var(--s5); }
 .wb-term-kbd, .kbd-row, .wb-kbd-row { display: flex; gap: 5px; padding: 6px; background: var(--bar); border-top: 1px solid var(--line); overflow-x: auto; }
 .wb-term-kbd button, .wb-kbd-row button {
   height: 36px; min-width: 44px; padding: 0 10px; flex: 0 0 auto;
-  font-family: var(--mono); font-size: 12px;
+  font-family: var(--mono); font-size: var(--fs-2);
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm);
   box-shadow: var(--e1), var(--rim); color: var(--fg-2);
 }
@@ -665,15 +794,15 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 }
 .set-row:last-child { border-bottom: 0; }
 .set-tx { flex: 1 1 auto; min-width: 0; }
-.set-tx b { display: block; font-size: 13.5px; }
+.set-tx b { display: block; font-size: var(--fs-3); }
 .set-tx small { color: var(--fg-3); }
 .set-ic { width: 36px; height: 36px; display: grid; place-items: center; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-row); color: var(--fg-2); }
 .sess-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s3); margin-bottom: var(--s2); }
 .tfa-qr { background: #fff; padding: var(--s3); border-radius: var(--r-row); display: inline-block; }
-.tfa-manual, .tfa-man-block { font-family: var(--mono); font-size: 12.5px; color: var(--fg-2); word-break: break-all; }
+.tfa-manual, .tfa-man-block { font-family: var(--mono); font-size: var(--fs-2); color: var(--fg-2); word-break: break-all; }
 /* ─────────────────────── OVERLAYS: modal, drawer, toast ───────────────── */
 .ah-modal, .cmd-overlay, .side-overlay {
-  position: fixed; inset: 0; z-index: 1000;
+  position: fixed; inset: 0; z-index: var(--z-modal);
   display: grid; place-items: center; padding: var(--s4);
   background: rgba(0,0,0,.78);
   animation: fade .16s var(--ease) both;
@@ -687,12 +816,12 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 .ah-modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s4); }
 .cmd-box { max-width: 620px; padding: 0; overflow: hidden; align-self: start; margin-top: 10vh; }
 .cmd-input-row { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
-.cmd-input-row input { border: 0; background: transparent; box-shadow: none; height: 40px; font-size: 15px; }
+.cmd-input-row input { border: 0; background: transparent; box-shadow: none; height: 40px; font-size: var(--fs-5); }
 .cmd-results { max-height: 52vh; overflow-y: auto; padding: var(--s2); }
 .cmd-item { display: flex; align-items: center; gap: var(--s3); padding: 10px var(--s3); border-radius: var(--r-ctl); cursor: pointer; }
 .cmd-item:hover, .cmd-item.active { background: var(--card-2); }
-.cmd-kind { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--fg-4); text-transform: uppercase; letter-spacing: .1em; }
-.cmd-foot { padding: 10px var(--s4); border-top: 1px solid var(--line); font-size: 11.5px; color: var(--fg-4); display: flex; gap: var(--s3); }
+.cmd-kind { margin-left: auto; font-family: var(--mono); font-size: var(--fs-1); color: var(--fg-4); text-transform: uppercase; letter-spacing: .1em; }
+.cmd-foot { padding: 10px var(--s4); border-top: 1px solid var(--line); font-size: var(--fs-1); color: var(--fg-4); display: flex; gap: var(--s3); }
 .activity-panel, .ap-panel {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 950;
   width: min(400px, 100%);
@@ -703,12 +832,21 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 @keyframes slideIn { from { transform: translateX(100%) } to { transform: none } }
 .ap-head { height: var(--bar-h); padding: 0 var(--s4); display: flex; align-items: center; gap: var(--s3); border-bottom: 1px solid var(--line); }
 .ap-title { font-weight: 650; flex: 1 1 auto; }
-.ap-body, .ap-list { flex: 1 1 auto; overflow-y: auto; padding: var(--s3); }
+/* The panel is pinned top:0/bottom:0, so on a phone with a home indicator the
+   last row of the list sits UNDER it — reachable by scrolling, but the final
+   item is permanently half-hidden and its tap target overlaps the system
+   gesture area. Pad the scrolling body, not the panel, so the border still
+   runs to the true bottom edge. */
+.ap-body, .ap-list {
+  flex: 1 1 auto; overflow-y: auto;
+  padding: var(--s3);
+  padding-bottom: calc(var(--s3) + env(safe-area-inset-bottom, 0px));
+}
 .ap-item { display: flex; gap: var(--s3); padding: var(--s3); border-radius: var(--r-row); }
 .ap-item:hover { background: var(--card-2); }
 .ap-ic { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; background: var(--card-2); border: 1px solid var(--line); border-radius: 50%; }
-.ap-meta, .ap-sub { font-size: 11.5px; color: var(--fg-3); }
-.toast-container { position: fixed; right: var(--s4); bottom: var(--s4); z-index: 1100; display: flex; flex-direction: column; gap: var(--s2); }
+.ap-meta, .ap-sub { font-size: var(--fs-1); color: var(--fg-3); }
+.toast-container { position: fixed; right: var(--s4); bottom: var(--s4); z-index: var(--z-toast); display: flex; flex-direction: column; gap: var(--s2); }
 .toast {
   display: flex; align-items: center; gap: var(--s3);
   padding: 12px var(--s4); min-width: 250px;
@@ -718,7 +856,7 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 }
 .toast.ok  { border-left: 3px solid var(--ok); }
 .toast.err { border-left: 3px solid var(--danger); }
-.toast-msg { font-size: 13px; }
+.toast-msg { font-size: var(--fs-3); }
 /* ───────────────────────────── ADMIN ──────────────────────────────────── */
 .adm-panel { padding: var(--s4); margin-bottom: var(--s4); }
 .adm-panel-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
@@ -728,14 +866,14 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 table { width: 100%; border-collapse: collapse; }
 th {
   text-align: left; padding: 9px var(--s3);
-  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  font-family: var(--mono); font-size: var(--fs-1); font-weight: 500;
   letter-spacing: .12em; text-transform: uppercase; color: var(--fg-3);
   border-bottom: 1px solid var(--line);
 }
-td { padding: 11px var(--s3); border-bottom: 1px solid var(--line); font-size: 13px; }
+td { padding: 11px var(--s3); border-bottom: 1px solid var(--line); font-size: var(--fs-3); }
 tr:hover td { background: var(--card-2); }
 /* ───────────────────────── BOOT / FATAL / MISC ────────────────────────── */
-.boot-splash { position: fixed; inset: 0; z-index: 9000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s4); background: var(--bg); color: var(--fg-3); }
+.boot-splash { position: fixed; inset: 0; z-index: var(--z-fatal); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s4); background: var(--bg); color: var(--fg-3); }
 html:not(.booting) .boot-splash { display: none; }
 html.booting .nav, html.booting .hero, html.booting .section,
 html.booting .foot, html.booting .auth, html.booting .dashboard { display: none; }
@@ -743,10 +881,10 @@ html.booting .foot, html.booting .auth, html.booting .dashboard { display: none;
 .boot-logo object, .boot-logo svg { width: 100%; height: 100%; }
 .boot-spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--fg); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg) } }
-.boot-text { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; }
+.boot-text { font-family: var(--mono); font-size: var(--fs-1); letter-spacing: .1em; }
 .fatal-card { max-width: 440px; margin: 12vh auto; padding: var(--s6); text-align: center; }
 .loading-state { text-align: center; padding: var(--s7) var(--s5); color: var(--fg-3); }
-.loading-state .empty-icon { font-size: 26px; opacity: .5; display: inline-block; animation: spin 1.3s linear infinite; }
+.loading-state .empty-icon { font-size: var(--fs-7); opacity: .5; display: inline-block; animation: spin 1.3s linear infinite; }
 .btn-spinner { width: 16px; height: 16px; border: 2px solid rgba(0,0,0,.25); border-top-color: currentColor; border-radius: 50%; animation: spin .7s linear infinite; }
 .reveal { animation: rise .5s var(--ease) both; }
 /* ══════════════════════════════ MOBILE ═════════════════════════════════
@@ -771,12 +909,32 @@ html.booting .foot, html.booting .auth, html.booting .dashboard { display: none;
   .bottom-nav { display: flex; gap: 4px; }
   .stats-grid, .quick-grid { gap: 10px; }
   .stat-card { padding: var(--s3); gap: 10px; }
-  .stat-card b { font-size: 24px; }
+  .stat-card b { font-size: var(--fs-7); }
   .feat-card { padding: var(--s4); }
   /* Everything tappable clears the 44px floor. */
   button, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger,
   .dash-tab, input, select, textarea { min-height: 44px; }
   .ic-btn, .nav-burger { min-height: 44px; min-width: 44px; }
+  /* THE DENSE CONTROLS WERE EXEMPT FROM THE 44px FLOOR, AND THEY ARE THE
+     ONES A PHONE USER TOUCHES MOST. The rule above only names generic
+     elements, so every RunSpace / Code Studio control kept its 32px desktop
+     size on a phone: the run button, the language select, the job-name
+     field, the segmented tabs, the icon squares. Measured at 32px against a
+     44px guideline — a third too small, and they sit in a crowded toolbar
+     where a mis-tap fires the wrong action.
+
+     Raising the token raises all of them together, which is the whole point
+     of having one; hand-listing selectors is what let them drift apart. */
+  .rs-head, .rs-side-head, .rs-toolbar, .rs-seg, .cs-explorer-head,
+  .cs-header, .cs-actions, .jd-top-acts, .jd-tabs,
+  #tab-jobs .rs-menu-field {
+    --ctl-h-sm: 44px;
+  }
+  /* The RunSpace alias is scoped to #tab-jobs, so raising --ctl-h-sm on the
+     rows above does not reach it. Raise it where it is declared. */
+  #tab-jobs { --rs-ctl-h: 44px; }
+  /* Square icon buttons must stay square as they grow. */
+  .rs-sq, .rs-side-new { width: var(--ctl-h-sm); }
   /* A phone has no hover; a latched :hover after a tap looks like a bug. */
   .stat-card:hover, .quick-card:hover, .feat-card:hover, .feat:hover,
   .job-item:hover, .btn-primary:hover, .btn-secondary:hover, .dash-tab:hover {
@@ -798,9 +956,9 @@ html.booting .foot, html.booting .auth, html.booting .dashboard { display: none;
 }
 @media (max-width: 380px) {
   .stats-grid { grid-template-columns: 1fr 1fr; }
-  .stat-card b { font-size: 21px; }
+  .stat-card b { font-size: var(--fs-6); }
   .stat-card, .quick-card { padding: 11px; }
-  h1 { font-size: 27px; }
+  h1 { font-size: var(--fs-7); }
 }
 /* Desktop: the drawer close button is not needed. */
 @media (min-width: 761px) { .rs-side-close { display: none; } }
@@ -828,7 +986,7 @@ html.booting .foot, html.booting .auth, html.booting .dashboard { display: none;
 .left                  { text-align: left; }
 .full                  { width: 100%; }
 .mono                  { font-family: var(--mono); }
-.muted, .hint, .sub    { color: var(--fg-3); font-size: 12.5px; }
+.muted, .hint, .sub    { color: var(--fg-3); font-size: var(--fs-2); }
 .link                  { color: var(--fg); font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .danger                { color: var(--danger); }
 .danger-lite           { color: var(--danger); background: var(--danger-dim); }
@@ -877,6 +1035,36 @@ button:hover .arr      { transform: translateX(3px); }
 .success-ring          { box-shadow: 0 0 0 3px rgba(63,214,126,.35); }
 .publishing, .signing-out { pointer-events: none; opacity: .7; }
 .signed-out-in         { animation: fade .3s var(--ease) both; }
+
+/* ── SIGNING OUT: cross-fade instead of a hard cut ─────────────────────────
+   pro.js already adds body.signing-out, waits, then swaps to
+   body.signed-out-in — but nothing in the stylesheet described either state
+   on the elements that actually change, so the dashboard vanished and the
+   landing page appeared in the same frame. On a phone that reads as a crash
+   rather than a transition.
+
+   Two short movements: the dashboard falls back and fades, the landing page
+   rises into its place. */
+body.signing-out .dashboard {
+  opacity: 0;
+  transform: scale(.985);
+  transition: opacity .22s var(--ease), transform .22s var(--ease);
+}
+body.signed-out-in .hero {
+  animation: signOutIn .34s var(--ease) both;
+}
+@keyframes signOutIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Vestibular safety: the same states, with no movement. Someone who has
+   asked the OS for less motion still needs to SEE that the screen changed,
+   so the opacity change stays and only the travel is removed. */
+@media (prefers-reduced-motion: reduce) {
+  body.signing-out .dashboard { transform: none; transition-duration: .01ms; }
+  body.signed-out-in .hero { animation-duration: .01ms; }
+  body.signed-out-in .hero, body.signing-out .dashboard { transform: none; }
+}
 .pw-done               { color: var(--ok); }
 .row-leave             { animation: fadeOut .2s var(--ease) both; }
 @keyframes fadeOut     { to { opacity: 0; transform: translateX(10px) } }
@@ -892,36 +1080,36 @@ button:hover .arr      { transform: translateX(3px); }
 .step-n {
   width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center;
   border-radius: 50%; background: var(--card-2); border: 1px solid var(--line);
-  font-family: var(--mono); font-size: 12px; color: var(--fg);
+  font-family: var(--mono); font-size: var(--fs-2); color: var(--fg);
 }
 .ah-dots { display: flex; gap: 6px; }
 .telegram-login, .tg { display: flex; justify-content: center; }
-.telegram-hint { font-size: 12.5px; color: var(--fg-3); text-align: center; }
-.tos-check, .check { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; color: var(--fg-3); }
+.telegram-hint { font-size: var(--fs-2); color: var(--fg-3); text-align: center; }
+.tos-check, .check { display: flex; align-items: flex-start; gap: 9px; font-size: var(--fs-2); color: var(--fg-3); }
 .tos-check input, .check input { width: 16px; height: 16px; min-height: 0; margin-top: 2px; flex: 0 0 auto; box-shadow: none; }
 .input-text { flex: 1 1 auto; }
 /* ── code studio ───────────────────────────────────────────────────────── */
 .cs-brand      { display: flex; align-items: center; gap: var(--s2); min-width: 0; flex: 1 1 auto; }
-.cs-status, .cs-st-right { font-size: 11.5px; color: var(--fg-3); font-family: var(--mono); }
+.cs-status, .cs-st-right { font-size: var(--fs-1); color: var(--fg-3); font-family: var(--mono); }
 .cs-st-right   { margin-left: auto; }
 .cs-activity   { display: flex; align-items: center; gap: 6px; }
 .cs-explorer   { width: 230px; flex: 0 0 auto; background: var(--bar); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .cs-explorer-head { height: 34px; padding: 0 var(--s3); display: flex; align-items: center; gap: var(--s2);
-                    border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px;
+                    border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: var(--fs-1);
                     letter-spacing: .14em; text-transform: uppercase; color: var(--fg-3); }
 .cs-code-input { flex: 1 1 auto; width: 100%; border: 0; border-radius: 0; box-shadow: none;
                  background: var(--bg); color: var(--fg); font-family: var(--mono);
-                 font-size: 13px; line-height: 1.6; padding: var(--s3); resize: none; }
+                 font-size: var(--fs-3); line-height: 1.6; padding: var(--s3); resize: none; }
 .cs-preview-zone { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
 .cs-preview-top  { height: 34px; padding: 0 var(--s3); display: flex; align-items: center; gap: var(--s2);
-                   background: var(--bar); border-bottom: 1px solid var(--line); font-size: 12px; color: var(--fg-3); }
+                   background: var(--bar); border-bottom: 1px solid var(--line); font-size: var(--fs-2); color: var(--fg-3); }
 .cs-preview-body { flex: 1 1 auto; min-height: 0; background: #fff; }
 .cs-iframe       { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
 .cs-fp-head  { padding: 10px var(--s3); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s2); }
-.cs-fp-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); }
+.cs-fp-count { margin-left: auto; font-family: var(--mono); font-size: var(--fs-1); color: var(--fg-3); }
 .cs-fp-item  { display: flex; align-items: center; gap: var(--s2); padding: 9px var(--s3); cursor: pointer; }
 .cs-fp-item:hover { background: var(--card-2); }
-.cs-fpi-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.cs-fpi-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
 .cs-fpi-act  { display: flex; gap: 4px; }
 .cs-fpi-act button { width: 28px; height: 28px; padding: 0; color: var(--fg-3); }
 .cs-fpi-act button:hover { color: var(--fg); background: var(--card-2); }
@@ -936,13 +1124,13 @@ button:hover .arr      { transform: translateX(3px); }
 .rs-list  { display: flex; flex-direction: column; gap: var(--s-2); }
 .rs-side-title { font-family: var(--mono); font-size: var(--t-xs); letter-spacing: .14em;
                  text-transform: uppercase; color: var(--fg-3); flex: 1 1 auto; }
-.rs-side-new   { width: 30px; height: 30px; padding: 0; border-radius: var(--r-ctl);
+.rs-side-new   { width: var(--ctl-h-sm); height: var(--ctl-h-sm); padding: 0; border-radius: var(--r-ctl);
                  background: var(--card-2); border: 1px solid var(--line); color: var(--fg); }
 .rs-count { font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-3); }
 .rs-meta  { font-size: var(--t-xs); color: var(--fg-3); font-family: var(--mono); }
 .rs-ic, .rs-gh-ic { width: 18px; height: 18px; flex: 0 0 auto; }
 .rs-ic-sm { width: 14px; height: 14px; flex: 0 0 auto; }
-.rs-sq    { width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center;
+.rs-sq    { width: var(--ctl-h-sm); height: var(--ctl-h-sm); flex: 0 0 auto; display: grid; place-items: center;
             background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-sm); }
 .rs-pane, .rs-split, .rs-editor, .rs-cm-host, .rs-code {
   flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column;
@@ -963,7 +1151,7 @@ button:hover .arr      { transform: translateX(3px); }
 .rs-skel-dot { width: 8px; height: 8px; border-radius: 50%; }
 @keyframes shimmer { to { background-position: -200% 0 } }
 .rs-spin { background: var(--fg); }
-.rs-log-head  { height: 34px; padding: 0 var(--s3); display: flex; align-items: center; gap: var(--s2);
+.rs-log-head  { height: var(--ctl-h-sm); padding: 0 var(--s3); display: flex; align-items: center; gap: var(--s2);
                 background: var(--bar); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .rs-log-label { font-family: var(--mono); font-size: var(--t-xs); letter-spacing: .14em;
                 text-transform: uppercase; color: var(--fg-3); }
@@ -980,12 +1168,12 @@ button:hover .arr      { transform: translateX(3px); }
 .rs-ghost-btn:hover { background: var(--card-2); color: var(--fg); }
 .rs-seg  { display: inline-flex; padding: var(--s-1); gap: 2px; background: var(--bar);
            border: 1px solid var(--line); border-radius: var(--r-ctl); box-shadow: var(--rim); }
-.rs-seg-btn { height: 28px; padding: 0 var(--s-3); font-size: var(--t-sm); border-radius: var(--r-sm);
+.rs-seg-btn { height: var(--ctl-h-sm); padding: 0 var(--s-3); font-size: var(--t-sm); border-radius: var(--r-sm);
               color: var(--fg-3); background: transparent; border: 0; box-shadow: none; }
 .rs-seg-btn.active { background: var(--acc); color: var(--acc-fg); }
 .rs-seg-danger { color: var(--danger); }
 .rs-seg-label  { font-size: var(--t-xs); color: var(--fg-3); }
-.rs-sel  { height: 32px; font-size: var(--t-sm); padding: 0 28px 0 var(--s-2); }
+.rs-sel  { height: var(--ctl-h-sm); font-size: var(--t-sm); padding: 0 28px 0 var(--s-2); }
 .rs-inp-err { border-color: var(--danger); }
 .rs-kv   { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s-2) 0;
            border-bottom: 1px solid var(--line); font-size: var(--t-sm); }
@@ -1004,6 +1192,8 @@ button:hover .arr      { transform: translateX(3px); }
   display: flex; flex-direction: column; transition: transform var(--med);
 }
 .rs-insp.rs-insp-open, .rs-insp-open .rs-insp { transform: none; }
+/* Same home-indicator overlap as the activity panel. */
+.rs-insp-body { padding-bottom: calc(var(--s3) + env(safe-area-inset-bottom, 0px)); }
 .rs-insp-head  { height: var(--bar-h); padding: 0 var(--s4); display: flex; align-items: center;
                  gap: var(--s3); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .rs-insp-title { font-weight: 650; flex: 1 1 auto; }
@@ -1059,7 +1249,7 @@ button:hover .arr      { transform: translateX(3px); }
 .jd-pill     { height: 24px; padding: 0 var(--s-2); border-radius: var(--pill); background: var(--card-2);
                border: 1px solid var(--line); font-size: var(--t-xs); display: inline-flex; align-items: center; }
 .jd-acts     { display: flex; gap: var(--s-2); flex-wrap: wrap; }
-.jd-btn, .jd-primary { height: 34px; padding: 0 var(--s-3); font-size: var(--t-sm); }
+.jd-btn, .jd-primary { height: var(--ctl-h-sm); padding: 0 var(--s-3); font-size: var(--t-sm); }
 .jd-primary  { background: var(--acc); color: var(--acc-fg); border-color: var(--acc); }
 .jd-more-wrap{ position: relative; }
 .jd-menu     { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; min-width: 190px;
@@ -1078,7 +1268,7 @@ button:hover .arr      { transform: translateX(3px); }
 /* ── admin ─────────────────────────────────────────────────────────────── */
 .adm-stats  { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s3); }
 .adm-stat   { padding: var(--s3); background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-row); }
-.adm-hint   { font-size: 12px; color: var(--fg-3); }
+.adm-hint   { font-size: var(--fs-2); color: var(--fg-3); }
 .adm-link   { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .adm-libs   { display: flex; flex-wrap: wrap; gap: 5px; }
 .adm-spark  { height: 26px; display: flex; align-items: flex-end; gap: 2px; }
@@ -1089,7 +1279,7 @@ button:hover .arr      { transform: translateX(3px); }
 /* ── settings / profile / 2FA ──────────────────────────────────────────── */
 .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); }
 .profile-card { padding: var(--s5); }
-.set-meta   { font-size: 11.5px; color: var(--fg-3); }
+.set-meta   { font-size: var(--fs-1); color: var(--fg-3); }
 .sess-list  { display: flex; flex-direction: column; gap: var(--s2); }
 .sess-ic    { width: 34px; height: 34px; display: grid; place-items: center; background: var(--card-2);
               border: 1px solid var(--line); border-radius: var(--r-row); flex: 0 0 auto; }
@@ -1097,25 +1287,25 @@ button:hover .arr      { transform: translateX(3px); }
 .tab-group  { display: flex; flex-direction: column; gap: var(--s3); }
 .tab-head   { display: flex; align-items: center; gap: var(--s2); }
 .tab-tx     { flex: 1 1 auto; }
-.tfa-p      { color: var(--fg-2); font-size: 13px; }
+.tfa-p      { color: var(--fg-2); font-size: var(--fs-3); }
 .tfa-ok     { color: var(--ok); }
-.tfa-status { font-size: 12.5px; color: var(--fg-3); }
-.tfa-meta   { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); }
+.tfa-status { font-size: var(--fs-2); color: var(--fg-3); }
+.tfa-meta   { font-family: var(--mono); font-size: var(--fs-1); color: var(--fg-3); }
 .tfa-otp    { display: flex; gap: var(--s2); justify-content: center; }
 .tfa-dis-btn{ color: var(--danger); border-color: var(--danger); background: transparent; }
 .bc-grid    { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: var(--s2); }
 .bc-grid span { font-family: var(--mono); justify-content: center; }
 .bc-actions, .bc-confirm { display: flex; gap: var(--s2); flex-wrap: wrap; }
-.user-name  { font-weight: 600; font-size: 13px; }
-.otp-expire { font-size: 12px; color: var(--fg-3); text-align: center; }
-.otp-foot   { display: flex; justify-content: space-between; gap: var(--s3); font-size: 12.5px; }
+.user-name  { font-weight: 600; font-size: var(--fs-3); }
+.otp-expire { font-size: var(--fs-2); color: var(--fg-3); text-align: center; }
+.otp-foot   { display: flex; justify-content: space-between; gap: var(--s3); font-size: var(--fs-2); }
 .strength-bar { height: 4px; background: var(--line); border-radius: var(--pill); overflow: hidden; }
 /* ── command palette / activity / toast internals ──────────────────────── */
 .cmd-ic    { width: 18px; height: 18px; color: var(--fg-3); flex: 0 0 auto; }
 .cmd-lead  { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
-.cmd-text, .cmd-title { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmd-sub   { font-size: 11.5px; color: var(--fg-3); }
-.ap-clear  { font-size: 12px; color: var(--fg-3); height: 30px; padding: 0 10px; }
+.cmd-text, .cmd-title { font-size: var(--fs-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-sub   { font-size: var(--fs-1); color: var(--fg-3); }
+.ap-clear  { font-size: var(--fs-2); color: var(--fg-3); height: 30px; padding: 0 10px; }
 .activity-overlay { position: fixed; inset: 0; z-index: 940; background: rgba(0,0,0,.6); }
 .toast-ic  { width: 18px; height: 18px; flex: 0 0 auto; }
 /* ── terminal page ─────────────────────────────────────────────────────── */
@@ -1127,7 +1317,7 @@ button:hover .arr      { transform: translateX(3px); }
              background: var(--card); border: 1px solid var(--line-2);
              border-radius: var(--r-row); box-shadow: var(--e3), var(--rim); }
 .term-ctx button { width: 100%; height: 34px; justify-content: flex-start; padding: 0 var(--s-3);
-                   font-size: 13px; border-radius: var(--r-sm); }
+                   font-size: var(--fs-3); border-radius: var(--r-sm); }
 .term-ctx button:hover { background: var(--card-2); }
 .term-kbd-up .wb-term-kbd { transform: none; }
 .wb-term-body  { flex: 1 1 auto; min-height: 0; }
@@ -1140,12 +1330,12 @@ button:hover .arr      { transform: translateX(3px); }
 .log-url   { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
 .pub-acts  { display: flex; gap: 6px; flex-wrap: wrap; }
 .pub-ic    { width: 18px; height: 18px; }
-.pub-link  { font-family: var(--mono); font-size: 12.5px; color: var(--fg);
+.pub-link  { font-family: var(--mono); font-size: var(--fs-2); color: var(--fg);
              text-decoration: underline; text-underline-offset: 3px; word-break: break-all; }
-.fatal-ic  { font-size: 30px; margin-bottom: var(--s3); }
+.fatal-ic  { font-size: var(--fs-8); margin-bottom: var(--s3); }
 .fatal-btns{ display: flex; gap: var(--s2); justify-content: center; margin-top: var(--s4); }
-.load-error-ic { font-size: 26px; opacity: .5; }
-.load-error-tx { color: var(--fg-3); font-size: 13px; }
+.load-error-ic { font-size: var(--fs-7); opacity: .5; }
+.load-error-tx { color: var(--fg-3); font-size: var(--fs-3); }
 .i-flame   { color: var(--warn); }
 .alt, .cc, .back, .dl, .delete, .expanded { min-width: 0; }
 .jdel      { color: var(--fg-3); }
@@ -1179,7 +1369,7 @@ button:hover .arr      { transform: translateX(3px); }
 #tab-jobs .jd {
   position: fixed;
   inset: 0;
-  z-index: 1600;
+  z-index: var(--z-panel);
   display: none;
   visibility: hidden;
   background: var(--bg);
@@ -1200,6 +1390,21 @@ body.rs-detail-open #tab-jobs .rs-side,
 body.rs-detail-open #tab-jobs .rs-insp { display: none; }
 /* Lock the page behind so a scroll gesture cannot chain through. */
 body.rs-detail-open { overflow: hidden; }
+
+/* RUNSPACE IS FULL-SCREEN, SO THE BOTTOM NAV MUST GO.
+   body.rs-active already makes .dash-main a full-height flex column with
+   overflow hidden (see the rule near the top of the RunSpace section), and
+   .dash-main reserves --bottom-nav-h of bottom padding for a bar that is
+   still floating over the editor. The result on a phone: the last ~64px of
+   the code area sits underneath the nav, the editor's own footer controls
+   are unreachable, and the Details page — which DOES hide the bar — jumps
+   the layout as you move between the two.
+   The Details rule above proves the intent; this is the same rule for the
+   view it was missing from. !important because .bottom-nav's own
+   display:flex is set inside the 760px media query, which wins on order. */
+body.rs-active .bottom-nav { display: none !important; }
+/* With the bar gone, stop reserving room for it. */
+body.rs-active .dash-main { padding-bottom: 0; }
 #tab-jobs .jd-top { padding-top: calc(var(--s3) + env(safe-area-inset-top, 0px)); }
 #tab-jobs .jd-scroll {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -1312,7 +1517,7 @@ html.tg-no-auth #screen-landing { display: none !important; }
 .tg-fatal {
   position: fixed;
   top: 0; right: 0; bottom: 0; left: 0;
-  z-index: 2000;
+  z-index: var(--z-fatal);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1328,7 +1533,7 @@ html.tg-no-auth #screen-landing { display: none !important; }
   margin: 0;
   max-width: 34ch;
   color: var(--fg-2);
-  font-size: 14px;
+  font-size: var(--fs-4);
   line-height: 1.55;
 }
 .tg-fatal .btn-primary,
@@ -1355,20 +1560,74 @@ a, .link, .adm-link, .rs-insp-link, .jd-url, .pub-link, .log-url {
 }
 a:focus-visible, .link:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 .nav-link, .bn-item, .dash-tab, .cmd-item, .jd-menu-item { text-decoration: none; }
-/* ── Buttons: one size system ──────────────────────────────────────────── */
-/* Every variant is border-box with an explicit height driven by --btn-h,
-   so a ghost button next to a primary one cannot end up 2px taller. */
-button, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger {
+/* ── ONE CONTROL SIZE SYSTEM ───────────────────────────────────────────────
+   THE PROBLEM THIS FIXES, measured rather than guessed. Booting the real
+   page and reading getComputedStyle on every control gave:
+
+       buttons          40px   (var(--btn-h, 40px))
+       text inputs      42px
+       selects          32px   (.rs-sel, .cs-lang)
+       RunSpace inputs  32px   (.rs-inp)
+       segmented btns   28px   (.rs-seg-btn)
+       job-detail btns  34px   (.jd-btn)
+       RunSpace squares 30px   (.rs-sq, .rs-side-new)
+
+   Seven heights for one job. Put a button next to an input — which the
+   Code Studio header, the RunSpace toolbar and the job-detail bar all do —
+   and the row is visibly ragged: the 40px button sits 2px short of the 42px
+   field beside it, and 8px taller than the select on its other side.
+
+   THREE SIZES, and they are the only ones:
+
+       --ctl-h-sm  32px   dense toolbars (RunSpace rail, editor chrome)
+       --ctl-h     40px   the default: forms, dialogs, page actions
+       --ctl-h-lg  48px   hero / primary page CTA
+
+   Buttons, inputs, selects and textareas all read the SAME token, so a row
+   is aligned by construction instead of by everyone happening to pick the
+   same number. Anything that needs a different height sets --ctl-h on the
+   element (or its row), which keeps the neighbours in step automatically. */
+:root { --ctl-h-sm: 32px; --ctl-h: 40px; --ctl-h-lg: 48px; }
+
+button, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger,
+input, select {
   box-sizing: border-box;
-  height: var(--btn-h, 40px);
+  /* --btn-h is kept as an alias: older rules set it and would otherwise be
+     silently ignored. New code should set --ctl-h. */
+  height: var(--btn-h, var(--ctl-h));
 }
-.btn-primary.lg, .btn-secondary.lg, .btn-ghost.lg, .btn-danger.lg { --btn-h: 48px; }
-.btn-primary.sm, .btn-secondary.sm, .btn-ghost.sm, .btn-danger.sm { --btn-h: 32px; }
-.nav-cta .btn-primary, .nav-cta .btn-secondary, .nav-cta .btn-ghost { --btn-h: 38px; }
-.hero-actions .btn-primary, .hero-actions .btn-secondary { --btn-h: 48px; }
+/* Multi-line controls grow, but start on the same rhythm. */
+textarea { box-sizing: border-box; min-height: calc(var(--ctl-h) * 2); }
+
+.btn-primary.lg, .btn-secondary.lg, .btn-ghost.lg, .btn-danger.lg { --btn-h: var(--ctl-h-lg); }
+.btn-primary.sm, .btn-secondary.sm, .btn-ghost.sm, .btn-danger.sm { --btn-h: var(--ctl-h-sm); }
+/* The landing page pairs a primary with a ghost in the same row. Sizing only
+   the primary is how a row ends up with two different button heights, so both
+   members are named in one rule and both read the same token. */
+.nav-cta .btn-primary,
+.nav-cta .btn-ghost { --btn-h: var(--ctl-h); }
+.nav-cta .btn-secondary { --btn-h: var(--ctl-h); }
+.hero-actions .btn-primary,
+.hero-actions .btn-ghost { --btn-h: var(--ctl-h-lg); }
+.hero-actions .btn-secondary { --btn-h: var(--ctl-h-lg); }
+
+/* Dense surfaces opt into the small size ONCE, for the whole row, so every
+   control inside them agrees — this is what removes the ragged toolbars. */
+/* The container list is taken from the markup, not invented: these are the
+   dense rows that actually exist in index.html. A name that matches nothing
+   is worse than no rule, because it reads as covered when it is not — the
+   first draft of this listed .cs-bar/.cs-top/.jd-actions, none of which are
+   real, so the Code Studio header and job-detail action bar quietly kept
+   their own sizes. */
+.rs-head, .rs-side-head, .rs-toolbar, .rs-seg, .cs-explorer-head,
+.cs-header, .cs-actions, .jd-top-acts, .jd-tabs {
+  --ctl-h: var(--ctl-h-sm);
+}
 @media (max-width: 560px) {
   .hero-actions { flex-direction: column; align-items: stretch; }
-  .hero-actions .btn-primary, .hero-actions .btn-secondary { width: 100%; }
+  .hero-actions .btn-primary,
+  .hero-actions .btn-secondary,
+  .hero-actions .btn-ghost { width: 100%; }
 }
 /* ── Clickable rows must say so ────────────────────────────────────────── */
 .stat-card, .quick-card, .feat-card, .job-item, .snippet-item,
@@ -1389,7 +1648,7 @@ button, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger {
    visible while a full-screen view is opening. */
 .rs-progress {
   position: fixed; top: 0; left: 0; right: 0;
-  height: 3px; z-index: 2500;
+  height: 3px; z-index: var(--z-menu);
   background: transparent; pointer-events: none;
 }
 .rs-progress-fill {
@@ -1413,11 +1672,42 @@ button, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger {
 }
 .jstatus-dot.checking,
 #tab-jobs .rs-status-dot.checking { background: var(--warn); }
-/* ── Layered z-index, declared in one place so it can be reasoned about ──
-   700 dash bar · 800 bottom nav · 860 drawers · 950 activity
-   1100 toasts · 1500 details · 9990/10000 fatal + modal */
-.toast-container { z-index: 9990; }
-.ah-modal        { z-index: 10000; }
+/* ── THE LAYER LADDER ──────────────────────────────────────────────────────
+   This comment used to describe a ladder the stylesheet did not implement:
+   it said "1100 toasts ... 9990/10000 fatal + modal", while .toast-container
+   was declared TWICE (1100 at its definition, 9990 here) and .ah-modal twice
+   (1000 and 10000). Whichever came last in the file won, which is not a
+   decision — it is an accident that changes when someone reorders a block.
+   Counted across the sheet: 29 distinct z-index values from 5 to 10000, with
+   no rule saying what sits above what.
+
+   The ladder is now TOKENS. Each layer is named, the order is visible in one
+   place, and a new panel picks a name instead of inventing a number one
+   higher than whatever it happened to appear behind. */
+:root {
+  --z-sticky:   700;   /* dashboard bar (scrolls with content)     */
+  --z-nav:      800;   /* mobile bottom nav                        */
+  --z-scrim:    855;   /* dimmer behind a drawer                   */
+  --z-drawer:   860;   /* side rails, file panes                   */
+  --z-panel:    870;   /* inspector / details drawer               */
+  --z-header:   900;   /* marketing nav (over the hero)            */
+  --z-overlay:  940;   /* full-screen dimmer                       */
+  --z-flyout:   950;   /* activity panel over its own overlay      */
+  /* A sheet/popover is opened FROM whatever is on screen — including the
+     activity panel — so it has to sit above the flyout layer, not below it.
+     My first ordering put it at 880 and the RunSpace "more" sheet opened
+     UNDERNEATH the activity panel: visible, tappable, and painted behind.
+     Its own scrim sits one step down so it still covers the flyout. */
+  --z-sheet-scrim: 960;
+  --z-sheet:    970;   /* bottom sheets, popover menus             */
+  --z-modal:   1000;   /* dialogs                                  */
+  --z-menu:    1050;   /* context menu, which may open IN a dialog */
+  --z-toast:   1100;   /* transient feedback, above everything     */
+  --z-fatal:   1200;   /* the boot/fatal screen — nothing outranks */
+}
+/* Each layer is set where its element is defined — see .toast-container and
+   .ah-modal above. Restating them here is what created the duplicate pair
+   this ladder exists to prevent. */
 /* ── Reveal / fade helpers pro.js toggles ──────────────────────────────── */
 .fade-out { opacity: 0; transition: opacity .18s var(--ease); }
 .fade-in  { opacity: 1; transition: opacity .18s var(--ease); }
@@ -1482,7 +1772,7 @@ html[data-theme="dark"], html[data-theme="light"], :root {
 .adm-jd-why {
   padding: 10px var(--s3); border-left: 3px solid var(--st-danger);
   background: var(--card-2); border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  font-size: 12.5px; color: var(--fg-2);
+  font-size: var(--fs-2); color: var(--fg-2);
 }
 /* "Attributed, not caused" is information, not an accusation -- neutral
    removes the alert bar rather than recolouring the text. */
@@ -1607,7 +1897,7 @@ body.rs-side-open #tab-jobs .rs-side { transform: translateX(0); }
 }
 /* ── Auth link leaves ──────────────────────────────────────────────────── */
 .tos-check a, .field-taken a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
-.field-taken { color: var(--warn); font-size: 12px; }
+.field-taken { color: var(--warn); font-size: var(--fs-2); }
 /* ── Job Detail panes ──────────────────────────────────────────────────── */
 .jd-pane, .jd-tabpane { display: none; }
 .jd-pane.is-active, .jd-tabpane.is-active { display: flex; flex-direction: column; min-height: 0; }
@@ -2062,7 +2352,7 @@ body.term-open .wb-term-kbd { display: flex; }
 }
 .auth-form .check {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-3);
   color: var(--fg-2);
   white-space: nowrap;
   cursor: pointer;
@@ -2074,7 +2364,7 @@ body.term-open .wb-term-kbd { display: flex; }
   box-shadow: none;
 }
 .auth-form .field-row .link {
-  font-size: 13px;
+  font-size: var(--fs-3);
   color: var(--fg-2);
   text-decoration: none;
   white-space: nowrap;
@@ -2090,7 +2380,7 @@ body.term-open .wb-term-kbd { display: flex; }
   border-top-style: solid;
   border-top-color: var(--line);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--fs-3);
   color: var(--fg-3);
 }
 .auth-switch a { color: var(--fg); font-weight: 600; text-decoration: none; }
@@ -2301,12 +2591,12 @@ body.term-open .wb-term-kbd { display: flex; }
 #tab-jobs .rs-menu-field { cursor: default; }
 #tab-jobs .rs-menu-field:hover { background: transparent; }
 #tab-jobs .rs-menu-field .rs-sel {
-  flex: 0 0 auto; width: 110px; height: 32px;
+  flex: 0 0 auto; width: 110px; height: var(--ctl-h-sm);
   font-size: var(--t-sm); padding: 0 28px 0 var(--s-2);
 }
 #tab-jobs .rs-menu-field.rs-gh-wrap { gap: var(--s-2); padding: var(--s-2) var(--s-3); }
-#tab-jobs .rs-menu-field .rs-gh { flex: 1 1 auto; min-width: 0; height: 32px; font-size: var(--t-sm); }
-#tab-jobs .rs-menu-field .rs-sq { flex: 0 0 auto; width: 32px; height: 32px; }
+#tab-jobs .rs-menu-field .rs-gh { flex: 1 1 auto; min-width: 0; height: var(--ctl-h-sm); font-size: var(--t-sm); }
+#tab-jobs .rs-menu-field .rs-sq { flex: 0 0 auto; width: var(--ctl-h-sm); height: var(--ctl-h-sm); }
 
 /* ── under 760px the same menu is a bottom sheet ───────────────────────── */
 @media (max-width: 760px) {
@@ -2326,9 +2616,10 @@ body.term-open .wb-term-kbd { display: flex; }
     background: var(--line-2); border-radius: var(--r-pill);
   }
   #tab-jobs .rs-menu-item { min-height: 48px; }
-  #tab-jobs .rs-menu-field .rs-sel { width: 130px; height: 38px; }
-  #tab-jobs .rs-menu-field .rs-gh,
-  #tab-jobs .rs-menu-field .rs-sq { height: 38px; }
+  /* Bottom sheet on a phone: one token raises the whole row together,
+     and 44px clears the tap-target floor instead of missing it by 6. */
+  #tab-jobs .rs-menu-field { --ctl-h-sm: 44px; }
+  #tab-jobs .rs-menu-field .rs-sel { width: 130px; }
 }
 
 /* ── everything below the header is the editor ─────────────────────────── */
@@ -2343,9 +2634,11 @@ body.term-open .wb-term-kbd { display: flex; }
   border-bottom: 1px solid var(--line);
 }
 #tab-jobs .rs-meta .rs-inp {
-  width: 100%; height: 32px;
+  /* Was a literal 32px, which pinned this field to the desktop size even on
+     a phone where every control around it grows to 44px. */
+  width: 100%; height: var(--rs-ctl-h);
   background: transparent; border-color: transparent; box-shadow: none;
-  font-size: var(--t-md);
+  font-size: var(--rs-ctl-fs);
 }
 #tab-jobs .rs-meta .rs-inp:focus {
   background: var(--bg); border-color: var(--line-2);
@@ -2500,8 +2793,8 @@ body.rs-menu-open { overflow: hidden; }
 .cs-drop.is-over { display: grid; border-color: var(--fg-3); }
 .cs-drop-inner { display: flex; flex-direction: column; align-items: center; gap: var(--s2); pointer-events: none; }
 .cs-drop-ic { width: 30px; height: 30px; color: var(--fg-2); }
-.cs-drop b { font-size: 15px; color: var(--fg); }
-.cs-drop small { font-size: 12px; color: var(--fg-3); max-width: 34ch; line-height: 1.5; }
+.cs-drop b { font-size: var(--fs-5); color: var(--fg); }
+.cs-drop small { font-size: var(--fs-2); color: var(--fg-3); max-width: 34ch; line-height: 1.5; }
 
 .cs-empty-upload {
   position: absolute;
@@ -2513,11 +2806,11 @@ body.rs-menu-open { overflow: hidden; }
   text-align: center;
 }
 .cs-empty-upload[hidden] { display: none; }
-.cs-empty-hint { font-size: 12px; color: var(--fg-3); }
+.cs-empty-hint { font-size: var(--fs-2); color: var(--fg-3); }
 
 @media (max-width: 760px) {
-  .cs-drop b { font-size: 14px; }
-  .cs-drop small { font-size: 11.5px; }
+  .cs-drop b { font-size: var(--fs-4); }
+  .cs-drop small { font-size: var(--fs-1); }
   .cs-empty-hint { display: none; }   /* no dragging on a phone */
 }
 
@@ -2564,17 +2857,17 @@ body.rs-menu-open { overflow: hidden; }
 }
 
 /* ── 1b. The sheet sits above every other fixed layer ──────────────────── */
-/* Above .bottom-nav (800), the rail (860), its scrim (855) and the activity
-   panel (950); below toasts (9990) and modals (10000), which must always be
-   able to interrupt. */
-#tab-jobs .rs-menu { z-index: 9000; }
+/* Above the nav, the rail and its scrim; below toasts and modals, which must
+   always be able to interrupt. Named layers, so this comment cannot drift out
+   of step with the numbers the way the old one did. */
+#tab-jobs .rs-menu { z-index: var(--z-sheet); }
 
 /* A scrim, so the sheet reads as modal and a tap outside dismisses it
    rather than hitting whatever is behind. */
 .rs-menu-scrim {
   position: fixed;
   top: 0; right: 0; bottom: 0; left: 0;
-  z-index: 8990;
+  z-index: var(--z-sheet-scrim);
   background: rgba(0, 0, 0, .55);
   opacity: 0; visibility: hidden; pointer-events: none;
   transition: opacity var(--fast), visibility var(--fast);
@@ -2681,7 +2974,7 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
 @media (max-width: 760px) {
   /* Full-width sheet on a phone: a 280px column beside a 375px screen is
      not a browser, it is a nuisance. */
-  #tab-jobs .rs-files { width: 100%; z-index: 8980; }
+  #tab-jobs .rs-files { width: 100%; z-index: var(--z-drawer); }
   #tab-jobs .rs-file-row { min-height: 46px; }
 }
 
@@ -2743,9 +3036,7 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
   body.rs-menu-open .bottom-nav { display: flex; }
 
   /* The field rows shrink with the panel. */
-  #tab-jobs .rs-menu-field .rs-sel { width: 104px; height: 32px; }
-  #tab-jobs .rs-menu-field .rs-gh,
-  #tab-jobs .rs-menu-field .rs-sq { height: 32px; }
+  #tab-jobs .rs-menu-field .rs-sel { width: 104px; }
 }
 
 /* The compact panel is position:absolute, so unlike the old fixed sheet it
@@ -2787,7 +3078,10 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
 /* Save & Run, beside the status text. */
 #tab-jobs .rs-run-quick {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 32px; padding: 0 var(--s-3); flex: 0 0 auto;
+  /* Sits in .rs-head beside .rs-ghost-btn. It was the last control in
+     that row still on its own number, which is exactly how a toolbar
+     ends up looking ragged. */
+  height: var(--ctl-h-sm); padding: 0 var(--s-3); flex: 0 0 auto;
   background: var(--accent); color: var(--acc-fg);
   border: 1px solid var(--accent); border-radius: var(--r-pill);
   font-size: var(--t-sm); font-weight: 600; white-space: nowrap;
@@ -2799,7 +3093,7 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
 @media (max-width: 400px) {
   /* Only the glyph at the narrowest sizes, so the job name keeps its room. */
   #tab-jobs .rs-run-quick span { display: none; }
-  #tab-jobs .rs-run-quick { width: 34px; padding: 0; justify-content: center; }
+  #tab-jobs .rs-run-quick { width: var(--ctl-h-sm); padding: 0; justify-content: center; }
 }
 
 /* The inspector ("Details") used `inset: auto 0 0 0`, a shorthand that did

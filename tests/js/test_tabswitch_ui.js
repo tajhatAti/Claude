@@ -44,8 +44,13 @@ check("bar CSS never transitions width",
   !/\.rs-progress-fill \{[^}]*transition:[^;]*width/.test(css));
 check("bar is thin and pinned to the top",
   /\.rs-progress \{[^}]*height: 3px/.test(css) && /\.rs-progress \{[^}]*top: 0/.test(css));
-const z = css.match(/\.rs-progress \{[^}]*z-index:\s*(\d+)/);
-check("bar sits above the Details page (2400)", z && Number(z[1]) > 2400, z && z[1]);
+/* Named layer ladder — see tests/js/zlayers.js. The progress bar must outrank
+   the Details page; both are now tokens, so compare the resolved layers. */
+const { zValue } = require('./zlayers');
+const z = css.match(/\.rs-progress \{[^}]*z-index:\s*([^;]+);/);
+const barZ = z && zValue(z[1]);
+check("bar sits above the Details page",
+  barZ > zValue('var(--z-panel)'), String(barZ));
 
 // ---- §3 status animation ------------------------------------------------
 check("status dots cross-fade rather than flip",

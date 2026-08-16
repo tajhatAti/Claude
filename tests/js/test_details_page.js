@@ -145,10 +145,18 @@ check("Details page is position:fixed (owns the viewport)",
   /#tab-jobs \.jd \{[^}]*position:\s*fixed/.test(css));
 check("Details page covers the full viewport (inset:0)",
   /#tab-jobs \.jd \{[^}]*inset:\s*0/.test(css));
-const zm = css.match(/#tab-jobs \.jd \{[^}]*z-index:\s*(\d+)/);
-check("z-index is above .bottom-nav (1500)", zm && Number(zm[1]) > 1500, zm && zm[1]);
-check("z-index stays below toasts (9990) and modals (10000)",
-  zm && Number(zm[1]) < 9990, zm && zm[1]);
+/* The layer order is a named ladder now (--z-sticky ... --z-fatal), declared
+   once at :root, because it used to be 29 ad-hoc numbers with two selectors
+   declared twice at different values. Assert the ORDER, which is the thing
+   that matters, instead of a literal that has to be edited whenever the
+   ladder is renumbered. */
+const { zValue } = require('./zlayers');
+const zm = css.match(/#tab-jobs \.jd \{[^}]*z-index:\s*([^;]+);/);
+const jdZ = zm && zValue(zm[1]);
+check("z-index is above the bottom nav and the drawers",
+  jdZ > zValue('var(--z-nav)') && jdZ >= zValue('var(--z-drawer)'), String(jdZ));
+check("z-index stays below toasts and modals, which must interrupt it",
+  jdZ < zValue('var(--z-toast)') && jdZ < zValue('var(--z-modal)'), String(jdZ));
 check("CodeNest dashboard bar hidden while open",
   /body\.rs-detail-open \.dash-bar[\s\S]{0,260}?display:\s*none/.test(css));
 // The shell rebuild replaced .rs-bar + .rs-ed-bar with one .rs-head and a

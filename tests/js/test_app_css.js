@@ -127,7 +127,14 @@ ok('cards lift on hover', /\.stat-card:hover[^{]*\{[^}]*translateY\(-3px\)/s.tes
 console.log('\n[7] bento layout');
 ok('feature tiles are a 2-up grid', /\.feat-cards\s*\{[^}]*grid-template-columns:\s*1fr 1fr/s.test(SRC));
 ok('metrics are a 4-up strip', /\.stats-grid\s*\{[^}]*repeat\(4, 1fr\)/s.test(SRC));
-ok('big bento numerals', /\.stat-card b\s*\{[^}]*font-size:\s*30px/s.test(SRC));
+/* The intent is "the metric is the biggest text on the card", not the literal
+   string 30px. Every font-size in the sheet now comes from the type scale
+   (--fs-1..--fs-8) because eighteen ad-hoc sizes — four of them half-pixel —
+   were making labels that should match look subtly misaligned. Assert the
+   display step, which is what "big" means here. */
+ok('big bento numerals',
+   /\.stat-card b\s*\{[^}]*font-size:\s*var\(--fs-8\)/s.test(SRC)
+   && /--fs-8:\s*30px/.test(SRC));
 
 // ── 8. MOBILE ──────────────────────────────────────────────────────────
 console.log('\n[8] mobile');
