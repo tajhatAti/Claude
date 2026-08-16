@@ -266,5 +266,28 @@ ok('and no orphaned handler left behind', !/toggleTheme/.test(proJs),
 ok('but the boot path can still write the attribute', /function applyTheme/.test(proJs),
    'index.html sets data-theme before first paint and pro.js must agree');
 
+// ---------------------------------------------------------------------------
+console.log('[12] one source of truth per token');
+// ---------------------------------------------------------------------------
+/* :root is declared in eight places in this sheet, which is fine on its own —
+   but three tokens were declared in two of them with DIFFERENT right-hand
+   sides: --accent (var(--acc) and #ffffff), --nav-height (var(--nav-h) and
+   62px), --jd-accent. They resolved to the same value today, so nothing
+   looked wrong; that is luck, not design. Change --acc and the hardcoded
+   copy silently keeps the old colour, and the bug appears in one half of the
+   UI only. A duplicate must be an ALIAS, never a second copy of the value. */
+const rootBlocks = [...css.matchAll(/:root\s*\{([^}]*)\}/g)].map(m => m[1]);
+const decls = {};
+rootBlocks.forEach((b, i) => {
+  [...b.matchAll(/(--[\w-]+):\s*([^;]+);/g)].forEach(m => {
+    (decls[m[1]] = decls[m[1]] || []).push(m[2].trim());
+  });
+});
+const conflicting = Object.entries(decls)
+  .filter(([, vals]) => new Set(vals).size > 1)
+  .map(([k, vals]) => `${k} = ${[...new Set(vals)].join(' | ')}`);
+ok('no token is declared twice with different values', conflicting.length === 0,
+   conflicting.join('; '));
+
 console.log(`\ntest_ui_consistency: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

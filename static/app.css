@@ -208,7 +208,10 @@ html[data-theme="light"] #tab-jobs .jd {
   --r-md: 12px;
   --r-pill: 999px;
   --bg-sunken: #000000;
-  --jd-accent: #ffffff;
+  /* Alias, not a copy: --accent is the theme-aware token and is
+     overridden for light surfaces. A hex here agreed with it only by
+     coincidence and would have been left behind by any change. */
+  --jd-accent: var(--accent);
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
   --dur: .16s;
 
@@ -1729,7 +1732,7 @@ textarea { box-sizing: border-box; min-height: calc(var(--ctl-h) * 2); }
   --surface-1: var(--bar);
   --surface-2: var(--card-2);
   --r-pill: var(--pill);
-  --jd-accent: var(--acc);
+  --jd-accent: var(--accent);
   --accent: var(--acc);
   --btn: var(--acc);
   --btn-fg: var(--acc-fg);
@@ -1909,7 +1912,11 @@ body.rs-side-open #tab-jobs .rs-side { transform: translateX(0); }
 /* One accent for the whole app, as a literal so it can be audited at a
    glance, plus the light-theme value (the dark accent on white is 2.2:1,
    so a single number cannot serve both). */
-:root { --accent: #ffffff; }
+/* --accent is an ALIAS of --acc, not a second copy of its value. It was
+   declared here as a literal #ffffff while :root above sets it from
+   var(--acc); the two agreed only by coincidence, so changing --acc would
+   have left this one behind. */
+:root { --accent: var(--acc); }
 html[data-theme="light"] { --accent: #141414; }
 /* ── ONE pill rule for every badge-like element ────────────────────────── */
 .badge, .chip, .rs-badge, .rs-chip, .job-pill,
@@ -1951,7 +1958,8 @@ html[data-theme="dark"] {
 .feat-card .fc-body small, .fc-body small { color: var(--fg-2); }
 /* The nav height is a token; the dashboard reserves exactly it, notch
    included, and scroll anchoring uses the same value. */
-:root { --nav-height: 62px; }
+/* Alias of --nav-h; the literal duplicate could drift from it. */
+:root { --nav-height: var(--nav-h); }
 
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2087,6 +2095,11 @@ html[data-theme="dark"] {
 /* RunSpace members take the same shape through the token, since literals
    are not allowed inside that scope. */
 .jd-pill { border-radius: var(--r-pill); }
+/* --jd-accent MUST read --accent, not --acc: --accent is the theme-aware
+   one (html[data-theme="light"] overrides it to #141414, since white on
+   white is 2.2:1 and unusable). Pointing this at --acc would pin the
+   detail page to the dark-theme colour and break it the day a light
+   surface exists. The earlier declaration is aliased to match. */
 :root { --jd-accent: var(--accent); }
 
 .jd-pill.running { color: var(--ok); }
