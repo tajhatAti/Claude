@@ -357,6 +357,14 @@ button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 }
 .ic-btn:hover, .nav-burger:hover, .side-menu-btn:hover,
 .ap-close:hover, .ah-term-close:hover { background: var(--card-2); color: var(--fg); }
+
+/* THE HAMBURGER IS A PHONE CONTROL, so it must not be on screen at desktop.
+   It had no breakpoint rule at all, so it rendered at every width — sitting
+   in the dashboard bar right next to the tab row it opens. On desktop
+   .dash-tabs is already a visible inline row, so pressing it slid nothing
+   into view and only raised the scrim: a button that appears to do nothing.
+   The tabs it reveals are shown directly above 760px, so it is hidden there. */
+.side-menu-btn { display: none; }   /* shown in the phone block below */
 .ic {  width: 18px; height: 18px; }
 svg.ic, .btn-svg, .tab-ic { width: 18px; height: 18px; flex: 0 0 auto; }
 /* Inputs — recessed, so they read as a slot rather than a slab. */
@@ -596,16 +604,36 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .dash-tab-content { display: none; }
 .dash-tab-content.active { display: block; animation: rise .3s var(--ease) both; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+/* ── OVERVIEW RHYTHM ───────────────────────────────────────────────────────
+   The gaps between sections were 24 / 16 / 24 / 24px — close enough to look
+   like a mistake rather than a rhythm. Every section on this page now uses
+   the same step, so the eye can group by spacing instead of guessing. */
 .welcome { margin-bottom: var(--s5); }
-.welcome p { color: var(--fg-3); }
+/* The greeting is context, not content: it should be the quietest thing on
+   the page so the two action cards below it are what the eye lands on. */
+.welcome h1 { font-size: var(--fs-6); font-weight: 700; letter-spacing: -.02em; }
+.welcome p { color: var(--fg-3); font-size: var(--fs-3); margin-top: 2px; }
+
+/* One label style for both "Your usage" and "Quick actions", so the two
+   supporting blocks are announced the same way. */
+.section-label {
+  font-family: var(--mono); font-size: var(--fs-1); font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3);
+  margin-bottom: var(--s3);
+}
 /* ── BENTO ──────────────────────────────────────────────────────────────
    Mockup B's defining move: tiles of unequal weight on one rhythm. The
    two feature tiles span wide, the four metrics sit in a 4-up strip. */
-.feat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); margin-bottom: var(--s4); }
+.feat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); margin-bottom: var(--s5); }
 .feat-card {
   display: flex; align-items: flex-start; gap: var(--s4);
   padding: var(--s5); text-align: left;
   height: auto; border-radius: var(--r-card);
+  /* PRIMARY (level 1). A shade lighter than the page and than the stats
+     below it, with a brighter edge, so it reads as the raised, "start here"
+     surface without needing colour to say so. */
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
   box-shadow: var(--e2), var(--rim);
   /* box-shadow is deliberately NOT transitioned: it cannot be composited,
      so tweening it repaints the card every frame. It still CHANGES on
@@ -632,10 +660,35 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .fc-body i { font-style: normal; font-family: var(--mono); font-size: var(--fs-1); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3); margin-left: 7px; }
 .fc-body small { color: var(--fg-3); line-height: 1.5; }
 .fc-go { margin-left: auto; color: var(--fg-3); font-size: var(--fs-6); align-self: center; }
-.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4); margin-bottom: var(--s5); }
+/* A tighter gap than the primary cards: these are one group, not four
+   separate things. */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); margin-bottom: var(--s5); }
+/* ── VISUAL HIERARCHY ──────────────────────────────────────────────────────
+   Measured before changing anything: .feat-card, .stat-card and .quick-card
+   resolved to the SAME background (#161616), the SAME border (1px #282828),
+   the SAME shadow and the SAME 18px radius. Three groups with three different
+   jobs, rendered identically — which is exactly the reported flatness: there
+   is nothing for the eye to rank, so the page has to be read word by word.
+
+   Three levels now, and each one is a real step, not a nudge:
+
+     1. PRIMARY   .feat-card   Code Studio / RunSpace — "start here".
+                  Raised: lighter surface, stronger edge, deeper shadow.
+     2. SUPPORTING .stat-card  at-a-glance numbers. Quiet: recessed into the
+                  page rather than sitting on it — no shadow, softer edge,
+                  and grouped under a section label so they read as one block.
+     3. TERTIARY  .quick-card  shortcuts that duplicate what is already above.
+                  Flattest of the three.
+   ────────────────────────────────────────────────────────────────────────── */
 .stat-card {
   display: flex; align-items: center; gap: var(--s3);
   padding: var(--s4); cursor: pointer;
+  /* Recessed, not raised: no shadow at all, and a surface a shade darker
+     than the primary cards so the two groups cannot be confused. */
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  box-shadow: none;
   /* box-shadow is deliberately NOT transitioned: it cannot be composited,
      so tweening it repaints the card every frame. It still CHANGES on
      hover — it just snaps, which is imperceptible at this blur radius and
@@ -653,12 +706,17 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .stat-card b { display: block; font-size: var(--fs-8); font-weight: 700; letter-spacing: -.035em; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .stat-card span { font-size: var(--fs-2); color: var(--fg-3); }
 .quick { margin-top: var(--s5); }
+/* The heading is a .section-label now; this stays for any other h2
+   that lands inside .quick. */
 .quick h2 { font-size: var(--fs-6); margin-bottom: var(--s4); }
+.quick { margin-top: var(--s5); }
 .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
 .quick-card {
   flex-direction: column; gap: var(--s3); height: auto; padding: var(--s4);
-  background: var(--card); border: 1px solid var(--line);
-  border-radius: var(--r-card); box-shadow: var(--e1), var(--rim);
+  /* Tertiary: these repeat actions already offered by the cards above, so
+     they must not compete with them. Flat surface, no shadow. */
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r-row); box-shadow: none;
   font-size: var(--fs-3); font-weight: 600;
   /* box-shadow is deliberately NOT transitioned: it cannot be composited,
      so tweening it repaints the card every frame. It still CHANGES on
@@ -858,7 +916,37 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 .tfa-qr { background: #fff; padding: var(--s3); border-radius: var(--r-row); display: inline-block; }
 .tfa-manual, .tfa-man-block { font-family: var(--mono); font-size: var(--fs-2); color: var(--fg-2); word-break: break-all; }
 /* ─────────────────────── OVERLAYS: modal, drawer, toast ───────────────── */
-.ah-modal, .cmd-overlay, .side-overlay {
+/* .side-overlay USED TO BE IN THIS GROUP, AND THAT IS WHY THE MENU WAS DEAD.
+ *
+ * Reported: the hamburger opens the slide-out menu, but tapping Overview /
+ * Code / RunSpace / Activity / Profile does nothing at all.
+ *
+ * This rule is for MODALS — things that must sit on top of everything and
+ * deliberately swallow clicks on whatever is behind them. .side-overlay is
+ * not that: it is the dimmer BEHIND the navigation drawer, so it must sit
+ * UNDER the drawer. Grouped here it inherited two modal properties that a
+ * scrim must never have:
+ *
+ *     z-index: var(--z-modal)  ->  1000
+ *     display: grid            ->  overrides `.hidden { display: none }`
+ *                                  at equal specificity, decided by order
+ *
+ * The drawer (.dash-tabs.open) is z-index 940. 1000 > 940, so the scrim
+ * rendered ON TOP of the very menu it was meant to sit behind, covering it
+ * edge to edge — every tap landed on the scrim, which has no handler for
+ * menu items. Measured with the stylesheet parsed rather than eyeballed:
+ *
+ *     .side-overlay      z=1000   (this rule)
+ *     .dash-tabs.open    z=940
+ *     .side-overlay      z=930    (the correct rule, further down, LOSES
+ *                                  because this one appears first at equal
+ *                                  specificity... and `grid` beat `none`)
+ *
+ * It is exactly the recurring class of bug the brief describes: an invisible
+ * overlay absorbing clicks before they reach the control underneath.
+ * .side-overlay now belongs only to the scrim rule further down (z 930).
+ */
+.ah-modal, .cmd-overlay {
   position: fixed; inset: 0; z-index: var(--z-modal);
   display: grid; place-items: center; padding: var(--s4);
   background: rgba(0,0,0,.78);
@@ -958,6 +1046,8 @@ html.booting .foot, html.booting .auth, html.booting .dashboard { display: none;
   .rs-side-close { display: inline-flex; align-items: center; justify-content: center; }
   .nav-links { display: none; }
   .nav-burger { display: inline-flex; }
+  /* The hamburger only means something where .dash-tabs is a drawer. */
+  .side-menu-btn { display: inline-flex; align-items: center; justify-content: center; }
   .nav-cta .btn-secondary { display: none; }
   .hero { padding: calc(var(--nav-h) + var(--s5)) var(--s4) var(--s5); }
   .section { padding: var(--s6) var(--s4); }
@@ -1757,6 +1847,13 @@ textarea { box-sizing: border-box; min-height: calc(var(--ctl-h) * 2); }
   --z-drawer:   860;   /* side rails, file panes                   */
   --z-panel:    870;   /* inspector / details drawer               */
   --z-header:   900;   /* marketing nav (over the hero)            */
+  /* The dimmer behind the MOBILE NAV DRAWER. It has to be strictly below
+     --z-nav-drawer, and both have to be below the activity layers, or the
+     scrim covers the very menu it is dimming for — which is exactly what
+     happened when .side-overlay was grouped with the modals at 1000 and
+     ate every tap on Overview / Code / RunSpace / Activity / Profile. */
+  --z-scrim-nav:   930;
+  --z-nav-drawer:  940;
   --z-overlay:  940;   /* full-screen dimmer                       */
   --z-flyout:   950;   /* activity panel over its own overlay      */
   /* A sheet/popover is opened FROM whatever is on screen — including the
@@ -2210,7 +2307,9 @@ html[data-theme="dark"] {
 @media (max-width: 760px) {
   .dash-tabs {
     display: flex;
-    position: fixed; top: 0; bottom: 0; left: 0; z-index: 940;
+    /* Must stay ABOVE --z-scrim-nav: this is the drawer, that is its dimmer.
+       A literal here is how the pair drifts apart. */
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--z-nav-drawer);
     width: min(280px, 82vw);
     margin: 0; padding: var(--s3);
     flex-direction: column; align-items: stretch; gap: var(--s2);
@@ -2253,12 +2352,31 @@ html[data-theme="dark"] {
 }
 
 /* The scrims these panels sit on. pro.js toggles `.hidden` on them, which
-   the global rule already handles; this only gives them a look. */
+   the global rule already handles; this only gives them a look.
+
+   THE Z-INDEX IS A NAMED LAYER, NOT A NUMBER. 930 was a literal sitting
+   below --z-overlay (940) by luck; the drawer it belongs behind is 940, so
+   the two were one edit away from swapping over. Both now read the ladder,
+   so "the scrim is under the drawer" is written down rather than implied.
+
+   pointer-events is stated in both directions on purpose. `.hidden` sets
+   display:none, which already stops clicks — but this element has been
+   given display:grid by an unrelated rule once before (see the note in the
+   OVERLAYS section), and when that happens a scrim with no pointer-events
+   rule silently becomes a click-eating sheet over the whole app. Saying it
+   explicitly means that failure cannot come back through a different door. */
 .side-overlay, .activity-overlay {
-  position: fixed; inset: 0; z-index: 930;
+  position: fixed; inset: 0;
+  z-index: var(--z-scrim-nav);
   background: rgba(0,0,0,.6);
+  pointer-events: auto;
 }
-.activity-overlay { z-index: 945; }
+.side-overlay.hidden, .activity-overlay.hidden {
+  pointer-events: none;
+}
+/* The activity panel opens OVER the nav drawer, so its own scrim has to
+   clear the drawer as well. */
+.activity-overlay { z-index: var(--z-overlay); }
 
 /* ══════════════════════════════════════════════════════════════════════════
    RUNSPACE / TERMINAL — the four defects reported together
@@ -3178,7 +3296,55 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
 }
 #tab-jobs .rs-run-quick[hidden] { display: none; }
 #tab-jobs .rs-run-quick:active { transform: translateY(1px); }
-#tab-jobs .rs-run-quick.loading { opacity: .6; pointer-events: none; }
+
+/* ── SAVE & RUN FEEDBACK ────────────────────────────────────────────────
+   `.loading` used to be the entire feedback: opacity .6 and nothing else.
+   No spinner, no label change — on a fast connection a flicker, on a slow
+   one a button that appears to have ignored the press.
+
+   The label is swapped by rsRunState() in pro.js; this supplies the motion.
+   Only opacity and transform are animated (both composited), at 160ms, so
+   the transition matches the tab-switch and status-dot fades already used
+   elsewhere and costs nothing to paint. */
+#tab-jobs .rs-run-quick {
+  transition: opacity .16s var(--ease), transform .16s var(--ease),
+              background-color .16s var(--ease);
+}
+#tab-jobs .rs-run-quick.loading {
+  opacity: .82;
+  cursor: progress;
+  pointer-events: none;      /* also disabled in JS; belt and braces */
+}
+/* The button keeps its width while the label changes length, so the toolbar
+   beside it does not jump between "Save & Run" and "Starting…". */
+#tab-jobs .rs-run-quick > span { min-width: 7.5ch; text-align: center; }
+
+/* The two busy states are distinguishable, not just "greyed out". Saving is
+   writing the user's code and must feel solid; starting is waiting on a
+   process the app does not control, so it breathes. Both are opacity-only,
+   which is composited and free to animate. */
+#tab-jobs .rs-run-quick.is-saving   { opacity: .9; }
+#tab-jobs .rs-run-quick.is-starting { animation: pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  #tab-jobs .rs-run-quick.is-starting { animation: none; opacity: .85; }
+}
+
+/* One spinner, sized to the label. currentColor keeps it correct against
+   the accent fill without a second colour token. */
+.rs-run-spin {
+  width: 13px; height: 13px; flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  opacity: .9;
+}
+.rs-run-spin[hidden] { display: none; }
+/* Respect a reduced-motion preference: the spinner still shows that work is
+   happening, it just pulses instead of rotating. */
+@media (prefers-reduced-motion: reduce) {
+  .rs-run-spin { animation: pulse 1.2s ease-in-out infinite; }
+}
 @media (max-width: 400px) {
   /* Only the glyph at the narrowest sizes, so the job name keeps its room. */
   #tab-jobs .rs-run-quick span { display: none; }
