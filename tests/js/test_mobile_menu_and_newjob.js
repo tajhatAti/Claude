@@ -260,7 +260,17 @@ for (const width of [320, 375, 414, 1280]) {
 console.log('\n[5b] it forwards to the real control, not a second implementation');
 ok('the menu item clicks #btnNew', /btnNewInMenu[\s\S]{0,420}getElementById\("btnNew"\)[\s\S]{0,60}\.click\(\)/.test(JS));
 ok('no duplicate new-job logic was added', (JS.match(/_composingNew = true/g) || []).length === 1);
-ok('a "Job list" entry opens the rail', /btnJobsInMenu[\s\S]{0,300}rs-side-open/.test(JS));
+/* The menu's "Job list" row is GONE, and its absence is the fix. The header
+   already carries a dedicated hamburger (#wbMenuBtn) with the SAME icon whose
+   only job is the job list, so the toolbar showed two near-identical grey
+   squares — one opening a drawer, the other opening a menu containing a row
+   that opened the same drawer by a different code path. Reported as
+   "সাইটে তিনটা মেনু বাটন ... একটাতে ক্লিক করলে কিছুই আসে না".
+   The requirement is that the rail is REACHABLE, not that it is reachable
+   twice. */
+ok('the job list has exactly one entry point',
+   /wbMenuBtn[\s\S]{0,600}rs-side-open/.test(JS)
+   && !/getElementById\("btnJobsInMenu"\)/.test(JS));
 
 /* ── 6. the trap detector actually detects ─────────────────────────────── */
 console.log('\n[6] the detector is falsifiable');

@@ -4349,15 +4349,10 @@ function _initWbWiring() {
       // editor stays full-bleed, which is what the user asked for.
     });
 
-    const jobsInMenu = document.getElementById("btnJobsInMenu");
-    if (jobsInMenu) jobsInMenu.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeMore();
-      document.body.classList.add("rs-side-open");
-      document.body.classList.remove("rs-side-collapsed");
-      const mb = document.getElementById("wbMenuBtn");
-      if (mb) mb.setAttribute("aria-expanded", "true");
-    });
+    /* #btnJobsInMenu is gone from the markup: the header's hamburger already
+       does exactly this, with the same icon, a few centimetres away. Two
+       controls for one job is what made the toolbar look like it had two
+       menu buttons where one of them "did nothing". */
   }
   if (newBtn2) { newBtn2.addEventListener("click", onNew); newBtn2.type = "button"; newBtn2._w = 1; }
   if (newBtnE) { newBtnE.addEventListener("click", onNew); newBtnE.type = "button"; newBtnE._w = 1; }
@@ -4390,9 +4385,11 @@ function _initWbWiring() {
     // desktop collapses the rail, mobile slides the drawer over.
     const _isPhone = () => window.matchMedia("(max-width: 760px)").matches;
     const _syncMenuBtn = () => {
-      // Same truth the toggle uses: is the rail actually on screen?
-      const el = document.getElementById("wbSide");
-      const open = !!el && el.getBoundingClientRect().width > 4;
+      // Same source of truth as the toggle: the class, not the geometry.
+      // Measuring reported "open" in both states (a translateX-hidden element
+      // keeps its width), so this attribute was stuck on "true" and screen
+      // readers announced the drawer as permanently expanded.
+      const open = document.body.classList.contains("rs-side-open");
       menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
     };
     // ROOT CAUSE of "the job list bar will not hide": this used to pick the
@@ -4404,15 +4401,23 @@ function _initWbWiring() {
     // Derive the state from what is ACTUALLY on screen instead of from a
     // media query, and drive both classes together so the result is the same
     // whichever side of the breakpoint we are on.
-    const _sideVisible = () => {
-      const el = document.getElementById("wbSide");
-      if (!el) return false;
-      // A drawer parked off-screen has no width in the layout sense.
-      return el.getBoundingClientRect().width > 4;
-    };
+    /* MEASURING THE RAIL TO DECIDE WHETHER IT IS OPEN DOES NOT WORK, and it
+     * is why the button would open the panel but never close it again.
+     *
+     * The rail is hidden with `transform: translateX(-100%)`, and a
+     * transformed element still reports its FULL width from
+     * getBoundingClientRect() — the transform moves the box, it does not
+     * shrink it. So `_sideVisible()` answered "visible" in both states, the
+     * toggle computed `show = !visible`, and after the first tap it just kept
+     * setting the same pair of classes. Reproduced: clicking wbMenuBtn twice
+     * leaves body as "rs-active rs-side-open" both times.
+     *
+     * The class on <body> IS the state. Read that instead of trying to
+     * re-derive it from geometry that two different CSS mechanisms (width:0
+     * on desktop, translateX on mobile) express in two different ways. */
     menuBtn.addEventListener("click", (e) => {
       e.stopPropagation(); e.preventDefault();
-      const show = !_sideVisible();
+      const show = !document.body.classList.contains("rs-side-open");
       document.body.classList.toggle("rs-side-open", show);
       document.body.classList.toggle("rs-side-collapsed", !show);
       _syncMenuBtn();
@@ -7403,18 +7408,9 @@ function _initRsJobsPop() {
   if (!pop || pop.dataset.wired === "1") return;
   pop.dataset.wired = "1";
 
-  // The menu row opens this instead of toggling the legacy rail classes.
-  const trigger = document.getElementById("btnJobsInMenu");
-  if (trigger) {
-    const fresh = trigger.cloneNode(true);   // drop the old rail handler
-    trigger.parentNode.replaceChild(fresh, trigger);
-    fresh.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const menu = document.getElementById("rsMoreMenu");
-      if (menu) menu.hidden = true;
-      rsJobsPopOpen();
-    });
-  }
+  /* This used to re-wire #btnJobsInMenu — a SECOND way to reach the job list,
+     on top of the header hamburger. That row no longer exists; the hamburger
+     is the single entry point. */
 
   pop.addEventListener("click", (e) => {
     const row = e.target.closest(".rs-jp-item");
@@ -7435,7 +7431,7 @@ function _initRsJobsPop() {
   document.addEventListener("click", (e) => {
     if (pop.hidden) return;
     if (pop.contains(e.target)) return;
-    if (e.target.closest("#btnJobsInMenu, #rsMoreBtn")) return;
+    if (e.target.closest("#wbMenuBtn, #rsMoreBtn")) return;
     rsJobsPopClose();
   });
   document.addEventListener("keydown", (e) => {

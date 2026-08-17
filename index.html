@@ -780,10 +780,14 @@
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M7.25 2.75a.75.75 0 0 1 1.5 0v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5Z"/></svg>
               <span class="rs-seg-label">New job</span>
             </button>
-            <button class="rs-menu-item" id="btnJobsInMenu" role="menuitem" title="Show the job list">
-              <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M2 3.75A.75.75 0 0 1 2.75 3h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 3.75Zm0 4A.75.75 0 0 1 2.75 7h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 7.75Zm0 4a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z"/></svg>
-              <span class="rs-seg-label">Job list</span>
-            </button>
+            <!-- "Job list" REMOVED from this menu. The header already has a
+                 dedicated hamburger button (#wbMenuBtn) whose only job is to
+                 show the job list, and it sits three centimetres to the left
+                 with the SAME icon. Two identical-looking grey squares in one
+                 toolbar, one opening a drawer and one opening a menu that
+                 contains a row which opens the same drawer by a different
+                 code path, is exactly the "দুইটা মেনু বাটন" confusion. One
+                 job, one control. -->
             <button class="rs-menu-item" id="btnFilesInMenu" role="menuitem" title="Browse the files in this job">
               <span class="rs-seg-label">Files</span>
             </button>

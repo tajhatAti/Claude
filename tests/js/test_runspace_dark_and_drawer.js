@@ -213,8 +213,24 @@ ok('open beats collapsed if both are somehow set',
 // The JS must not decide the class from a media query any more.
 ok('toggle no longer picks its class from _isPhone()',
    !/classList\.toggle\(_isPhone\(\) \? "rs-side-open"/.test(JS));
-ok('toggle reads what is actually on screen',
-   /getBoundingClientRect\(\)\.width > 4/.test(JS));
+/* THIS ASSERTION LOCKED IN THE BUG IT WAS WRITTEN TO PREVENT.
+   It required the toggle to decide "is the rail open?" by MEASURING it with
+   getBoundingClientRect().width > 4. That cannot work, because the rail is
+   hidden two different ways: `width: 0` on desktop, and
+   `transform: translateX(-100%)` on mobile — and a transformed element keeps
+   its full width, since a transform moves the box without resizing it.
+   Measured both ways:
+       real browser, translateX-hidden : width = 260  -> reads "open"
+       jsdom,        translateX-hidden : width = 0    -> reads "closed"
+   So in a real browser the check said "open" in BOTH states: the first tap
+   opened the drawer and every tap after that recomputed the same answer and
+   re-applied the same classes. That is the reported "মেনু বাটন বন্ধ হয় না".
+   jsdom returns 0, which is why the suite was happy.
+   The class on <body> IS the state; read it instead of re-deriving it from
+   geometry that two CSS mechanisms express differently. */
+ok('toggle reads the state, not the geometry',
+   /classList\.contains\("rs-side-open"\)/.test(JS)
+   && !/getBoundingClientRect\(\)\.width > 4/.test(JS));
 ok('toggle drives BOTH classes together',
    /toggle\("rs-side-open", show\)[\s\S]{0,120}toggle\("rs-side-collapsed", !show\)/.test(JS));
 ok('one helper owns closing', /function _closeJobsRail\(\)/.test(JS));
