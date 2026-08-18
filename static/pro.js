@@ -2414,9 +2414,25 @@ const ROUTES = {
   "/terminal": "term", "/term": "term",
   "/admin": "admin", "/profile": "profile",
 };
-// /runspace/{username}/{tabname}          -> editor
-// /runspace/{username}/{tabname}/page     -> Details page (§5)
-const _JOB_PATH_RE = /^\/runspace\/([^/]+)\/([^/]+?)(\/page)?\/?$/;
+// Canonical: /runspace/{job}[/{logs|details|database|env|settings}].
+// Legacy username-prefixed links and their /page suffix remain readable.
+const JOB_SECTIONS = new Set(["logs", "details", "database", "env", "settings"]);
+function parseJobPath(path) {
+  const clean = String(path || "").split(/[?#]/, 1)[0].replace(/\/+$/, "");
+  const bits = clean.split("/").filter(Boolean);
+  if (bits[0] !== "runspace" || bits.length < 2 || bits.length > 4) return null;
+  const dec = (v) => { try { return decodeURIComponent(v); } catch (e) { return v; } };
+  if (bits.length === 2) return {slug: dec(bits[1]), section: "editor", legacy: false};
+  if (bits.length === 3) {
+    if (JOB_SECTIONS.has(bits[2])) return {slug: dec(bits[1]), section: bits[2], legacy: false};
+    return {slug: dec(bits[2]), section: "editor", legacy: true};
+  }
+  if (bits.length === 4) {
+    const section = bits[3] === "page" ? "details" : bits[3];
+    if (JOB_SECTIONS.has(section)) return {slug: dec(bits[2]), section, legacy: true};
+  }
+  return {invalid: true};
+}
 const TAB_PATHS = {};
 Object.keys(ROUTES).forEach(p => { if (!TAB_PATHS[ROUTES[p]]) TAB_PATHS[ROUTES[p]] = p; });
 const AUTH_ROUTES = {
@@ -2460,8 +2476,8 @@ function routeFromUrl() {
     if (ROUTES[p] !== currentTab) _switch(ROUTES[p]);
     return "tab";
   }
-  // Deep link: /runspace/{username}/{slug} → open RunSpace and select the matching job.
-  const _jd = p.match(_JOB_PATH_RE);
+  // Per-job deep link, canonical or legacy.
+  const _jd = parseJobPath(p);
   if (_jd) {
     if (!hasToken) {
       try { sessionStorage.setItem("ahad_return_to", p); } catch (e2) {}
@@ -2470,18 +2486,20 @@ function routeFromUrl() {
       return "blocked";
     }
     showScreen("screen-dashboard");
-    const _slug = decodeURIComponent(_jd[2] || "");
-    const _wantDetails = !!_jd[3];            // the "/page" suffix
-    // Back/Forward between the editor and its Details page: the job is already
-    // selected, so just toggle the view instead of reloading everything.
+    if (_jd.invalid) {
+      window.__rs_deep_invalid = true;
+      if (currentTab !== "jobs") _switch("jobs");
+      return "not-found";
+    }
+    const _slug = _slugify(_jd.slug);
+    const _section = _jd.section || "editor";
     const _cur = (window._lastJobs || []).find(x => String(x.id) === String(_selectedJobId));
     if (currentTab === "jobs" && _cur && _slugify(_cur.name) === _slug) {
-      if (_wantDetails && !_jdOpen) openJobDetails(null, {noUrl: true});
-      else if (!_wantDetails && _jdOpen) closeJobDetails({noUrl: true});
+      _openJobSection(_section, true);
       return "tab";
     }
     window.__rs_deep_slug = _slug;
-    window.__rs_deep_details = _wantDetails;
+    window.__rs_deep_section = _section;
     if (currentTab !== "jobs") _switch("jobs");
     else _deepSelectJobBySlug(window.__rs_deep_slug);
     return "tab";
@@ -3191,25 +3209,40 @@ function _deepSelectJobBySlug(slug) {
   if (j) selectJob(j.id);
 }
 function _jobBasePath(job) {
-  const u = (window.__user && window.__user.username) ? window.__user.username : null;
-  if (!u || !job || !job.name) return null;
-  return "/runspace/" + encodeURIComponent(u) + "/" + _slugify(job.name);
+  if (!job || !job.name) return null;
+  return "/runspace/" + _slugify(job.name);
 }
 
-/* Keep the address bar in sync with the job AND with which view is showing.
-   Editor  -> /runspace/{username}/{tabname}
-   Details -> /runspace/{username}/{tabname}/page          (§5) */
+function _sectionToTab(section) {
+  return ({logs:"logs", details:"metrics", database:"files", env:"env",
+           settings:"settings"})[section] || "code";
+}
+function _openJobSection(section, noUrl) {
+  section = section || "editor";
+  if (section === "editor") {
+    if (_jdOpen) closeJobDetails({noUrl: !!noUrl});
+    return;
+  }
+  if (!_jdOpen) openJobDetails(null, {noUrl: true, section});
+  jdSwitchTab(_sectionToTab(section));
+}
+
+/* Keep the address bar in sync with the selected job and detail section. */
 function _updateJobUrl(job, opts) {
   try {
     const base = _jobBasePath(job);
     if (!base) return;
-    const wantDetails = opts && opts.details !== undefined ? opts.details : _jdOpen;
-    const path = base + (wantDetails ? "/page" : "");
+    let section = opts && opts.section;
+    if (!section && (opts && opts.details !== undefined ? opts.details : _jdOpen)) {
+      section = ({logs:"logs", metrics:"details", files:"database", env:"env",
+                  settings:"settings"})[_jdTab] || "details";
+    }
+    const path = base + (section ? "/" + section : "");
     if (_clientPath() === path || _routeNav) return;
     // Editor <-> Details is a real navigation inside the job, so PUSH it:
     // the browser Back button then returns to the editor as users expect.
-    if (opts && opts.push) history.pushState({tab:"jobs", jobId:job.id, details:!!wantDetails}, "", path);
-    else history.replaceState({tab:"jobs", jobId:job.id, details:!!wantDetails}, "", path);
+    if (opts && opts.push) history.pushState({tab:"jobs", jobId:job.id, section:section || "editor"}, "", path);
+    else history.replaceState({tab:"jobs", jobId:job.id, section:section || "editor"}, "", path);
   } catch (e) {}
 }
 
@@ -3553,6 +3586,19 @@ function _clearWorkspaceChrome() {
   if (btnStop) btnStop.style.display = "none";
   if (btnRest) btnRest.style.display = "none";
 }
+function _showMissingJob(slug) {
+  const emp = document.getElementById("wbEmpty");
+  const ws = document.getElementById("wbWorkspace");
+  const boot = document.getElementById("wbBootLoader");
+  if (emp) emp.style.display = "";
+  if (ws) ws.style.display = "none";
+  if (boot) boot.style.display = "none";
+  const title = emp && emp.querySelector(".rs-empty-title");
+  const sub = emp && emp.querySelector(".rs-empty-sub");
+  if (title) title.textContent = "Job not found";
+  if (sub) sub.textContent = `The shared job “${slug}” was deleted or you do not have access.`;
+}
+
 function _showEmpty(zeroJobs) {
   const emp = document.getElementById("wbEmpty");
   const ws  = document.getElementById("wbWorkspace");
@@ -4144,20 +4190,33 @@ function renderJobs(jobs) {
     }
     list.appendChild(item);
   });
-  // Deep-link: if URL says /runspace/u/slug, pick that job regardless of running state
+  // Deep-link: pick the requested job regardless of running state.
+  if (window.__rs_deep_invalid) {
+    window.__rs_deep_invalid = false;
+    _selectedJobId = null;
+    _showMissingJob("that address");
+    return;
+  }
   let deepPick = null;
   if (window.__rs_deep_slug) deepPick = jobs.find(x => _slugify(x.name) === window.__rs_deep_slug);
   if (deepPick) {
     selectJob(deepPick.id);
     window.__rs_deep_slug = null;
     _suppressAutoSelect = 0;
-    // Landing directly on .../page must open Details, not the editor.
-    if (window.__rs_deep_details) {
-      window.__rs_deep_details = false;
-      openJobDetails(null, {noUrl: true});
-    } else if (_jdOpen) {
-      closeJobDetails({noUrl: true});
-    }
+    // Open the exact section encoded in the shared URL.
+    const section = window.__rs_deep_section || "editor";
+    window.__rs_deep_section = null;
+    _openJobSection(section, true);
+  }
+  else if (window.__rs_deep_slug) {
+    // Never silently replace a deleted shared job with the first job in the
+    // account while the address bar still claims the missing one.
+    const missing = window.__rs_deep_slug;
+    window.__rs_deep_slug = null;
+    window.__rs_deep_section = null;
+    _selectedJobId = null;
+    _showMissingJob(missing);
+    return;
   }
   else if (_composingNew || Date.now() < _suppressAutoSelect) {
     // A new job is being written — never auto-select, never repaint the
@@ -5145,6 +5204,13 @@ function jdSwitchTab(name) {
   if (name === "logs") _jdMirrorLogs();
   // CodeMirror paints blank if it was sized while display:none.
   if (name === "code") { try { _jobCmRefresh(); } catch (e) {} }
+  // Detail tabs are bookmarkable too; Back returns to the previous section.
+  if (_jdOpen && !_routeNav) {
+    const job = _jdCurrentJob();
+    const section = ({logs:"logs", metrics:"details", files:"database", env:"env",
+                      settings:"settings"})[name] || "details";
+    if (job) _updateJobUrl(job, {section, push:false});
+  }
 }
 
 /* Keep the full-height Logs panel in step with the Output pane. */
@@ -5687,13 +5753,15 @@ async function loadAdminPanel(force) {
     stats.innerHTML = '<div class="adm-stat"><b>…</b><span>loading</span></div>';
   }
   try {
-    const [ov, usersR, jobsR, reportsR, auditR, libsR] = await Promise.all([
+    const botDays = document.getElementById("admBotDays")?.value || 30;
+    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR] = await Promise.all([
       api("/admin/overview", "GET", null, true),
       api("/admin/users", "GET", null, true),
       api("/admin/jobs", "GET", null, true),
       api("/admin/abuse-reports", "GET", null, true),
       api("/admin/audit-log", "GET", null, true),
       api("/admin/libraries", "GET", null, true).catch(() => null),
+      api("/admin/bot-usage?days=" + encodeURIComponent(botDays), "GET", null, true).catch(() => null),
     ]);
     _admPreserve(() => {
       renderAdminStats(ov || {});
@@ -5703,7 +5771,9 @@ async function loadAdminPanel(force) {
       renderAdminReports((reportsR && reportsR.reports) || []);
       renderAdminAudit((auditR && auditR.audit) || []);
       renderAdminLibs(libsR || {});
+      renderAdminBotUsage(botR || {});
     });
+    _wireAdminBotUsage();
     _admMarkFresh();
     stats.dataset.loaded = "1";
   } catch (e) {
@@ -5820,6 +5890,75 @@ function renderAdminLibs(data) {
     row.append(main, count);
     el.appendChild(row);
   });
+}
+
+function _admAgo(value) {
+  if (!value) return "—";
+  // SQLite timestamps are UTC but have no suffix; offset-bearing values must
+  // not receive a second Z (Date.parse("+00:00Z") is NaN).
+  const raw = String(value);
+  const parsed = Date.parse(/[zZ]$|[+-]\d\d:\d\d$/.test(raw) ? raw : raw.replace(" ", "T") + "Z");
+  if (!Number.isFinite(parsed)) return raw;
+  const sec = Math.max(0, Math.round((Date.now() - parsed) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+  return `${Math.round(sec / 86400)}d ago`;
+}
+
+function _botText(tag, value, cls) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  el.textContent = value == null || value === "" ? "—" : String(value);
+  return el;
+}
+
+function renderAdminBotUsage(data) {
+  const stats = document.getElementById("admBotStats");
+  if (!stats) return;
+  stats.textContent = "";
+  [["people", data.people || 0], ["with account", data.linked_people || 0],
+   ["not signed up", data.unlinked_people || 0], ["actions", data.actions || 0],
+   ["today", data.today || 0], ["failed", data.failures || 0]].forEach(([label, val]) => {
+    const box = document.createElement("div"); box.className = "adm-stat" + (label === "failed" && val ? " warn" : "");
+    box.append(_botText("b", val), _botText("span", label)); stats.appendChild(box);
+  });
+
+  const spark = document.getElementById("admBotSpark");
+  if (spark) {
+    spark.textContent = "";
+    const rows = data.daily || [], max = Math.max(1, ...rows.map(r => r.count || 0));
+    rows.forEach(r => { const bar = document.createElement("i"); bar.style.height = Math.max(6, Math.round((r.count/max)*56)) + "px"; bar.title = `${r.day}: ${r.count}`; spark.appendChild(bar); });
+  }
+  const commands = document.getElementById("admBotCommands");
+  if (commands) {
+    commands.textContent = "";
+    (data.commands || []).slice(0, 12).forEach(r => { const row = document.createElement("div"); row.className="adm-bot-row"; row.append(_botText("b", r.command), _botText("span", `${r.count}${r.failures ? ` · ${r.failures} failed` : ""}`)); commands.appendChild(row); });
+    if (!(data.commands || []).length) commands.appendChild(_botText("div", "No activity yet.", "adm-empty"));
+  }
+  const people = document.getElementById("admBotPeople");
+  if (people) {
+    people.textContent = "";
+    (data.users || []).slice(0, 12).forEach(r => { const row=document.createElement("div"); row.className="adm-bot-row"; row.append(_botText("b", r.display_name || `Chat ${r.chat_id}`), _botText("span", `${r.actions} actions · ${r.user_id ? "account" : "not signed up"}`)); people.appendChild(row); });
+  }
+  const events = document.getElementById("admBotEvents");
+  if (events) {
+    events.textContent = "";
+    const head=document.createElement("tr"); ["When","Person","Action","Target","Result"].forEach(v=>head.appendChild(_botText("th",v))); events.appendChild(head);
+    (data.events || []).slice(0, 60).forEach(r => { const tr=document.createElement("tr"); [_admAgo(r.created_at), r.display_name || `Chat ${r.chat_id}`, r.command || r.event_type, r.payload, r.outcome].forEach(v=>tr.appendChild(_botText("td",v))); events.appendChild(tr); });
+  }
+}
+
+function _wireAdminBotUsage() {
+  const range = document.getElementById("admBotDays");
+  if (range && !range.dataset.wired) { range.dataset.wired="1"; range.addEventListener("change", () => loadAdminPanel(true)); }
+  const csv = document.getElementById("admBotCsv");
+  if (csv && !csv.dataset.wired) { csv.dataset.wired="1"; csv.addEventListener("click", async () => {
+    const days = range?.value || 30;
+    const res = await fetch(`/admin/bot-usage.csv?days=${encodeURIComponent(days)}`, {headers:{Authorization:`Bearer ${localStorage.getItem("ahad_token") || ""}`}});
+    if (!res.ok) return;
+    const a=document.createElement("a"); a.href=URL.createObjectURL(await res.blob()); a.download=`telegram-bot-usage-${days}d.csv`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }); }
 }
 
 function renderAdminStats(ov) {

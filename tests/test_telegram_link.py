@@ -126,29 +126,11 @@ def last_text():
 
 
 def dispatch(chat_id, text, first_name="Someone", username=""):
-    """Drive the bot exactly as poll_loop() does for a text message."""
-    msg = {"chat": {"id": chat_id},
-           "from": {"first_name": first_name,
+    """Drive the same single-update dispatcher used by poll_loop()."""
+    msg = {"chat": {"id": chat_id}, "text": text,
+           "from": {"id": chat_id, "first_name": first_name,
                     **({"username": username} if username else {})}}
-    label = PB._tg_display(msg)
-    if text.startswith("/start"):
-        parts = text.split(None, 1)
-        PB.handle_start(chat_id, label or first_name,
-                        parts[1] if len(parts) > 1 else "")
-    elif text.startswith("/link"):
-        PB.handle_link(chat_id, text, label)
-    elif text.startswith("/unlink"):
-        PB.handle_unlink(chat_id)
-    elif text.startswith("/ping"):
-        if PB._require_link(chat_id):
-            PB.handle_ping(chat_id, text)
-    elif text.startswith("/apps"):
-        if PB._require_link(chat_id):
-            PB.cmd_apps(chat_id, PB.telegram_link.user_for_chat(chat_id))
-    else:
-        # No plain-text branch any more: a message that is not a command used
-        # to be collected as source and deployed. Nothing does that now.
-        PB._send(chat_id, PB.UNKNOWN_REPLY, reply_markup=PB._open_kb())
+    PB.handle_update({"update_id": 1, "message": msg})
 
 
 # ---------------------------------------------------------------------------
@@ -363,17 +345,18 @@ src = open(os.path.join(ROOT, "services/pingbot.py"), encoding="utf-8").read()
 check("there is no /code command left", 'startswith("/code")' not in src)
 check("nor any way for a message to become a deploy",
       '"/internal/jobs"' not in src)
-check("/ping is gated", 'text.startswith("/ping")' in src and "_require_link" in src)
-check("every acting command is gated", src.count("_require_link(chat_id)") >= 6,
-      str(src.count("_require_link(chat_id)")))
+check("/ping is gated", '"/ping": lambda: gated(' in src)
+check("every acting command is gated",
+      all(f'"{cmd}": lambda: gated(' in src for cmd in
+          ("/ping", "/apps", "/status", "/logs", "/restart", "/stop", "/delete", "/rename")))
 # The deploy timer it used to guard no longer exists — there is nothing that
 # runs on a delay and spends memory.
 check("no delayed deploy path survives",
       "threading.Timer" not in src, "a timer still schedules work")
 check("callbacks are gated",
-      "if telegram_link.user_for_chat(cb_chat):" in src)
+      'if linked:\n                handle_callback(chat_id, data)' in src)
 check("ANY message that is not a handled command gets the same reply",
-      "else:\n                        _send(chat_id, UNKNOWN_REPLY," in src)
+      'event["outcome"] = "unknown"' in src and "_send(chat_id, UNKNOWN_REPLY" in src)
 check("no command besides /start, /link and /unlink runs unlinked",
       src.count("UNKNOWN_REPLY") >= 4, str(src.count("UNKNOWN_REPLY")))
 

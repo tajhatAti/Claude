@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from routes.deps import *  # shared kernel (config, helpers, models)
 
 
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from services import runner_client
 from services import limits
@@ -144,6 +144,26 @@ def admin_telegram_diagnostic(authorization: Optional[str] = Header(None)):
             f"the token belongs to @{out['bot_username']}. These must be the "
             f"same bot.")
     return out
+
+
+@router.get("/admin/bot-usage")
+def admin_bot_usage(days: int = 30, authorization: Optional[str] = Header(None)):
+    """Aggregated Telegram activity, including chats without an account."""
+    require_admin(authorization)
+    from services import bot_analytics
+    return bot_analytics.usage(days)
+
+
+@router.get("/admin/bot-usage.csv")
+def admin_bot_usage_csv(days: int = 30,
+                        authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    from services import bot_analytics
+    body = bot_analytics.usage_csv(days)
+    return Response(body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="telegram-bot-usage-{max(1, min(days, 365))}d.csv"',
+                             "Cache-Control": "no-store"})
 
 
 @router.get("/admin/overview")

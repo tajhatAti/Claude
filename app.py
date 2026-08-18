@@ -287,6 +287,15 @@ def read_admin(request: Request):
         headers={"Cache-Control": "no-store"},
     )
 
+# Short, canonical per-job URL. The old username-prefixed form below remains
+# readable for links already shared in the wild.
+@app.get("/runspace/{slug}", include_in_schema=False)
+def read_runspace_job(slug: str):
+    if not INDEX_FILE.exists():
+        raise HTTPException(status_code=404, detail="index.html not found.")
+    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
 # /runspace/{username}/{job-slug} → SPA shell; frontend routes to jobs tab and
 # selects the matching job (deep-linking per job).
 @app.get("/runspace/{username}/{slug:path}", include_in_schema=False)

@@ -697,6 +697,24 @@ _SCHEMA_TABLES = [
         FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE CASCADE
     )
     """,
+    """
+    -- Durable bot activity. chat_id is retained even when no site account is
+    -- linked, so the admin funnel includes the people who have not signed up.
+    CREATE TABLE IF NOT EXISTS bot_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        telegram_user_id TEXT,
+        user_id INTEGER,
+        display_name TEXT,
+        event_type TEXT NOT NULL,
+        command TEXT,
+        payload TEXT,
+        outcome TEXT NOT NULL DEFAULT 'ok',
+        error TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+    )
+    """,
 ]
 
 
@@ -802,6 +820,10 @@ def init_db():
             conn.execute("ALTER TABLE sessions ADD COLUMN fingerprint TEXT")
         if not _column_exists(conn, "sessions", "expires_at"):
             conn.execute("ALTER TABLE sessions ADD COLUMN expires_at TEXT")
+
+        # Read paths filter by time, then group by chat/command.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_created_at ON bot_events (created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_chat_id ON bot_events (chat_id)")
 
         conn.commit()
     finally:
