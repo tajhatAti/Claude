@@ -14,6 +14,7 @@ class JobCreateRequest(BaseModel):
     repo_url: Optional[str] = None
     entry: Optional[str] = None
     env: Optional[dict] = None
+    telegram_verification_id: Optional[str] = None
 
 
 class JobUpdateRequest(BaseModel):
@@ -23,6 +24,7 @@ class JobUpdateRequest(BaseModel):
     repo_url: Optional[str] = None
     entry: Optional[str] = None
     env: Optional[dict] = None
+    telegram_verification_id: Optional[str] = None
 
 
 class EntryPinPayload(BaseModel):
@@ -86,7 +88,10 @@ def verify_telegram_bot(payload: TelegramTokenVerify,
         raise HTTPException(status_code=400, detail="Telegram rejected this token. Copy a fresh token from @BotFather.")
     if meta.get("check_status") != "verified" or not meta.get("username"):
         raise HTTPException(status_code=503, detail="Telegram could not verify the bot right now. Try again shortly.")
-    return telegram_detector.public_fields(meta)
+    out = telegram_detector.public_fields(meta)
+    out["telegram_verification_id"] = telegram_detector.issue_verification(user["id"], token, meta)
+    out["expires_in"] = 900
+    return out
 
 
 @router.post("/api/execute")
@@ -338,17 +343,24 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
             conn.close()
             raise HTTPException(
                 status_code=429,
-                detail=(f"You already have {active} of {MAX_JOBS_PER_USER} RunSpace jobs "
-                        f"running — stop one before starting another."),
+                detail=(f"You already have {active} of {MAX_JOBS_PER_USER} Telegram bots "
+                        f"running — stop one before adding another bot."),
             )
     except HTTPException:
         raise
 
     env_map = _clean_env_map(payload.env)
-    bot_meta = telegram_detector.inspect_bot(payload.code or "", env_map)
+    verified_token = str(env_map.get("BOT_TOKEN") or "").strip()
+    bot_meta = telegram_detector.validate_verification(
+        user["id"], payload.telegram_verification_id, verified_token)
+    if not bot_meta:
+        raise HTTPException(status_code=400,
+                            detail="Verify your Telegram bot token first, then add the bot.")
+    canonical_code, env_map = telegram_detector.apply_verified_token(
+        payload.code or "", env_map, verified_token)
     body = {
         "language": payload.language or "python",
-        "code": payload.code or "",
+        "code": canonical_code,
         "name": f"u{user['id']}-{name}",
         "env": env_map,
     }
@@ -377,11 +389,12 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
                 telegram_check_status,telegram_verified_at,created_at,updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user["id"], name, payload.language, payload.code, info["id"],
+            (user["id"], name, payload.language, canonical_code, info["id"],
              json.dumps(env_map) if env_map else None, *_telegram_columns(bot_meta), now, now),
         )
         _record_deploy_event(conn, user["id"], cursor.lastrowid, "run", name, bot_meta, now)
         conn.commit()
+        telegram_detector.consume_verification(payload.telegram_verification_id)
         info["job_db_id"] = cursor.lastrowid
         info.update(telegram_detector.public_fields(bot_meta))
         # Remember WHICH worker accepted this job. Every later restart / stop /
@@ -968,7 +981,22 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     new_entry = (payload.entry or "").strip()
     # env omitted from the request => keep what is already saved.
     new_env = _clean_env_map(payload.env) if payload.env is not None else _row_env(row)
-    bot_meta = telegram_detector.inspect_bot(new_code, new_env)
+    verified_token = str(new_env.get("BOT_TOKEN") or "").strip()
+    if payload.telegram_verification_id:
+        bot_meta = telegram_detector.validate_verification(
+            user["id"], payload.telegram_verification_id, verified_token)
+    else:
+        bot_meta = ({"detected": bool(row.get("telegram_bot_detected")),
+                     "username": row.get("telegram_bot_username"),
+                     "bot_id": row.get("telegram_bot_id"),
+                     "check_status": row.get("telegram_check_status"),
+                     "verified_at": row.get("telegram_verified_at")}
+                    if verified_token and row.get("telegram_bot_detected") else None)
+    if not bot_meta:
+        raise HTTPException(status_code=400,
+                            detail="Verify your Telegram bot token before saving this bot.")
+    new_code, new_env = telegram_detector.apply_verified_token(
+        new_code, new_env, verified_token)
     now = now_utc_str()
     if new_name != (row["name"] or ""):
         conn0 = get_db_connection()
@@ -1045,6 +1073,8 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
             detail = "Runner rejected the update."
         raise HTTPException(status_code=502, detail=detail)
 
+    if payload.telegram_verification_id:
+        telegram_detector.consume_verification(payload.telegram_verification_id)
     info["job_db_id"] = job_id
     info.update(runner_client._job_web_fields(info, _worker_of(row)))
     info.update(telegram_detector.public_fields(bot_meta))

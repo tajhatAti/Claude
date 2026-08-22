@@ -721,6 +721,21 @@ _SCHEMA_TABLES = [
     )
     """,
     """
+    -- Short-lived proof that an authenticated user verified a BotFather token
+    -- before creating a bot. Only a SHA-256 digest is stored, never the token.
+    CREATE TABLE IF NOT EXISTS telegram_token_verifications (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL,
+        bot_username TEXT NOT NULL,
+        bot_id TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
+    """
     -- Immutable deployment history for the admin Telegram-bot view. This says
     -- who ran/updated/restarted what without retaining a second copy of code
     -- or any bot token.
@@ -884,6 +899,8 @@ def init_db():
                      "ON job_deploy_events (created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_deploy_events_user "
                      "ON job_deploy_events (user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tg_verify_user_expiry "
+                     "ON telegram_token_verifications (user_id, expires_at)")
 
         conn.commit()
     finally:

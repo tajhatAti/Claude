@@ -3283,16 +3283,16 @@ function _setJobsStatus(status) {
       if (!list.querySelector(".job-item")) list.innerHTML = _skel(4);
     }
   } else if (status === "empty") {
-    // Confirmed: zero jobs exist. Show the "No RunSpace yet" panel.
+    // Confirmed: zero jobs exist. Show the "No bots yet" panel.
     ws.style.display = "none";
     if (boot) boot.style.display = "none";
     emp.style.display = "";
     if (btnNewEmpty) btnNewEmpty.style.display = "";
-    // Tweak copy from generic "No job selected" to first-run messaging
+    // Tweak copy from generic "No bot selected" to first-run messaging
     const t = emp.querySelector(".rs-empty-title");
     const s = emp.querySelector(".rs-empty-sub");
-    if (t) t.textContent = "No RunSpace yet";
-    if (s) s.textContent = "Create your first 24/7 bot or service — it goes live in seconds.";
+    if (t) t.textContent = "No bots yet";
+    if (s) s.textContent = "Verify a BotFather token, paste the bot code, then run it 24/7.";
     if (list) list.innerHTML = '<div class="rs-empty-sm" style="padding:16px 12px;text-align:center">No saved jobs yet.</div>';
   } else if (status === "error") {
     // NEVER hide the workspace here. A failed background refresh used to set
@@ -3366,7 +3366,7 @@ async function loadJobs() {
       // called _setJobsStatus("empty"), and THAT function does
       // `ws.style.display = "none"` on the workspace (see the "empty" branch).
       // So on an account with zero saved jobs, every 7s poll hid the blank
-      // New editor and swapped in the "No RunSpace yet" panel. It looked
+      // New editor and swapped in the "No bots yet" panel. It looked
       // exactly like a spontaneous page reload, and it also explains the
       // stray word on screen: that panel's subtitle is the sentence
       // "...it goes live in seconds."
@@ -3390,7 +3390,7 @@ async function loadJobs() {
     else {
       // Sig matched (nothing changed) — still make sure the right main
       // pane is visible: if we had a selected job, show workspace; else
-      // show the "No job selected" empty panel (different copy from zero-jobs).
+      // show the "No bot selected" empty panel (different copy from zero-jobs).
       if (_selectedJobId) {
         const cur = jobs.find(x => String(x.id) === String(_selectedJobId));
         if (cur) { _showWorkspace(cur); _updateJobUrl(cur); }
@@ -3563,6 +3563,7 @@ function _playSwap(el) {
 
 let _rsVerifiedBotToken = "";
 let _rsVerifiedBotMeta = null;
+let _rsTelegramVerificationId = "";
 
 async function _verifyRunSpaceTelegramBot() {
   const input=document.getElementById("rsTgToken");
@@ -3576,16 +3577,19 @@ async function _verifyRunSpaceTelegramBot() {
     const meta=await api("/api/telegram-bot/verify","POST",{token},true);
     _rsVerifiedBotToken=token;
     _rsVerifiedBotMeta=meta;
+    _rsTelegramVerificationId=meta.telegram_verification_id || "";
     _renderTelegramBot({...meta,status:"not deployed"});
+    document.body.classList.remove("rs-awaiting-bot");
     if(state){state.textContent=`Verified @${meta.telegram_bot_username}. Press Save & Run to connect it.`;state.className="rs-tg-verify-state ok";}
   } catch(e) {
-    _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;
+    _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
+    document.body.classList.add("rs-awaiting-bot");
     if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
   } finally { if(btn){btn.disabled=false;btn.textContent="Verify bot";} }
 }
 
 function _resetRunSpaceTelegramDraft() {
-  _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;
+  _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
   const input=document.getElementById("rsTgToken");if(input)input.value="";
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
 }
@@ -3680,10 +3684,10 @@ function _showEmpty(zeroJobs) {
   if (btnNewEmpty) btnNewEmpty.style.display = "";
   const t = emp && emp.querySelector(".rs-empty-title");
   const s = emp && emp.querySelector(".rs-empty-sub");
-  if (t) t.textContent = zeroJobs ? "No RunSpace yet" : "No job selected";
+  if (t) t.textContent = zeroJobs ? "No bots yet" : "No bot selected";
   if (s) s.textContent = zeroJobs
-    ? "Create your first 24/7 bot or service — it goes live in seconds."
-    : "Create a new job or pick one from the left to start editing.";
+    ? "Verify a BotFather token, paste the bot code, then run it 24/7."
+    : "Add a bot or pick one from the list.";
   const n = document.getElementById("jobName"); if (n) n.value = "";
   const langEl = document.getElementById("jobLang");
   if (langEl) langEl.value = "python";
@@ -3809,7 +3813,7 @@ function _reflectJobStatus(jobOrId) {
   const crumbSep = document.getElementById("rsCrumbSep");
   const crumbCur = document.getElementById("rsTitle");
   const headChip = document.getElementById("rsHeadState");
-  const openName = (job && job.name) || (_composingNew ? "new job" : "");
+  const openName = (job && job.name) || (_composingNew ? "new bot" : "");
   if (crumbCur && crumbSep) {
     crumbCur.textContent = openName;
     crumbCur.hidden = !openName;
@@ -3971,6 +3975,7 @@ function selectJob(id) {
     if (!confirm("You have unsaved changes. Discard them and open this job?")) return;
   }
   _resetRunSpaceTelegramDraft();
+  document.body.classList.remove("rs-awaiting-bot");
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
@@ -4352,6 +4357,8 @@ function _initWbWiring() {
     if (emp) emp.style.display = "none";
     _clearWorkspaceChrome();
     _resetRunSpaceTelegramDraft();
+    document.body.classList.add("rs-awaiting-bot");
+    const tgSetup=document.getElementById("rsTgSetup");if(tgSetup)tgSetup.open=true;
     _renderLogs("");
     const n = document.getElementById("jobName"); if (n) { n.value = ""; n.classList.remove("rs-inp-err"); }
     const u = document.getElementById("jobRepoUrl"); if (u) u.value = "";
@@ -5433,6 +5440,15 @@ async function toggleJobAccess(id, makePublic) {
 
 async function startJob() {
   const nameEl = document.getElementById("jobName");
+  const btn = document.getElementById("btnStartJob");
+  const editingId = btn && btn.dataset.editingId;
+  if (!editingId && (!_rsVerifiedBotToken || !_rsTelegramVerificationId)) {
+    document.body.classList.add("rs-awaiting-bot");
+    const setup=document.getElementById("rsTgSetup");if(setup)setup.open=true;
+    const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="Verify a Telegram bot token before adding code.";state.className="rs-tg-verify-state err";}
+    toast("Verify your bot token first", "error");
+    return;
+  }
   let name = (nameEl && nameEl.value || "").trim();
   const language = document.getElementById("jobLang").value;
   const code = _jobCmGetValue();
@@ -5444,12 +5460,10 @@ async function startJob() {
   }
   const finalName = (nameEl && nameEl.value || "").trim() || name;
   if (nameEl) nameEl.value = finalName;
-  if (!finalName) { toast("Name required", "error"); if (nameEl) nameEl.focus(); return; }
-  if (!code.trim() && !repoUrl) { toast("Write code or paste a GitHub URL", "error"); return; }
+  if (!finalName) { toast("Bot name required", "error"); if (nameEl) nameEl.focus(); return; }
+  if (!code.trim() && !repoUrl) { toast("Paste the bot code or a GitHub URL", "error"); return; }
   // Client-side duplicate name guard (server enforces authoritatively)
   if (window._lastJobs) {
-    const btn = document.getElementById("btnStartJob");
-    const editingId = btn && btn.dataset.editingId;
     const dup = window._lastJobs.find(j => (j.name||"").toLowerCase() === finalName.toLowerCase() && String(j.id) !== String(editingId||""));
     if (dup) {
       toast("You already have a job named \u201c"+finalName+"\u201d \u2014 choose a different name.", "error");
@@ -5458,8 +5472,6 @@ async function startJob() {
       return;
     }
   }
-  const btn = document.getElementById("btnStartJob");
-  const editingId = btn && btn.dataset.editingId;
   setLoading(btn, true);
   if (btn) {
     btn.classList.add("is-firing","loading");
@@ -5477,6 +5489,7 @@ async function startJob() {
     if (_rsVerifiedBotToken) {
       const current=(window._lastJobs||[]).find(j=>String(j.id)===String(editingId||""));
       payload.env={...((current&&current.env)||{}),BOT_TOKEN:_rsVerifiedBotToken};
+      payload.telegram_verification_id=_rsTelegramVerificationId;
     }
     if (repoUrl) payload.repo_url = repoUrl;
     let info;
@@ -5637,7 +5650,7 @@ function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobs
     if (tabId === "jobs") {
       // If we have no prior data at all, enter 'loading' immediately so the
       // boot skeleton is painted on top of the empty panel before loadJobs
-      // fires (prevents the premature "No job selected" flash). Stale cache
+      // fires (prevents the premature "No bot selected" flash). Stale cache
       // stays visible via stale-while-revalidate inside loadJobs.
       const hasPrior = !!(window._lastJobs && window._lastJobs.length);
       if (!hasPrior) _setJobsStatus("loading");
@@ -7649,6 +7662,12 @@ const RS_EXT_LANG = {
 
 async function _rsHandleUpload(file) {
   if (!file) return;
+  if (_composingNew && (!_rsVerifiedBotToken || !_rsTelegramVerificationId)) {
+    document.body.classList.add("rs-awaiting-bot");
+    const setup=document.getElementById("rsTgSetup");if(setup)setup.open=true;
+    toast("Verify the bot token first, then upload its code.","error");
+    return;
+  }
   const ext = _csExt(file.name);
 
   if (ext === "zip") {

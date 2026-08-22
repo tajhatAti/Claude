@@ -13,4 +13,7 @@ if(!dom.window.document.getElementById('rsTgToken')||!dom.window.document.getEle
 if(!/telegram_bot_username: info\.telegram_bot_username/.test(JS))throw Error('optimistic deployed job drops bot metadata');
 if(!/Telegram token detected in this file/.test(JS))throw Error('uploaded bot file is not surfaced');
 if(!adom.window.document.getElementById('admTelegramSection')||!adom.window.document.querySelector('.adm-section-nav'))throw Error('admin Telegram section/navigation missing');
-console.log('9 Telegram job UI checks passed');
+if(!/telegram_verification_id=_rsTelegramVerificationId/.test(JS))throw Error('verified proof not sent with bot');
+if(!/rs-awaiting-bot/.test(JS+CSS))throw Error('code editor is not gated behind token verification');
+if(!/Add Bot 🤖/.test(HTML))throw Error('old job creation label remains');
+console.log('12 Telegram bot-first UI checks passed');

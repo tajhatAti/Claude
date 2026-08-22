@@ -764,12 +764,12 @@
                rules), which is why it behaved differently every time. This
                shares the "···" menu's look and nothing else. -->
           <div class="rs-menu rs-jobs-pop" id="rsJobsPop" role="menu" hidden>
-            <div class="rs-menu-head">Jobs</div>
+            <div class="rs-menu-head">Your bots</div>
             <div class="rs-jobs-pop-list" id="rsJobsPopList"></div>
             <div class="rs-menu-sep" role="separator"></div>
             <button class="rs-menu-item" id="rsJobsPopNew" role="menuitem">
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M7.25 2.75a.75.75 0 0 1 1.5 0v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5Z"/></svg>
-              <span class="rs-seg-label">New job</span>
+              <span class="rs-seg-label">Add Bot 🤖</span>
             </button>
           </div>
 
@@ -784,9 +784,9 @@
                  is not on screen; this copy is what guarantees a user can
                  always start a job. Its click is forwarded to #btnNew so
                  there is one implementation of "new job", not two. -->
-            <button class="rs-menu-item" id="btnNewInMenu" role="menuitem" title="New job (Ctrl+N)">
+            <button class="rs-menu-item" id="btnNewInMenu" role="menuitem" title="Add Bot (Ctrl+N)">
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M7.25 2.75a.75.75 0 0 1 1.5 0v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5Z"/></svg>
-              <span class="rs-seg-label">New job</span>
+              <span class="rs-seg-label">Add Bot 🤖</span>
             </button>
             <!-- "Job list" REMOVED from this menu. The header already has a
                  dedicated hamburger button (#wbMenuBtn) whose only job is to
@@ -883,9 +883,9 @@
         <!-- LEFT SIDEBAR: job list -->
         <aside class="rs-side" id="wbSide">
           <div class="rs-side-head">
-            <span class="rs-side-title">Jobs</span>
+            <span class="rs-side-title">Bots</span>
             <span class="rs-count" id="txJobCount">0</span>
-            <button type="button" class="rs-ghost-btn rs-sq rs-side-new" id="btnNew" title="New job (Ctrl+N)" aria-label="New job">
+            <button type="button" class="rs-ghost-btn rs-sq rs-side-new" id="btnNew" title="Add Bot (Ctrl+N)" aria-label="Add Bot">
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M7.25 2.75a.75.75 0 0 1 1.5 0v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5Z"/></svg>
             </button>
             <!-- Mobile only. The drawer covers the editor, and the header
@@ -946,7 +946,7 @@
             <div class="rs-empty-sub">Fetching your saved bots &amp; services.</div>
             <button class="rs-empty-btn" id="btnNewEmpty" style="display:none">
               <svg viewBox="0 0 24 24" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-              Create new job
+              Add Bot 🤖
             </button>
           </div>
 
@@ -965,7 +965,7 @@
                  field that cannot wrap at any width. Runtime and GitHub
                  import moved into the "···" menu. -->
             <div class="rs-meta">
-              <input class="rs-inp" id="jobName" type="text" placeholder="Untitled job" maxlength="60" spellcheck="false" autocomplete="off" aria-label="Job name">
+              <input class="rs-inp" id="jobName" type="text" placeholder="Bot name" maxlength="60" spellcheck="false" autocomplete="off" aria-label="Bot name">
             </div>
             <details class="rs-tg-setup" id="rsTgSetup">
               <summary><span class="rs-bot-logo" aria-hidden="true">✈</span><span><b>Telegram bot</b><small>Verify a BotFather token and connect it to this job</small></span></summary>
