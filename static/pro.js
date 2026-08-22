@@ -5596,9 +5596,24 @@ let _admPending = null;   // { user_id, suspended } awaiting 2FA confirm
 
 let _adminFetching = false;  // guard: one in-flight markup fetch at a time
 let _adminSectHtml = null;   // pristine copy so the panel can come BACK on
+let _adminProfile = null;    // needed when a failed first fetch is retried
+let _adminRequested = false; // direct /admin or a click while markup is loading
                              // this device when an actual admin signs in next
+function requestAdminPanel() {
+  _adminRequested = true;
+  const sect = document.getElementById("tab-admin");
+  if (sect) {
+    _adminRequested = false;
+    switchTab("admin");
+    return;
+  }
+  // The first request can fail during a cold start. A later click must make a
+  // NEW request rather than leaving a visible but permanently dead button.
+  if (_adminProfile) applyAdminVisibility(_adminProfile);
+}
 function applyAdminVisibility(profile) {
   const isAdm = !!(profile && profile.is_admin);
+  if (isAdm) _adminProfile = profile;
   let btn = document.getElementById("tabBtnAdmin");
   // The nav button is stripped from the shell too, for the same reason as the
   // section: a hidden button is still discoverable in the page source.
@@ -5614,14 +5629,16 @@ function applyAdminVisibility(profile) {
         '<path d="M9.2 11.8l2 2 3.6-4"/></svg>' +
         '<span class="tab-tx">Admin</span></button>');
       btn = document.getElementById("tabBtnAdmin");
-      if (btn && typeof _wireTabButton === "function") _wireTabButton(btn);
-      else if (btn) btn.addEventListener("click", () => switchTab("admin"));
+      if (btn) btn.addEventListener("click", requestAdminPanel);
     }
   }
   if (btn) btn.classList.toggle("hidden", !isAdm);
   let sect = document.getElementById("tab-admin");
 
   if (isAdm) {
+    // routeFromUrl runs before /profile has proved admin status. Remember a
+    // direct /admin navigation and complete it after protected markup arrives.
+    if (_clientPath() === "/admin") _adminRequested = true;
     // The shell no longer ships the console's markup — it was readable in the
     // page source by any anonymous visitor. Fetch it once, from an endpoint
     // behind the same 404 gate as the admin data.
@@ -5629,12 +5646,18 @@ function applyAdminVisibility(profile) {
       if (_adminSectHtml) {
         const host = document.querySelector(".dash-main");
         if (host) host.insertAdjacentHTML("beforeend", _adminSectHtml);
+        sect = document.getElementById("tab-admin");
+        if (sect && _adminRequested) {
+          _adminRequested = false;
+          switchTab("admin");
+        }
       } else if (!_adminFetching) {
         _adminFetching = true;
         // Plain fetch, not api(): api() parses JSON and its 5th argument is a
         // retry flag, not options. This endpoint returns HTML.
+        const panelToken = authToken || localStorage.getItem("ahad_token") || "";
         fetch(API + "/admin/panel-html", {
-          headers: authToken ? {Authorization: "Bearer " + authToken} : {},
+          headers: panelToken ? {Authorization: "Bearer " + panelToken} : {},
         })
           .then(r => (r.ok ? r.text() : Promise.reject(r.status)))
           .then(html => {
@@ -5643,17 +5666,32 @@ function applyAdminVisibility(profile) {
             if (host && !document.getElementById("tab-admin")) {
               host.insertAdjacentHTML("beforeend", html);
             }
-            if (currentTab === "admin" && typeof loadAdminPanel === "function") {
+            if (_adminRequested && document.getElementById("tab-admin")) {
+              _adminRequested = false;
+              switchTab("admin");
+            } else if (currentTab === "admin" && typeof loadAdminPanel === "function") {
               loadAdminPanel();
             }
           })
-          .catch(() => {})          // 404 => not an admin after all; stay quiet
+          .catch(status => {
+            // 404 remains intentionally ambiguous. Network/5xx failures are
+            // retryable by clicking the Admin button again.
+            if (status !== 404 && typeof toast === "function") {
+              toast("Admin panel could not load. Tap Admin to retry.", "error");
+            }
+          })
           .finally(() => { _adminFetching = false; });
       }
+    }
+    if (sect && _adminRequested) {
+      _adminRequested = false;
+      switchTab("admin");
     }
     return;
   }
 
+  _adminProfile = null;
+  _adminRequested = false;
   // STEALTH for everyone else — the panel must not merely hide its DATA, it
   // must not EXIST: non-admins get "this page isn't here", exactly like the
   // server's 404. Remove the section from the DOM (switchTab then no-ops on
