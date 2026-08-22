@@ -431,6 +431,47 @@ def admin_user_detail_route(user_id: int, authorization: Optional[str] = Header(
     }
 
 
+@router.get("/admin/telegram-jobs")
+def admin_telegram_jobs(authorization: Optional[str] = Header(None)):
+    """Detected Telegram bots and immutable run/update/restart history.
+
+    Raw tokens and source code are deliberately excluded.
+    """
+    require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT j.id,j.name,j.runner_job_id,j.telegram_bot_username,j.telegram_bot_id,"
+            "j.telegram_check_status,j.telegram_verified_at,j.updated_at,u.id AS user_id,"
+            "u.username AS owner FROM jobs j JOIN users u ON u.id=j.user_id "
+            "WHERE j.telegram_bot_detected=1 ORDER BY j.updated_at DESC LIMIT 300"
+        ).fetchall()
+        events = conn.execute(
+            "SELECT e.id,e.action,e.job_id,e.job_name,e.telegram_bot_detected,"
+            "e.telegram_bot_username,e.telegram_bot_id,e.telegram_check_status,"
+            "e.created_at,u.id AS user_id,u.username AS owner "
+            "FROM job_deploy_events e JOIN users u ON u.id=e.user_id "
+            "ORDER BY e.id DESC LIMIT 300"
+        ).fetchall()
+        bots = [dict(r) for r in rows]
+        history = [dict(r) for r in events]
+    finally:
+        conn.close()
+    live = runner_client.fleet_jobs()
+    for bot in bots:
+        info = live.get(bot.get("runner_job_id")) or {}
+        bot["status"] = info.get("status") or "offline"
+        bot["uptime_s"] = info.get("uptime_s")
+        username = bot.get("telegram_bot_username")
+        bot["telegram_bot_url"] = f"https://t.me/{username}" if username else None
+    for event in history:
+        username = event.get("telegram_bot_username")
+        event["telegram_bot_url"] = f"https://t.me/{username}" if username else None
+    return {"bots": bots, "events": history,
+            "detected": len(bots),
+            "running": sum(1 for b in bots if b.get("status") == "running")}
+
+
 @router.get("/admin/jobs")
 def admin_jobs_route(authorization: Optional[str] = Header(None)):
     """Job METADATA only (+ live status/uptime from the runner, best-effort) —
@@ -441,7 +482,9 @@ def admin_jobs_route(authorization: Optional[str] = Header(None)):
         rows = conn.execute(
             """
             SELECT j.id, j.name, j.language, j.created_at, j.runner_job_id,
-                   j.worker_url, j.user_id,
+                   j.worker_url, j.user_id, j.telegram_bot_detected,
+                   j.telegram_bot_username, j.telegram_bot_id,
+                   j.telegram_check_status, j.telegram_verified_at,
                    u.username AS owner, u.telegram_id AS owner_telegram,
                    u.telegram_name AS owner_telegram_name,
                    u.is_suspended AS owner_suspended
@@ -481,6 +524,8 @@ def admin_jobs_route(authorization: Optional[str] = Header(None)):
         row["source"] = "telegram" if row.get("owner_telegram") else "website"
         row["source_inferred"] = True
         row["owner_telegram_name"] = row.get("owner_telegram_name")
+        bot_username = row.get("telegram_bot_username")
+        row["telegram_bot_url"] = f"https://t.me/{bot_username}" if bot_username else None
         row.pop("owner_telegram", None)
     return {"jobs": jobs}
 
@@ -506,6 +551,8 @@ def admin_job_detail_route(job_id: int, authorization: Optional[str] = Header(No
             """
             SELECT j.id, j.name, j.language, j.created_at, j.updated_at,
                    j.runner_job_id, j.worker_url, j.user_id,
+                   j.telegram_bot_detected,j.telegram_bot_username,j.telegram_bot_id,
+                   j.telegram_check_status,j.telegram_verified_at,
                    u.username AS owner, u.email AS owner_email,
                    u.telegram_id AS owner_telegram,
                    u.telegram_name AS owner_telegram_name,
@@ -528,6 +575,8 @@ def admin_job_detail_route(job_id: int, authorization: Optional[str] = Header(No
 
     job["source"] = "telegram" if job.get("owner_telegram") else "website"
     job["source_inferred"] = True
+    bot_username = job.get("telegram_bot_username")
+    job["telegram_bot_url"] = f"https://t.me/{bot_username}" if bot_username else None
     job.pop("owner_telegram", None)
     worker = job.get("worker_url") or None
     job["worker"] = worker or "primary"

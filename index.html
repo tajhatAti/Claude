@@ -967,6 +967,11 @@
             <div class="rs-meta">
               <input class="rs-inp" id="jobName" type="text" placeholder="Untitled job" maxlength="60" spellcheck="false" autocomplete="off" aria-label="Job name">
             </div>
+            <aside class="rs-bot-callout" id="rsBotCallout" hidden aria-live="polite">
+              <span class="rs-bot-logo" aria-hidden="true">✈</span>
+              <div class="rs-bot-copy"><b id="rsBotName">Telegram bot detected</b><span id="rsBotState">Checking bot…</span></div>
+              <a class="rs-bot-go" id="rsBotGo" target="_blank" rel="noopener noreferrer">Go to your bot</a>
+            </aside>
 
             <!-- Vertical split: editor top, logs bottom -->
             <div class="rs-split" id="wbSplit">

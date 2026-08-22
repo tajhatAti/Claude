@@ -591,6 +591,11 @@ _SCHEMA_TABLES = [
         -- perfectly healthy bot as dead. NULL = the single-worker default.
         worker_url TEXT,
         env TEXT,
+        telegram_bot_detected INTEGER NOT NULL DEFAULT 0,
+        telegram_bot_username TEXT,
+        telegram_bot_id TEXT,
+        telegram_check_status TEXT,
+        telegram_verified_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -716,6 +721,25 @@ _SCHEMA_TABLES = [
     )
     """,
     """
+    -- Immutable deployment history for the admin Telegram-bot view. This says
+    -- who ran/updated/restarted what without retaining a second copy of code
+    -- or any bot token.
+    CREATE TABLE IF NOT EXISTS job_deploy_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        job_id INTEGER,
+        action TEXT NOT NULL,
+        job_name TEXT NOT NULL,
+        telegram_bot_detected INTEGER NOT NULL DEFAULT 0,
+        telegram_bot_username TEXT,
+        telegram_bot_id TEXT,
+        telegram_check_status TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE SET NULL
+    )
+    """,
+    """
     -- Durable bot activity. chat_id is retained even when no site account is
     -- linked, so the admin funnel includes the people who have not signed up.
     CREATE TABLE IF NOT EXISTS bot_events (
@@ -833,6 +857,18 @@ def init_db():
         if not _column_exists(conn, "jobs", "worker_url"):
             conn.execute("ALTER TABLE jobs ADD COLUMN worker_url TEXT")
 
+        # Telegram bot metadata is safe identity/status only. Raw tokens remain
+        # solely in the user's source/env and are never copied here.
+        for _col, _ddl in (
+            ("telegram_bot_detected", "INTEGER NOT NULL DEFAULT 0"),
+            ("telegram_bot_username", "TEXT"),
+            ("telegram_bot_id", "TEXT"),
+            ("telegram_check_status", "TEXT"),
+            ("telegram_verified_at", "TEXT"),
+        ):
+            if not _column_exists(conn, "jobs", _col):
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {_col} {_ddl}")
+
         # Same story for the sessions table.
         if not _column_exists(conn, "sessions", "fingerprint"):
             conn.execute("ALTER TABLE sessions ADD COLUMN fingerprint TEXT")
@@ -844,6 +880,10 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_chat_id ON bot_events (chat_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_blocks_lookup "
                      "ON admin_blocks (scope, value, revoked_at, expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_deploy_events_created "
+                     "ON job_deploy_events (created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_deploy_events_user "
+                     "ON job_deploy_events (user_id)")
 
         conn.commit()
     finally:

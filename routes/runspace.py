@@ -45,6 +45,7 @@ from fastapi.responses import StreamingResponse
 from services import runner_client
 from services import limits
 from services import abuse_control
+from services import telegram_detector
 from services.runner_client import MAX_JOBS_PER_USER
 
 logger = logging.getLogger("codenest.runspace")
@@ -213,6 +214,32 @@ _ENV_BLOCKED = {
 }
 
 
+def _telegram_columns(meta):
+    return (1 if meta.get("detected") else 0, meta.get("username"),
+            meta.get("bot_id"), meta.get("check_status"), meta.get("verified_at"))
+
+
+def _record_deploy_event(conn, user_id, job_id, action, job_name, meta, created_at):
+    conn.execute(
+        "INSERT INTO job_deploy_events (user_id,job_id,action,job_name,"
+        "telegram_bot_detected,telegram_bot_username,telegram_bot_id,"
+        "telegram_check_status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (user_id, job_id, action, job_name, 1 if meta.get("detected") else 0,
+         meta.get("username"), meta.get("bot_id"), meta.get("check_status"), created_at),
+    )
+
+
+def _attach_telegram_public(row):
+    row.update(telegram_detector.public_fields({
+        "detected": bool(row.get("telegram_bot_detected")),
+        "username": row.get("telegram_bot_username"),
+        "bot_id": row.get("telegram_bot_id"),
+        "check_status": row.get("telegram_check_status"),
+        "verified_at": row.get("telegram_verified_at"),
+    }))
+    return row
+
+
 def _clean_env_map(raw) -> dict:
     """Validate env vars here too — never trust the browser to have done it."""
     if not isinstance(raw, dict):
@@ -298,6 +325,7 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
         raise
 
     env_map = _clean_env_map(payload.env)
+    bot_meta = telegram_detector.inspect_bot(payload.code or "", env_map)
     body = {
         "language": payload.language or "python",
         "code": payload.code or "",
@@ -324,14 +352,18 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
     try:
         cursor = conn.execute(
             """
-            INSERT INTO jobs (user_id, name, language, code, runner_job_id, env, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs (user_id, name, language, code, runner_job_id, env,
+                telegram_bot_detected,telegram_bot_username,telegram_bot_id,
+                telegram_check_status,telegram_verified_at,created_at,updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (user["id"], name, payload.language, payload.code, info["id"],
-             json.dumps(env_map) if env_map else None, now, now),
+             json.dumps(env_map) if env_map else None, *_telegram_columns(bot_meta), now, now),
         )
+        _record_deploy_event(conn, user["id"], cursor.lastrowid, "run", name, bot_meta, now)
         conn.commit()
         info["job_db_id"] = cursor.lastrowid
+        info.update(telegram_detector.public_fields(bot_meta))
         # Remember WHICH worker accepted this job. Every later restart / stop /
         # log call reads it back, so a job on worker-B is never addressed to
         # worker-A once a second worker exists.
@@ -382,6 +414,7 @@ def list_jobs(authorization: Optional[str] = Header(None)):
             # here is what made running jobs appear stopped after a tab switch.
             r.update({"status": "unknown", "status_stale": True})
         r["env"] = _row_env(r)          # saved env vars (Details page)
+        _attach_telegram_public(r)
         r.pop("code", None)  # never ship stored code back in list payloads
         jobs.append(r)
     return {"jobs": jobs, "runner": runner_state, "max_per_user": MAX_JOBS_PER_USER}
@@ -431,6 +464,7 @@ def get_job(job_id: int, authorization: Optional[str] = Header(None)):
     else:
         row["status"] = "offline"
     row["env"] = _row_env(row)
+    _attach_telegram_public(row)
     return row
 
 
@@ -870,7 +904,20 @@ def restart_job(job_id: int, request: Request, authorization: Optional[str] = He
             conn.close()
         _restore_then_restart(job_id, info, getattr(resp, "placed_on", None))
 
+    meta = {
+        "detected": bool(row.get("telegram_bot_detected")),
+        "username": row.get("telegram_bot_username"), "bot_id": row.get("telegram_bot_id"),
+        "check_status": row.get("telegram_check_status"),
+        "verified_at": row.get("telegram_verified_at"),
+    }
+    conn = get_db_connection()
+    try:
+        _record_deploy_event(conn, user["id"], job_id, "restart", row["name"], meta, now_utc_str())
+        conn.commit()
+    finally:
+        conn.close()
     info["job_db_id"] = job_id
+    info.update(telegram_detector.public_fields(meta))
     info.update(runner_client._job_web_fields(info, _worker_of(row)))
     return info
 
@@ -901,6 +948,7 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     new_entry = (payload.entry or "").strip()
     # env omitted from the request => keep what is already saved.
     new_env = _clean_env_map(payload.env) if payload.env is not None else _row_env(row)
+    bot_meta = telegram_detector.inspect_bot(new_code, new_env)
     now = now_utc_str()
     if new_name != (row["name"] or ""):
         conn0 = get_db_connection()
@@ -916,10 +964,13 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     conn = get_db_connection()
     try:
         conn.execute(
-            "UPDATE jobs SET name = ?, language = ?, code = ?, env = ?, updated_at = ? WHERE id = ?",
-            (new_name, new_lang, new_code,
-             json.dumps(new_env) if new_env else None, now, job_id),
+            "UPDATE jobs SET name=?,language=?,code=?,env=?,telegram_bot_detected=?,"
+            "telegram_bot_username=?,telegram_bot_id=?,telegram_check_status=?,"
+            "telegram_verified_at=?,updated_at=? WHERE id=?",
+            (new_name, new_lang, new_code, json.dumps(new_env) if new_env else None,
+             *_telegram_columns(bot_meta), now, job_id),
         )
+        _record_deploy_event(conn, user["id"], job_id, "update", new_name, bot_meta, now)
         conn.commit()
     finally:
         conn.close()
@@ -976,6 +1027,7 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
 
     info["job_db_id"] = job_id
     info.update(runner_client._job_web_fields(info, _worker_of(row)))
+    info.update(telegram_detector.public_fields(bot_meta))
     return info
 
 

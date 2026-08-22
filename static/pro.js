@@ -3351,7 +3351,8 @@ async function loadJobs() {
   try {
     const data = await api("/api/jobs", "GET", null, true);
     const jobs = (data && data.jobs) || [];
-    const sig = jobs.map(j => [j.id, j.status, j.restarts, j.web ? 1 : 0, j.web_public === false ? 0 : 1].join(":")).join("|");
+    const sig = jobs.map(j => [j.id, j.status, j.restarts, j.web ? 1 : 0, j.web_public === false ? 0 : 1,
+      j.telegram_bot_detected ? 1 : 0, j.telegram_bot_username || "", j.telegram_check_status || ""].join(":")).join("|");
     _lastJobsTs = Date.now();
 
     // The user is writing a brand-new job, or has unsaved edits in the open
@@ -3560,6 +3561,35 @@ function _playSwap(el) {
   } catch (e) {}
 }
 
+function _renderTelegramBot(job) {
+  const box=document.getElementById("rsBotCallout");
+  if(!box)return;
+  const detected=!!(job && job.telegram_bot_detected);
+  box.hidden=!detected;
+  if(!detected)return;
+  const username=job.telegram_bot_username || "";
+  const status=String(job.status || "unknown").toLowerCase();
+  const check=job.telegram_check_status || "unverified";
+  const running=["running","starting","installing","restarting"].includes(status);
+  const name=document.getElementById("rsBotName");
+  if(name)name.textContent=username ? `@${username}` : "Telegram bot detected";
+  const state=document.getElementById("rsBotState");
+  if(state){
+    if(check === "invalid_token") state.textContent="Token was rejected by Telegram";
+    else if(running && check === "verified") state.textContent="Running · Telegram identity verified";
+    else if(running) state.textContent="Job is running · Telegram check unavailable";
+    else state.textContent=`Detected · job is ${status || "not running"}`;
+  }
+  box.classList.toggle("is-live", running && check !== "invalid_token");
+  box.classList.toggle("is-bad", check === "invalid_token" || status === "crashed");
+  const link=document.getElementById("rsBotGo");
+  if(link){
+    const url=job.telegram_bot_url || (username ? `https://t.me/${username}` : "");
+    link.hidden=!url;
+    if(url)link.href=url; else link.removeAttribute("href");
+  }
+}
+
 function _showWorkspace(job, animate) {
   const emp = document.getElementById("wbEmpty");
   const ws = document.getElementById("wbWorkspace");
@@ -3569,10 +3599,12 @@ function _showWorkspace(job, animate) {
   if (boot) boot.style.display = "none";
   if (animate) _playSwap(ws);
   _reflectJobStatus(job);
+  _renderTelegramBot(job);
   _jobCmRefresh();
 }
 
 function _clearWorkspaceChrome() {
+  _renderTelegramBot(null);
   const body = document.getElementById("jobLogBody");
   if (body) body.innerHTML = '<span class="rs-log-empty">// Logs will appear here when you run the job.</span>';
   const dot = document.getElementById("jobLogTitle");
@@ -3681,6 +3713,7 @@ function _reflectJobStatus(jobOrId) {
   }
   const stKey = (job && job.status) ? (job.status || "").toLowerCase() : "stopped";
   const st = _fmtStatus(job && job.status);
+  _renderTelegramBot(job);
   // §3: brief cross-fade whenever the status text changes, never a hard flip.
   if (_reflectJobStatus._last !== st.label) {
     _reflectJobStatus._last = st.label;
@@ -5804,7 +5837,7 @@ async function loadAdminPanel(force) {
   }
   try {
     const botDays = document.getElementById("admBotDays")?.value || 30;
-    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR, riskR] = await Promise.all([
+    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR, tgJobsR, riskR] = await Promise.all([
       api("/admin/overview", "GET", null, true),
       api("/admin/users", "GET", null, true),
       api("/admin/jobs", "GET", null, true),
@@ -5812,6 +5845,7 @@ async function loadAdminPanel(force) {
       api("/admin/audit-log", "GET", null, true),
       api("/admin/libraries", "GET", null, true).catch(() => null),
       api("/admin/bot-usage?days=" + encodeURIComponent(botDays), "GET", null, true).catch(() => null),
+      api("/admin/telegram-jobs", "GET", null, true).catch(() => null),
       _loadAdminRiskData(),
     ]);
     _admPreserve(() => {
@@ -5823,6 +5857,7 @@ async function loadAdminPanel(force) {
       renderAdminAudit((auditR && auditR.audit) || []);
       renderAdminLibs(libsR || {});
       renderAdminBotUsage(botR || {});
+      renderAdminTelegramJobs(tgJobsR || {});
       const risk = riskR || [];
       renderAdminRisk(risk[0] || {}, risk[1] || {}, risk[2] || {}, risk[3] || {});
     });
@@ -5944,6 +5979,31 @@ function renderAdminLibs(data) {
     row.append(main, count);
     el.appendChild(row);
   });
+}
+
+function renderAdminTelegramJobs(data) {
+  const stats=document.getElementById("admTgJobStats");
+  if(!stats)return;
+  stats.textContent="";
+  [["bots detected",data.detected||0],["running",data.running||0],["run actions",(data.events||[]).length]].forEach(([label,value])=>{const box=document.createElement("div");box.className="adm-stat";box.append(_botText("b",value),_botText("span",label));stats.appendChild(box);});
+  const grid=document.getElementById("admTgJobs");
+  if(grid){
+    grid.textContent="";
+    (data.bots||[]).forEach(bot=>{
+      const card=document.createElement("article");card.className="adm-tg-job"+(bot.status==="running"?" is-live":"");
+      const head=document.createElement("div");head.className="adm-tg-job-head";
+      const identity=document.createElement("div");identity.append(_botText("b",bot.telegram_bot_username?`@${bot.telegram_bot_username}`:"Telegram bot"),_botText("span",`${bot.owner} · ${bot.name}`));
+      const state=_botText("span",bot.status||"offline","adm-pill"+(bot.status==="running"?" ok":""));head.append(identity,state);card.appendChild(head);
+      card.appendChild(_botText("div",`Token check: ${bot.telegram_check_status||"unverified"}${bot.uptime_s?` · uptime ${_fmtUptime(bot.uptime_s)}`:""}`,"adm-hint"));
+      const actions=document.createElement("div");actions.className="adm-tg-job-actions";
+      const inspect=document.createElement("button");inspect.className="btn-ghost sm";inspect.textContent="View job";inspect.onclick=()=>openAdminJob(bot.id);actions.appendChild(inspect);
+      if(bot.telegram_bot_url){const go=document.createElement("a");go.className="btn-ghost sm adm-go-bot";go.textContent="Go to bot";go.href=bot.telegram_bot_url;go.target="_blank";go.rel="noopener noreferrer";actions.appendChild(go);}
+      card.appendChild(actions);grid.appendChild(card);
+    });
+    if(!(data.bots||[]).length)grid.appendChild(_botText("div","No Telegram bot detected in deployed jobs yet.","adm-empty"));
+  }
+  const events=document.getElementById("admTgJobEvents");
+  if(events){events.textContent="";const h=document.createElement("tr");["When","Owner","Action","Job","Bot","Open"].forEach(x=>h.appendChild(_botText("th",x)));events.appendChild(h);(data.events||[]).slice(0,100).forEach(ev=>{const tr=document.createElement("tr");[_admAgo(ev.created_at),ev.owner,ev.action,ev.job_name,ev.telegram_bot_username?`@${ev.telegram_bot_username}`:(ev.telegram_bot_detected?"detected":"—")].forEach(x=>tr.appendChild(_botText("td",x)));const td=document.createElement("td");if(ev.telegram_bot_url){const a=document.createElement("a");a.className="adm-link";a.href=ev.telegram_bot_url;a.target="_blank";a.rel="noopener noreferrer";a.textContent="Go to bot";td.appendChild(a);}else td.textContent="—";tr.appendChild(td);events.appendChild(tr);});}
 }
 
 let _admBlockDraft = null;
@@ -6308,6 +6368,14 @@ function renderAdminJobDetail(d) {
     _admRow("Created", (j.created_at || "").slice(0, 16)),
   );
   if (j.web_slug) t.appendChild(_admRow("Public URL", "/live/" + j.web_slug + "/"));
+  if (j.telegram_bot_detected) {
+    t.appendChild(_admRow("Telegram bot", j.telegram_bot_username ? `@${j.telegram_bot_username}` : "detected"));
+    t.appendChild(_admRow("Telegram check", j.telegram_check_status || "unverified"));
+    if (j.telegram_bot_url) {
+      const go=document.createElement("a");go.className="adm-go-bot";go.href=j.telegram_bot_url;go.target="_blank";go.rel="noopener noreferrer";go.textContent="Go to bot";
+      t.appendChild(_admRow("Open",go));
+    }
+  }
   // KEYS only. The values are bot tokens and API secrets; the console has no
   // reason to display a credential to prove it exists.
   if ((j.env_keys || []).length) {

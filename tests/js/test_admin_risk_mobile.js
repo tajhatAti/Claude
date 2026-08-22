@@ -14,6 +14,6 @@ context.renderAdminRisk({clusters:[{ip:'203.0.113.1',account_count:2,device_coun
 if(dom.window.document.querySelector('img')) throw new Error('risk data parsed as HTML');
 if(!dom.window.document.body.textContent.includes(attack)) throw new Error('full risk information missing');
 if(dom.window.document.querySelectorAll('.adm-risk-card').length!==2) throw new Error('cluster cards missing');
-if(!/\.adm-risk-grid\s*\{[^}]*grid-template-columns:1fr/.test(CSS)) throw new Error('mobile risk stack missing');
+if(!/\.adm-risk-grid[^\{]*\{[^}]*grid-template-columns:1fr/.test(CSS)) throw new Error('mobile risk stack missing');
 if(!/\.adm-detail-modal \.ah-modal-card\s*\{[^}]*width:100%/.test(CSS)) throw new Error('mobile bottom sheet missing');
 console.log('5 admin risk/mobile checks passed');
