@@ -15,11 +15,12 @@ Supported analysis signals include aiogram, python-telegram-bot, pyTelegramBotAP
 
 - Email and Telegram authentication
 - Telegram Mini App sign-in verification
-- Code-first bot hosting wizard
+- Code-first bot hosting wizard with Python/Node starter templates
 - Encrypted bot environment secrets at rest
 - Duplicate-token deployment prevention
 - Polling/webhook diagnostics and duplicate-poller detection
 - Run/stop/restart, live logs, CPU/memory and uptime
+- Immutable deployment versions, failed-candidate isolation, and one-click rollback
 - Per-job URLs and direct `t.me` links
 - Bot workspace snapshots and restore
 - Admin bot inventory, usage history, abuse controls, and audit log
@@ -89,6 +90,10 @@ Required/important environment variables:
 | `CORS_ALLOWED_ORIGINS` | Optional comma-separated trusted external origins |
 
 `render.yaml` generates `JOB_SECRETS_KEY`; configure the remaining secret values in Render.
+
+## Safe deployments and rollback
+
+Every successful creation/update is stored as an immutable source revision. An update remains a `building` candidate until the runner accepts it; a rejected candidate is marked `failed` and never replaces the last healthy source. The Versions tab lists status/error history and can restore any healthy revision. Rollback reuses the current encrypted environment secrets and preserves the bot workspace.
 
 ## Bot health
 

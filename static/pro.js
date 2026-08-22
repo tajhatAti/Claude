@@ -2416,7 +2416,7 @@ const ROUTES = {
 };
 // Canonical: /runspace/{job}[/{logs|details|database|env|settings}].
 // Legacy username-prefixed links and their /page suffix remain readable.
-const JOB_SECTIONS = new Set(["logs", "details", "database", "env", "settings"]);
+const JOB_SECTIONS = new Set(["logs", "details", "database", "env", "versions", "settings"]);
 function parseJobPath(path) {
   const clean = String(path || "").split(/[?#]/, 1)[0].replace(/\/+$/, "");
   const bits = clean.split("/").filter(Boolean);
@@ -3221,7 +3221,7 @@ function _jobBasePath(job) {
 
 function _sectionToTab(section) {
   return ({logs:"logs", details:"metrics", database:"files", env:"env",
-           settings:"settings"})[section] || "code";
+           versions:"versions", settings:"settings"})[section] || "code";
 }
 function _openJobSection(section, noUrl) {
   section = section || "editor";
@@ -3240,7 +3240,7 @@ function _updateJobUrl(job, opts) {
     if (!base) return;
     let section = opts && opts.section;
     if (!section && (opts && opts.details !== undefined ? opts.details : _jdOpen)) {
-      section = ({logs:"logs", metrics:"details", files:"database", env:"env",
+      section = ({logs:"logs", metrics:"details", files:"database", env:"env", versions:"versions",
                   settings:"settings"})[_jdTab] || "details";
     }
     const path = base + (section ? "/" + section : "");
@@ -3580,6 +3580,30 @@ function _rsWizardStep(step) {
     el.classList.toggle("is-active",i===at);
     el.classList.toggle("is-done",i<at);
   });
+}
+
+async function _loadRunSpaceBotTemplates() {
+  const select=document.getElementById("rsBotTemplate");
+  if(!select||select.dataset.loaded)return;
+  try{
+    const data=await api("/api/telegram-bot/templates","GET",null,true);
+    (data.templates||[]).forEach(item=>{const opt=document.createElement("option");opt.value=item.id;opt.textContent=`${item.name} · ${item.framework}`;select.appendChild(opt);});
+    select.dataset.loaded="1";
+  }catch(e){}
+}
+
+async function _applyRunSpaceBotTemplate() {
+  const select=document.getElementById("rsBotTemplate");
+  if(!select||!select.value){toast("Choose a starter template","error");return;}
+  if((_jobCmGetValue()||"").trim()&&!confirm("Replace the current code with this template?"))return;
+  try{
+    const item=await api(`/api/telegram-bot/templates/${encodeURIComponent(select.value)}`,"GET",null,true);
+    _jobCmSetValue(item.code||"");
+    const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
+    const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
+    _rsBotAnalysis=null;_rsWizardStep("code");
+    toast("Template loaded — review it, then analyze","success");
+  }catch(e){toast(e.message,"error");}
 }
 
 async function _analyzeRunSpaceBot() {
@@ -4407,6 +4431,9 @@ function _initWbWiring() {
   const btnStart = document.getElementById("btnStartJob");
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
+  _loadRunSpaceBotTemplates();
+  const applyTemplate=document.getElementById("rsApplyTemplate");
+  if(applyTemplate&&!applyTemplate.dataset.wired){applyTemplate.dataset.wired="1";applyTemplate.addEventListener("click",_applyRunSpaceBotTemplate);}
   const tgAnalyze = document.getElementById("rsTgAnalyze");
   if(tgAnalyze && !tgAnalyze.dataset.wired){tgAnalyze.dataset.wired="1";tgAnalyze.addEventListener("click",_analyzeRunSpaceBot);}
   const tgVerify = document.getElementById("rsTgVerify");
@@ -5330,6 +5357,37 @@ function _agoText(iso) {
    content area rather than scrolling to a different card.
    ============================================================ */
 let _jdTab = "code";
+let _jdVersionsBusy = false;
+
+async function _jdLoadVersions() {
+  const host=document.getElementById("jdVersions");
+  if(!host||!_selectedJobId||_jdVersionsBusy)return;
+  _jdVersionsBusy=true;host.textContent="Loading versions…";
+  try{
+    const data=await api(`/api/jobs/${_selectedJobId}/revisions`,"GET",null,true);
+    host.textContent="";
+    (data.revisions||[]).forEach(rev=>{
+      const row=document.createElement("div");row.className="jd-version";
+      const main=document.createElement("div");main.className="jd-version-main";
+      const title=document.createElement("b");title.textContent=`v${rev.version} · ${rev.action}`;
+      const meta=document.createElement("span");meta.textContent=`${rev.language} · ${(rev.created_at||"").slice(0,16)} · ${rev.status}`;
+      main.append(title,meta);
+      if(rev.error){const err=document.createElement("small");err.className="jd-version-error";err.textContent=rev.error;main.appendChild(err);}
+      row.appendChild(main);
+      if(rev.version===data.current_revision){const current=document.createElement("span");current.className="adm-pill ok";current.textContent="current";row.appendChild(current);}
+      else if(rev.status==="healthy") {const btn=document.createElement("button");btn.className="btn-ghost sm";btn.textContent="Restore";btn.onclick=()=>_jdRollback(rev.id,rev.version);row.appendChild(btn);}
+      host.appendChild(row);
+    });
+    if(!(data.revisions||[]).length)host.textContent="No deployment versions recorded yet.";
+  }catch(e){host.textContent=e.message;}
+  finally{_jdVersionsBusy=false;}
+}
+
+async function _jdRollback(revisionId,version){
+  if(!confirm(`Restore version ${version}? The current bot will restart.`))return;
+  try{await api(`/api/jobs/${_selectedJobId}/revisions/${revisionId}/rollback`,"POST",{},true);toast(`Restored version ${version}`,"success");await loadJobs();await _jdLoadVersions();}
+  catch(e){toast(e.message,"error");}
+}
 
 function jdSwitchTab(name) {
   const tabs = document.querySelectorAll("#jdTabs .jd-tab");
@@ -5352,6 +5410,7 @@ function jdSwitchTab(name) {
   // The Logs tab shows the same stream as the Code tab's Output pane, so
   // mirror the buffer instead of opening a second connection.
   if (name === "logs") _jdMirrorLogs();
+  if (name === "versions") _jdLoadVersions();
   // CodeMirror paints blank if it was sized while display:none.
   if (name === "code") { try { _jobCmRefresh(); } catch (e) {} }
   // Detail tabs are bookmarkable too; Back returns to the previous section.
@@ -5486,6 +5545,7 @@ function _initDetailWiring() {
 
   on("jdBackupNow",     () => _jdBackupNow());
   on("jdRestoreBackup", () => _jdRestoreBackup());
+  on("jdVersionsRefresh", () => _jdLoadVersions());
 
   // Escape closes the page, like any full-screen view.
   document.addEventListener("keydown", e => {
@@ -6528,6 +6588,12 @@ function renderAdminJobDetail(d) {
   }
   if ((j.libs || []).length) t.appendChild(_admRow("Packages", j.libs.join(", ")));
   body.appendChild(t);
+
+  body.appendChild(_admSubhead("Deployment versions", "healthy and failed candidates"));
+  const versions=document.createElement("div");versions.className="adm-version-list";
+  (j.revisions||[]).forEach(v=>{const row=document.createElement("div");row.className="adm-version-row";const main=document.createElement("div");main.append(_botText("b",`v${v.version} · ${v.action}`),_botText("span",`${v.status} · ${(v.created_at||"").slice(0,16)}`));if(v.error)main.appendChild(_botText("small",v.error,"err"));row.append(main,_botText("span",v.status,"adm-pill"+(v.status==="healthy"?" ok":v.status==="failed"?" warn":"")));versions.appendChild(row);});
+  if(!(j.revisions||[]).length)versions.appendChild(_admEmpty("No versions recorded yet."));
+  body.appendChild(versions);
 
   const logHead = document.createElement("div");
   logHead.className = "adm-panel-head";

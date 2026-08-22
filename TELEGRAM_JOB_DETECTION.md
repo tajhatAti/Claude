@@ -44,6 +44,6 @@ The RunSpace bot card separates:
 - framework and polling/webhook analysis;
 - direct **Go to your bot** link.
 
-The admin console’s **Telegram bots on RunSpace** section shows owner, bot job, framework, update mode, process status, token-check status, uptime, and a safe direct link. Immutable run/update/restart history records who ran what without duplicating source or tokens.
+The admin console’s **Telegram bots on RunSpace** section shows owner, bot job, framework, update mode, process status, token-check status, uptime, deployment revision outcomes, and a safe direct link. Immutable run/update/restart/rollback history records who ran what without duplicating secrets. Failed candidate source remains in version history for diagnosis but never replaces the last healthy job source.
 
 “Process running” and “Telegram identity verified” do not falsely claim every command handler is working; application behavior still belongs in logs and activity monitoring.

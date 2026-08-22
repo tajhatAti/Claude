@@ -49,6 +49,7 @@ from services import limits
 from services import abuse_control
 from services import telegram_detector
 from services import secrets_store
+from services import bot_templates
 from services.runner_client import MAX_JOBS_PER_USER
 
 logger = logging.getLogger("codenest.runspace")
@@ -79,6 +80,21 @@ class TelegramTokenVerify(BaseModel):
 class TelegramCodeAnalyze(BaseModel):
     code: str
     language: Optional[str] = "python"
+
+
+@router.get("/api/telegram-bot/templates")
+def telegram_bot_templates(authorization: Optional[str] = Header(None)):
+    get_current_user_and_session(authorization)
+    return {"templates": bot_templates.list_templates()}
+
+
+@router.get("/api/telegram-bot/templates/{template_id}")
+def telegram_bot_template(template_id: str, authorization: Optional[str] = Header(None)):
+    get_current_user_and_session(authorization)
+    item = bot_templates.get_template(template_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    return item
 
 
 @router.post("/api/telegram-bot/analyze")
@@ -285,6 +301,32 @@ def _reject_duplicate_bot_token(fingerprint, exclude_job_id=None):
         )
 
 
+def _create_revision(conn, user_id, job_id, language, code, action="deploy", status="building"):
+    row = conn.execute("SELECT COALESCE(MAX(version),0)+1 AS v FROM bot_revisions WHERE job_id=?",
+                       (job_id,)).fetchone()
+    version = int(dict(row)["v"])
+    cur = conn.execute(
+        "INSERT INTO bot_revisions (job_id,user_id,version,action,language,code,status,created_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (job_id, user_id, version, action, language, code, status, now_utc_str()),
+    )
+    return cur.lastrowid, version
+
+
+def _finish_revision(revision_id, status, error=""):
+    safe_error = telegram_detector.TOKEN_RE.sub("[redacted]", str(error or ""))[:500]
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE bot_revisions SET status=?,error=?,promoted_at=? WHERE id=?",
+            (status, safe_error or None, now_utc_str() if status == "healthy" else None,
+             revision_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _record_deploy_event(conn, user_id, job_id, action, job_name, meta, created_at):
     conn.execute(
         "INSERT INTO job_deploy_events (user_id,job_id,action,job_name,"
@@ -458,10 +500,15 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
              code_analysis["framework"], code_analysis["update_mode"],
              code_analysis["token_source"], now, now),
         )
+        revision_id, version = _create_revision(
+            conn, user["id"], cursor.lastrowid, payload.language, canonical_code,
+            action="deploy", status="healthy")
+        conn.execute("UPDATE bot_revisions SET promoted_at=? WHERE id=?", (now, revision_id))
         _record_deploy_event(conn, user["id"], cursor.lastrowid, "run", name, bot_meta, now)
         conn.commit()
         telegram_detector.consume_verification(payload.telegram_verification_id)
         info["job_db_id"] = cursor.lastrowid
+        info["revision"] = version
         info.update(telegram_detector.public_fields(bot_meta))
         info.update({"telegram_framework": code_analysis["framework"],
                      "telegram_update_mode": code_analysis["update_mode"],
@@ -605,6 +652,105 @@ def telegram_job_health(job_id: int, authorization: Optional[str] = Header(None)
         except Exception:
             health["process_status"] = "unknown"
     return health
+
+
+@router.get("/api/jobs/{job_id}/revisions")
+def list_bot_revisions(job_id: int, authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    _get_own_job(job_id, user)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id,version,action,language,status,error,created_at,promoted_at "
+            "FROM bot_revisions WHERE job_id=? AND user_id=? ORDER BY version DESC LIMIT 50",
+            (job_id, user["id"]),
+        ).fetchall()
+        current = conn.execute(
+            "SELECT version FROM bot_revisions WHERE job_id=? AND status='healthy' "
+            "AND promoted_at IS NOT NULL ORDER BY promoted_at DESC,id DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        return {"revisions": [dict(r) for r in rows],
+                "current_revision": dict(current)["version"] if current else None}
+    finally:
+        conn.close()
+
+
+@router.post("/api/jobs/{job_id}/revisions/{revision_id}/rollback")
+def rollback_bot_revision(job_id: int, revision_id: int,
+                          authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    row = dict(_get_own_job(job_id, user))
+    conn = get_db_connection()
+    try:
+        rev = conn.execute(
+            "SELECT id,version,language,code,status FROM bot_revisions "
+            "WHERE id=? AND job_id=? AND user_id=?",
+            (revision_id, job_id, user["id"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found.")
+    rev = dict(rev)
+    if rev.get("status") != "healthy":
+        raise HTTPException(status_code=409, detail="Only a previously healthy revision can be restored.")
+    rid = row.get("runner_job_id")
+    if not rid:
+        raise HTTPException(status_code=409, detail="Restart this bot once before rolling it back.")
+    env = _row_env(row)
+    body = {"name": row["name"], "language": rev["language"],
+            "code": rev["code"], "env": env}
+    try:
+        resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", body,
+                                          worker=_worker_of(row))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Runner is unreachable; the current revision was kept.")
+    new_worker = _worker_of(row)
+    new_runner_id = rid
+    if resp.status_code == 200:
+        info = resp.json()
+    elif resp.status_code == 404:
+        resp = runner_client._runner_http("POST", "/internal/jobs", {
+            **body, "name": f"u{user['id']}-{row['name']}"})
+        if resp.status_code != 201:
+            raise HTTPException(status_code=502, detail="Runner rejected rollback; the current revision was kept.")
+        info = resp.json()
+        new_runner_id = info["id"]
+        new_worker = getattr(resp, "placed_on", None)
+        info = _restore_then_restart(job_id, info, new_worker)
+    else:
+        raise HTTPException(status_code=502, detail="Runner rejected rollback; the current revision was kept.")
+
+    analysis = telegram_detector.analyze_code(rev["code"], rev["language"])
+    now = now_utc_str()
+    meta = {"detected": bool(row.get("telegram_bot_detected")),
+            "username": row.get("telegram_bot_username"),
+            "bot_id": row.get("telegram_bot_id"),
+            "check_status": row.get("telegram_check_status"),
+            "verified_at": row.get("telegram_verified_at")}
+    conn = get_db_connection()
+    try:
+        new_revision_id, version = _create_revision(
+            conn, user["id"], job_id, rev["language"], rev["code"],
+            action=f"rollback_to_v{rev['version']}", status="healthy")
+        conn.execute("UPDATE bot_revisions SET promoted_at=? WHERE id=?", (now, new_revision_id))
+        conn.execute(
+            "UPDATE jobs SET language=?,code=?,runner_job_id=?,worker_url=?,"
+            "telegram_framework=?,telegram_update_mode=?,telegram_token_source=?,updated_at=? WHERE id=?",
+            (rev["language"], rev["code"], new_runner_id, new_worker,
+             analysis["framework"], analysis["update_mode"], analysis["token_source"],
+             now, job_id),
+        )
+        _record_deploy_event(conn, user["id"], job_id, "rollback", row["name"], meta, now)
+        conn.commit()
+    finally:
+        conn.close()
+    info.update({"job_db_id": job_id, "revision": version,
+                 "rolled_back_from": rev["version"]})
+    info.update(telegram_detector.public_fields(meta))
+    info.update(runner_client._job_web_fields(info, new_worker))
+    return info
 
 
 # ── FILE BROWSER ───────────────────────────────────────────────────────────
@@ -1078,8 +1224,8 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     if not rid:
         raise HTTPException(status_code=409, detail="Job has no runner id — press Restart once, then retry edit.")
 
-    # Persist the new code/name/language in our DB FIRST (source of truth
-    # for future restarts after a full runner redeploy).
+    # Build a candidate revision first. The jobs row remains the last healthy
+    # source of truth until the runner accepts this candidate.
     new_name = (payload.name or row["name"]).strip()[:60]
     new_lang = (payload.language or row["language"]).strip()
     new_code = payload.code if payload.code is not None else row["code"]
@@ -1120,18 +1266,12 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
                 raise HTTPException(status_code=409, detail=f"You already have a job named \u201c{new_name}\u201d \u2014 choose a different name.")
         finally:
             conn0.close()
+    # Create an immutable candidate revision, but DO NOT promote it or replace
+    # the job's source until the runner accepts the deployment.
     conn = get_db_connection()
     try:
-        conn.execute(
-            "UPDATE jobs SET name=?,language=?,code=?,env=?,telegram_bot_detected=?,"
-            "telegram_bot_username=?,telegram_bot_id=?,telegram_check_status=?,"
-            "telegram_verified_at=?,telegram_token_fingerprint=?,telegram_framework=?,telegram_update_mode=?,"
-            "telegram_token_source=?,updated_at=? WHERE id=?",
-            (new_name, new_lang, new_code, secrets_store.pack_env(new_env),
-             *_telegram_columns(bot_meta), token_fingerprint, code_analysis["framework"],
-             code_analysis["update_mode"], code_analysis["token_source"], now, job_id),
-        )
-        _record_deploy_event(conn, user["id"], job_id, "update", new_name, bot_meta, now)
+        revision_id, revision_version = _create_revision(
+            conn, user["id"], job_id, new_lang, new_code, action="update")
         conn.commit()
     finally:
         conn.close()
@@ -1151,7 +1291,13 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     if new_repo:
         patch_body["repo_url"] = new_repo
         if new_entry: patch_body["entry"] = new_entry
-    resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", patch_body, worker=_worker_of(row))
+    new_runner_id = rid
+    new_worker = _worker_of(row)
+    try:
+        resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", patch_body, worker=_worker_of(row))
+    except Exception as exc:
+        _finish_revision(revision_id, "failed", "Runner unreachable")
+        raise
     if resp.status_code == 200:
         info = resp.json()
     elif resp.status_code == 404:
@@ -1167,15 +1313,11 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
                 detail = resp2.json().get("detail", "Runner rejected the job.")
             except Exception:
                 detail = "Runner rejected the job."
+            _finish_revision(revision_id, "failed", detail)
             raise HTTPException(status_code=502, detail=detail)
         info = resp2.json()
-        conn = get_db_connection()
-        try:
-            conn.execute("UPDATE jobs SET runner_job_id = ?, worker_url = ?, updated_at = ? WHERE id = ?",
-                         (info["id"], getattr(resp2, "placed_on", None), now_utc_str(), job_id))
-            conn.commit()
-        finally:
-            conn.close()
+        new_runner_id = info["id"]
+        new_worker = getattr(resp2, "placed_on", None)
         # Same cold-start recovery as restart_job(): the new workspace is
         # empty, so replay the snapshot we just took (or an older one).
         info = _restore_then_restart(job_id, info, getattr(resp2, "placed_on", None))
@@ -1184,12 +1326,34 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
             detail = resp.json().get("detail", "Runner rejected the update.")
         except Exception:
             detail = "Runner rejected the update."
+        _finish_revision(revision_id, "failed", detail)
         raise HTTPException(status_code=502, detail=detail)
+
+    # Runner accepted the candidate. Promote source/config atomically now.
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE jobs SET name=?,language=?,code=?,env=?,runner_job_id=?,worker_url=?,"
+            "telegram_bot_detected=?,telegram_bot_username=?,telegram_bot_id=?,"
+            "telegram_check_status=?,telegram_verified_at=?,telegram_token_fingerprint=?,"
+            "telegram_framework=?,telegram_update_mode=?,telegram_token_source=?,updated_at=? WHERE id=?",
+            (new_name, new_lang, new_code, secrets_store.pack_env(new_env),
+             new_runner_id, new_worker, *_telegram_columns(bot_meta), token_fingerprint,
+             code_analysis["framework"], code_analysis["update_mode"],
+             code_analysis["token_source"], now, job_id),
+        )
+        conn.execute("UPDATE bot_revisions SET status='healthy',error=NULL,promoted_at=? WHERE id=?",
+                     (now, revision_id))
+        _record_deploy_event(conn, user["id"], job_id, "update", new_name, bot_meta, now)
+        conn.commit()
+    finally:
+        conn.close()
 
     if payload.telegram_verification_id:
         telegram_detector.consume_verification(payload.telegram_verification_id)
     info["job_db_id"] = job_id
-    info.update(runner_client._job_web_fields(info, _worker_of(row)))
+    info["revision"] = revision_version
+    info.update(runner_client._job_web_fields(info, new_worker))
     info.update(telegram_detector.public_fields(bot_meta))
     info.update({"telegram_framework": code_analysis["framework"],
                  "telegram_update_mode": code_analysis["update_mode"],

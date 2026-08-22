@@ -65,6 +65,10 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     client=TestClient(app)
     token=client.post("/login",json={"username":"owner@gmail.com","email":"owner@gmail.com","password":"Passw0rd!x"}).json()["token"]
     headers={"Authorization":"Bearer "+token}
+    templates=client.get("/api/telegram-bot/templates",headers=headers)
+    assert templates.status_code==200 and len(templates.json()["templates"])>=4
+    starter=client.get("/api/telegram-bot/templates/aiogram",headers=headers).json()
+    assert "BOT_TOKEN" in starter["code"] and TOKEN not in starter["code"]
     analyzed=client.post("/api/telegram-bot/analyze",headers=headers,json={"language":"python","code":"from telegram.ext import ApplicationBuilder\nTOKEN='example'\nApplicationBuilder().token(TOKEN).run_polling()"})
     assert analyzed.status_code==200 and analyzed.json()["framework"]=="python-telegram-bot"
     assert analyzed.json()["update_mode"]=="polling" and analyzed.json()["needs_token_fix"]
@@ -76,10 +80,14 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     meta={"detected":True,"username":"DemoHelperBot","bot_id":"777","check_status":"verified","verified_at":now}
     monkeypatch.setattr(runspace,"CLUSTER_LIMITS_ENABLED",False)
     sent=[]
+    fail_patch=[False]
     def fake(method,path,*args,**kwargs):
         if method=="POST" and path=="/internal/jobs":
             sent.append(args[0] if args else kwargs)
             return Resp(201,{"id":"rid-bot","status":"running"})
+        if method=="PATCH" and path.startswith("/internal/jobs/"):
+            sent.append(args[0] if args else kwargs)
+            return Resp(500,{"detail":"build failed"}) if fail_patch[0] else Resp(200,{"id":"rid-bot","status":"running"})
         if method=="GET" and path=="/internal/jobs": return Resp(200,{"jobs":[{"id":"rid-bot","status":"running","uptime_s":5}]})
         if method=="GET" and path.startswith("/internal/jobs/"): return Resp(200,{"id":"rid-bot","status":"running","uptime_s":5,"logs":"bot started"})
         return Resp(404,{})
@@ -95,8 +103,24 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     assert 'os.getenv("BOT_TOKEN")' in sent[0]["code"] and sent[0]["env"]["BOT_TOKEN"]==TOKEN
     db=database.get_db_connection(); stored=db.execute("SELECT env FROM jobs WHERE name='demo-bot'").fetchone()["env"]; db.close()
     assert stored.startswith("enc:v1:") and TOKEN not in stored
-    health=client.get(f"/api/jobs/{r.json()['job_db_id']}/telegram-health",headers=headers)
+    job_id=r.json()["job_db_id"]
+    health=client.get(f"/api/jobs/{job_id}/telegram-health",headers=headers)
     assert health.status_code==200 and health.json()["process_status"]=="running"
+    updated=client.patch(f"/api/jobs/{job_id}",headers=headers,json={"code":"TOKEN='example'\nprint('version two')"})
+    assert updated.status_code==200 and updated.json()["revision"]==2,updated.text
+    versions=client.get(f"/api/jobs/{job_id}/revisions",headers=headers).json()
+    assert [v["version"] for v in versions["revisions"][:2]]==[2,1]
+    v1=next(v for v in versions["revisions"] if v["version"]==1)
+    rolled=client.post(f"/api/jobs/{job_id}/revisions/{v1['id']}/rollback",headers=headers,json={})
+    assert rolled.status_code==200 and rolled.json()["revision"]==3,rolled.text
+    fail_patch[0]=True
+    failed=client.patch(f"/api/jobs/{job_id}",headers=headers,json={"code":"TOKEN='example'\nprint('broken candidate')"})
+    assert failed.status_code==502
+    db=database.get_db_connection(); active_code=db.execute("SELECT code FROM jobs WHERE id=?",(job_id,)).fetchone()["code"]; db.close()
+    assert "broken candidate" not in active_code
+    versions=client.get(f"/api/jobs/{job_id}/revisions",headers=headers).json()
+    assert versions["revisions"][0]["status"]=="failed" and versions["current_revision"]==3
+    fail_patch[0]=False
     reused=client.post("/api/jobs",headers=headers,json={"name":"reuse-proof","language":"python","code":"TOKEN='x'","env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":verification_id})
     assert reused.status_code==400 and "Verify" in reused.text
     duplicate_proof=client.post("/api/telegram-bot/verify",headers=headers,json={"token":TOKEN}).json()["telegram_verification_id"]

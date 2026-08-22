@@ -18,4 +18,6 @@ if(/rs-awaiting-bot/.test(JS+CSS))throw Error('token-first editor lock still exi
 if(!/Opened .*analyze the bot code next/.test(JS))throw Error('upload does not lead to analysis');
 if(!/Add Bot 🤖/.test(HTML))throw Error('old job creation label remains');
 if(!dom.window.document.getElementById('rsBotHealth')||!/telegram-health/.test(JS))throw Error('live Telegram delivery health is missing');
-console.log('14 code-first Telegram hosting UI checks passed');
+if(!dom.window.document.getElementById('jdTabVersions')||!/revisions\/.*\$\{revisionId\}\/rollback/.test(JS))throw Error('version rollback UI is missing');
+if(!dom.window.document.getElementById('rsBotTemplate')||!/telegram-bot\/templates/.test(JS))throw Error('starter bot templates are missing');
+console.log('16 code-first Telegram hosting UI checks passed');

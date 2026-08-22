@@ -725,6 +725,26 @@ _SCHEMA_TABLES = [
     )
     """,
     """
+    -- Immutable source revisions. Environment secrets are deliberately not
+    -- duplicated here; rollback reuses the job's current encrypted env.
+    CREATE TABLE IF NOT EXISTS bot_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        action TEXT NOT NULL DEFAULT 'deploy',
+        language TEXT NOT NULL,
+        code TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        promoted_at TEXT,
+        FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        UNIQUE (job_id, version)
+    )
+    """,
+    """
     -- Short-lived proof that an authenticated user verified a BotFather token
     -- before creating a bot. Only a SHA-256 digest is stored, never the token.
     CREATE TABLE IF NOT EXISTS telegram_token_verifications (
@@ -911,6 +931,8 @@ def init_db():
                      "ON telegram_token_verifications (user_id, expires_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_tg_token_fingerprint "
                      "ON jobs (telegram_token_fingerprint)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_revisions_job_version "
+                     "ON bot_revisions (job_id, version)")
 
         conn.commit()
     finally:

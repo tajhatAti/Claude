@@ -976,7 +976,11 @@
               </div>
               <div class="rs-wizard-stage" id="rsTgCodeStage">
                 <div><b>Paste or upload your bot code</b><small>We’ll detect the framework, token usage and polling/webhook mode.</small></div>
-                <button class="btn-primary" id="rsTgAnalyze" type="button">Analyze code</button>
+                <div class="rs-template-actions">
+                  <select class="input-text" id="rsBotTemplate" aria-label="Starter bot template"><option value="">Starter template…</option></select>
+                  <button class="btn-ghost" id="rsApplyTemplate" type="button">Use template</button>
+                  <button class="btn-primary" id="rsTgAnalyze" type="button">Analyze code</button>
+                </div>
               </div>
               <div class="rs-analysis-result" id="rsTgAnalysis" hidden></div>
               <div class="rs-wizard-stage" id="rsTgConnectStage" hidden>
@@ -1111,6 +1115,7 @@
                 <button class="jd-tab"           role="tab" data-jdtab="env"      id="jdTabEnv"      aria-selected="false" aria-controls="jdPanelEnv">Env</button>
                 <button class="jd-tab"           role="tab" data-jdtab="files"    id="jdTabFiles"    aria-selected="false" aria-controls="jdPanelFiles">Files</button>
                 <button class="jd-tab"           role="tab" data-jdtab="metrics"  id="jdTabMetrics"  aria-selected="false" aria-controls="jdPanelMetrics">Metrics</button>
+                <button class="jd-tab"           role="tab" data-jdtab="versions" id="jdTabVersions" aria-selected="false" aria-controls="jdPanelVersions">Versions</button>
                 <button class="jd-tab"           role="tab" data-jdtab="settings" id="jdTabSettings" aria-selected="false" aria-controls="jdPanelSettings">Settings</button>
               </nav>
 
@@ -1200,6 +1205,13 @@
                   </div>
                   <div class="jd-pane-head"><span class="jd-pane-title">Run history</span></div>
                   <ol class="jd-timeline" id="jdTimeline"><li class="jd-empty">Events will appear here.</li></ol>
+                </div>
+
+                <!-- VERSIONS -->
+                <div class="jd-panel" id="jdPanelVersions" role="tabpanel" aria-labelledby="jdTabVersions" hidden>
+                  <div class="jd-pane-head"><span class="jd-pane-title">Deployment versions</span><button class="jd-icon-btn" id="jdVersionsRefresh" type="button" title="Refresh versions">↻</button></div>
+                  <p class="jd-sub">A failed update never replaces the last healthy source. Restore any previously healthy version.</p>
+                  <div class="jd-versions" id="jdVersions"><div class="jd-empty">Open this tab to load versions.</div></div>
                 </div>
 
                 <!-- SETTINGS -->

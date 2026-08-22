@@ -568,6 +568,10 @@ def admin_job_detail_route(job_id: int, authorization: Optional[str] = Header(No
         job["owner_job_count"] = dict(conn.execute(
             "SELECT COUNT(*) AS c FROM jobs WHERE user_id = ?", (job["user_id"],)
         ).fetchone())["c"]
+        job["revisions"] = [dict(r) for r in conn.execute(
+            "SELECT version,action,status,error,created_at,promoted_at FROM bot_revisions "
+            "WHERE job_id=? ORDER BY version DESC LIMIT 20", (job_id,)
+        ).fetchall()]
     finally:
         conn.close()
 
