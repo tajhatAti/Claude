@@ -5772,6 +5772,18 @@ function _admPreserve(fn) {
 }
 
 let _admInFlight = false;
+let _admRiskCache = null;
+let _admRiskAt = 0;
+
+function _loadAdminRiskData() {
+  if (_admRiskCache && Date.now() - _admRiskAt < 60000) return Promise.resolve(_admRiskCache);
+  return Promise.all([
+    api("/admin/ip-clusters", "GET", null, true).catch(() => null),
+    api("/admin/fingerprint-clusters", "GET", null, true).catch(() => null),
+    api("/admin/signup-flags", "GET", null, true).catch(() => null),
+    api("/admin/blocks", "GET", null, true).catch(() => null),
+  ]).then(parts => { _admRiskCache = parts; _admRiskAt = Date.now(); return parts; });
+}
 
 async function loadAdminPanel(force) {
   const stats = document.getElementById("admStats");
@@ -5792,7 +5804,7 @@ async function loadAdminPanel(force) {
   }
   try {
     const botDays = document.getElementById("admBotDays")?.value || 30;
-    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR] = await Promise.all([
+    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR, riskR] = await Promise.all([
       api("/admin/overview", "GET", null, true),
       api("/admin/users", "GET", null, true),
       api("/admin/jobs", "GET", null, true),
@@ -5800,6 +5812,7 @@ async function loadAdminPanel(force) {
       api("/admin/audit-log", "GET", null, true),
       api("/admin/libraries", "GET", null, true).catch(() => null),
       api("/admin/bot-usage?days=" + encodeURIComponent(botDays), "GET", null, true).catch(() => null),
+      _loadAdminRiskData(),
     ]);
     _admPreserve(() => {
       renderAdminStats(ov || {});
@@ -5810,8 +5823,11 @@ async function loadAdminPanel(force) {
       renderAdminAudit((auditR && auditR.audit) || []);
       renderAdminLibs(libsR || {});
       renderAdminBotUsage(botR || {});
+      const risk = riskR || [];
+      renderAdminRisk(risk[0] || {}, risk[1] || {}, risk[2] || {}, risk[3] || {});
     });
     _wireAdminBotUsage();
+    _wireAdminRisk();
     _admMarkFresh();
     stats.dataset.loaded = "1";
   } catch (e) {
@@ -5928,6 +5944,96 @@ function renderAdminLibs(data) {
     row.append(main, count);
     el.appendChild(row);
   });
+}
+
+let _admBlockDraft = null;
+
+function _admRiskCard(kind, cluster) {
+  const card = document.createElement("article");
+  card.className = "adm-risk-card" + (cluster.over_limit || cluster.signup_burst ? " danger" : "");
+  const top = document.createElement("div"); top.className = "adm-risk-card-top";
+  const title = _botText("b", kind === "ip" ? cluster.ip : cluster.fingerprint, "adm-risk-key");
+  const badge = _botText("span", `${cluster.account_count || cluster.signups_in_window || 0} account${(cluster.account_count || cluster.signups_in_window) === 1 ? "" : "s"}`, "adm-pill" + (cluster.over_limit ? " warn" : ""));
+  top.append(title, badge); card.appendChild(top);
+  const details = document.createElement("div"); details.className = "adm-risk-meta";
+  if (kind === "ip") details.textContent = `${cluster.device_count || 0} devices · ${cluster.running_jobs || 0}/${cluster.job_limit || 0} jobs running`;
+  else if (kind === "fingerprint") details.textContent = `${cluster.running_jobs || 0}/${cluster.job_limit || 0} jobs running${cluster.signup_burst ? ` · ${cluster.recent_signups} recent signups` : ""}`;
+  else details.textContent = `${cluster.signups_in_window || 0} signups in ${Math.round((cluster.window_seconds || 0) / 60)} minutes`;
+  card.appendChild(details);
+
+  const accounts = document.createElement("div"); accounts.className = "adm-risk-accounts";
+  (cluster.accounts || []).forEach(u => {
+    const b = document.createElement("button"); b.type="button"; b.className="adm-risk-account";
+    b.textContent = `${u.username || "account"}${u.is_suspended ? " · suspended" : ""}`;
+    b.addEventListener("click", () => openAdminUser(u.id)); accounts.appendChild(b);
+  });
+  card.appendChild(accounts);
+
+  const actions = document.createElement("div"); actions.className="adm-risk-actions";
+  const review = document.createElement("span"); review.className="adm-hint";
+  review.textContent = kind === "ip" ? "IP alone is not identity." : "Review linked accounts first.";
+  actions.appendChild(review);
+  const raw = kind === "ip" ? cluster.ip : cluster.fingerprint_full;
+  if (kind !== "signup" && raw) {
+    const block = document.createElement("button"); block.type="button"; block.className="btn-ghost sm";
+    block.textContent = kind === "ip" ? "Restrict network" : "Restrict device";
+    block.addEventListener("click", () => _admOpenBlock(kind, raw)); actions.appendChild(block);
+  }
+  card.appendChild(actions);
+  return card;
+}
+
+function renderAdminRisk(ipData, fpData, flagData, blockData) {
+  const stats = document.getElementById("admRiskStats");
+  if (!stats) return;
+  const ips = (ipData.clusters || []).filter(c => c.account_count > 1 || c.over_limit);
+  const fps = (fpData.clusters || []).filter(c => c.account_count > 1 || c.over_limit || c.signup_burst);
+  const flags = flagData.flags || [];
+  stats.textContent="";
+  [["shared networks",ips.length],["shared devices",fps.length],["signup bursts",flags.length],["active restrictions",blockData.active || 0]].forEach(([label,value])=>{
+    const box=document.createElement("div"); box.className="adm-stat"+(value ? " warn" : ""); box.append(_botText("b",value),_botText("span",label)); stats.appendChild(box);
+  });
+  const fill=(id, rows, kind, empty)=>{ const el=document.getElementById(id); if(!el)return; el.textContent=""; rows.slice(0,20).forEach(r=>el.appendChild(_admRiskCard(kind,r))); if(!rows.length)el.appendChild(_botText("div",empty,"adm-empty")); };
+  fill("admIpClusters",ips,"ip","No shared networks detected.");
+  fill("admFpClusters",fps,"fingerprint","No shared devices detected.");
+  fill("admSignupFlags",flags,"signup","No signup bursts detected.");
+
+  const active=document.getElementById("admActiveBlocks");
+  if (active) {
+    active.textContent="";
+    const rows=(blockData.blocks || []).filter(b=>b.active);
+    rows.forEach(b=>{ const row=document.createElement("div"); row.className="adm-block-row"; const info=document.createElement("div"); info.append(_botText("b",`${b.scope}: ${b.value}`),_botText("span",`${b.reason || "No reason"} · ${b.expires_at ? "until "+b.expires_at+" UTC" : "permanent"}`)); const remove=document.createElement("button"); remove.className="btn-ghost sm"; remove.textContent="Remove"; remove.onclick=()=>_admRemoveBlock(b.id); row.append(info,remove); active.appendChild(row); });
+    if(!rows.length) active.appendChild(_botText("div","No active manual restrictions.","adm-empty"));
+  }
+}
+
+function _admOpenBlock(scope, value) {
+  _admBlockDraft={scope,value};
+  const target=document.getElementById("admBlockTarget"); if(target)target.textContent=`${scope === "ip" ? "Network" : "Device"}: ${value}`;
+  const reason=document.getElementById("admBlockReason"); if(reason)reason.value="";
+  const code=document.getElementById("admBlockCode"); if(code)code.value="";
+  openModal("admBlockModal");
+}
+
+async function _admConfirmBlock() {
+  if(!_admBlockDraft)return;
+  const btn=document.getElementById("admBlockConfirm");
+  const body={..._admBlockDraft,duration_hours:Number(document.getElementById("admBlockDuration")?.value || 24),reason:document.getElementById("admBlockReason")?.value.trim() || "",code:document.getElementById("admBlockCode")?.value.trim() || ""};
+  try { if(btn)btn.disabled=true; await api("/admin/blocks","POST",body,true); _admRiskAt=0; closeModal("admBlockModal"); toast("Restriction applied","success"); await loadAdminPanel(true); }
+  catch(e){ toast(e.message,"error"); }
+  finally{ if(btn)btn.disabled=false; }
+}
+
+async function _admRemoveBlock(id) {
+  const code=prompt("Enter your admin 2FA code to remove this restriction:");
+  if(!code)return;
+  try { await api(`/admin/blocks/${id}/remove`,"POST",{code:code.trim()},true); _admRiskAt=0; toast("Restriction removed","success"); await loadAdminPanel(true); }
+  catch(e){ toast(e.message,"error"); }
+}
+
+function _wireAdminRisk() {
+  const refresh=document.getElementById("admRiskRefresh"); if(refresh&&!refresh.dataset.wired){refresh.dataset.wired="1";refresh.addEventListener("click",()=>{_admRiskAt=0;loadAdminPanel(true);});}
+  const confirm=document.getElementById("admBlockConfirm"); if(confirm&&!confirm.dataset.wired){confirm.dataset.wired="1";confirm.addEventListener("click",_admConfirmBlock);}
 }
 
 function _admAgo(value) {
@@ -6299,12 +6405,14 @@ function renderAdminUserDetail(d) {
   const t = document.createElement("table");
   t.className = "adm-table adm-jd-table";
   t.append(
+    _admRow("Account ID", u.id),
     _admRow("Email", u.email),
     // Inferred from which credential exists — there is no auth_method column,
     // and presenting a guess as a recorded fact is how a console starts lying.
     _admRow("Signed up via", u.auth_method
       ? u.auth_method + (u.auth_method_inferred ? " (inferred)" : "") : "—"),
     _admRow("Joined", (u.created_at || "").slice(0, 16)),
+    _admRow("Updated", (u.updated_at || "").slice(0, 16)),
     _admRow("Apps", `${(d.jobs || []).length} total · ${d.jobs_running || 0} running`),
     _admRow("Memory", `${Math.round(d.mem_used_mb || 0)}MB across their running apps`),
     _admRow("Devices seen", `${d.devices || 0} device${d.devices === 1 ? "" : "s"} · ${d.networks || 0} network${d.networks === 1 ? "" : "s"}`),
@@ -6312,6 +6420,7 @@ function renderAdminUserDetail(d) {
       ? `${u.telegram_name || "linked"} · ID ${u.telegram_id}`
       : "not connected"),
     _admRow("Last IP", u.last_ip),
+    _admRow("Device fingerprint", u.fingerprint || "not recorded"),
   );
   body.appendChild(t);
 
@@ -6407,11 +6516,11 @@ function renderAdminUserDetail(d) {
   } else {
     const stb = document.createElement("table");
     stb.className = "adm-table";
-    stb.innerHTML = "<tr><th>When</th><th>IP</th><th>Device</th></tr>";
+    stb.innerHTML = "<tr><th>Started</th><th>Last seen</th><th>IP</th><th>Device</th><th>Fingerprint</th></tr>";
     sessions.forEach(sv => {
       const tr = document.createElement("tr");
-      [(sv.created_at || "").slice(0, 16), sv.ip_address || "—",
-       sv.device_info || "—"].forEach(v => {
+      [(sv.created_at || "").slice(0, 16), (sv.last_seen || "").slice(0,16), sv.ip_address || "—",
+       sv.device_info || "—", sv.fingerprint || "—"].forEach(v => {
         const td = document.createElement("td");
         td.textContent = v;
         tr.appendChild(td);
@@ -6419,6 +6528,16 @@ function renderAdminUserDetail(d) {
       stb.appendChild(tr);
     });
     body.appendChild(stb);
+  }
+
+  body.appendChild(_admSubhead("Security activity", "latest account actions and source IP"));
+  const events=(d.events || []).slice(0,20);
+  if(!events.length) body.appendChild(_admEmpty("No account activity recorded."));
+  else {
+    const et=document.createElement("table"); et.className="adm-table";
+    et.innerHTML="<tr><th>When</th><th>Action</th><th>Details</th><th>IP</th></tr>";
+    events.forEach(ev=>{ const tr=document.createElement("tr"); [(ev.created_at||"").slice(0,16),ev.action||"—",ev.details||"—",ev.ip_address||"—"].forEach(v=>{const td=document.createElement("td");td.textContent=v;tr.appendChild(td);});et.appendChild(tr); });
+    body.appendChild(et);
   }
 }
 

@@ -1428,9 +1428,59 @@ body.signed-out-in .hero {
 .adm-bot-row { display: flex; justify-content: space-between; gap: var(--s2); padding: 7px 0; border-bottom: 1px solid var(--line); }
 .adm-bot-row span { color: var(--fg-3); text-align: right; }
 @media (max-width: 760px) { .adm-bot-grid { grid-template-columns: 1fr; } .adm-range { margin-left: 0; } }
+.adm-risk-help { display:flex; flex-direction:column; gap:4px; margin:var(--s3) 0; padding:var(--s3); border:1px solid var(--line); border-left:3px solid var(--ok); border-radius:var(--r-row); color:var(--fg-2); }
+.adm-risk-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--s3); margin-top:var(--s3); }
+.adm-risk-grid > section { min-width:0; padding:var(--s3); border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); }
+.adm-risk-grid h4 { margin:0 0 4px; }
+.adm-risk-card { margin-top:var(--s3); padding:var(--s3); border:1px solid var(--line); border-radius:var(--r-row); background:var(--card); }
+.adm-risk-card.danger { border-color:var(--warn); }
+.adm-risk-card-top,.adm-risk-actions,.adm-block-row { display:flex; align-items:center; justify-content:space-between; gap:var(--s2); }
+.adm-risk-key { min-width:0; overflow-wrap:anywhere; font-family:var(--mono); font-size:var(--fs-2); }
+.adm-risk-meta { margin-top:5px; color:var(--fg-3); font-size:var(--fs-2); }
+.adm-risk-accounts { display:flex; flex-wrap:wrap; gap:6px; margin:var(--s2) 0; }
+.adm-risk-account { min-height:32px; padding:4px 9px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-2); font-size:var(--fs-2); }
+.adm-risk-actions { margin-top:var(--s2); }
+.adm-risk-block-head { margin-top:var(--s4); }
+.adm-block-row { padding:var(--s3); border-bottom:1px solid var(--line); }
+.adm-block-row > div { display:flex; flex-direction:column; gap:3px; min-width:0; overflow-wrap:anywhere; }
+.adm-block-row span { color:var(--fg-3); font-size:var(--fs-2); }
+.adm-risk-warning { margin:var(--s3) 0; padding:var(--s3); border-radius:var(--r-row); background:color-mix(in srgb,var(--warn) 12%,transparent); color:var(--fg-2); font-size:var(--fs-2); }
+.adm-block-card textarea { min-height:88px; resize:vertical; padding-top:10px; }
 .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .adm-table  { min-width: 560px; }
 .adm-act    { display: flex; gap: var(--s1); }
+@media (max-width: 760px) {
+  #tab-admin { padding-inline:10px; }
+  #tab-admin > .tab-head { position:sticky; top:0; z-index:8; margin:0 -10px var(--s3); padding:10px 12px; background:color-mix(in srgb,var(--bg) 94%,transparent); backdrop-filter:blur(12px); }
+  #tab-admin > .tab-head h2 { font-size:var(--fs-6); }
+  .adm-head-right { margin-left:auto; }
+  .adm-fresh { display:none; }
+  .adm-stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .adm-stat { padding:10px; }
+  .adm-stat b { font-size:var(--fs-5); overflow-wrap:anywhere; }
+  .adm-panel { padding:12px; margin-bottom:10px; border-radius:var(--r-row); }
+  .adm-panel-head { align-items:flex-start; flex-wrap:wrap; gap:7px; }
+  .adm-panel-head > .adm-hint { flex-basis:100%; }
+  .adm-panel-head button,.adm-panel-head select,.adm-act,.adm-risk-actions button,.adm-block-row button { min-height:44px; }
+  .adm-risk-grid { grid-template-columns:1fr; gap:10px; }
+  .adm-risk-grid > section { padding:10px; }
+  .adm-risk-card { padding:10px; }
+  .adm-risk-actions { align-items:flex-end; }
+  .adm-table-wrap { margin-inline:-12px; padding-bottom:4px; scrollbar-width:thin; border-block:1px solid var(--line); }
+  .adm-table { min-width:520px; }
+  .adm-table th,.adm-table td { padding:10px; }
+  .adm-table th:first-child,.adm-table td:first-child { position:sticky; left:0; z-index:2; background:var(--card); box-shadow:1px 0 0 var(--line); }
+  .adm-detail-modal { align-items:flex-end; padding:0; }
+  .adm-detail-modal .ah-modal-card { width:100%; max-width:none; max-height:92dvh; margin:0; border-radius:18px 18px 0 0; padding:14px; overflow:auto; }
+  .adm-block-row { align-items:flex-start; }
+  .adm-bot-row { flex-wrap:wrap; }
+  .adm-bot-row span { text-align:left; }
+}
+@media (max-width: 390px) {
+  .adm-stats { grid-template-columns:1fr 1fr; }
+  .adm-stat span { font-size:11px; }
+  .adm-risk-card-top { align-items:flex-start; }
+}
 /* ── settings / profile / 2FA ──────────────────────────────────────────── */
 .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); }
 .profile-card { padding: var(--s5); }

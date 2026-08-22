@@ -82,6 +82,23 @@ class AbuseReportIn(BaseModel):
     reason: Optional[str] = ""
 
 
+class AdminBlockIn(BaseModel):
+    scope: str
+    value: str
+    duration_hours: Optional[int] = 24
+    reason: Optional[str] = ""
+    code: Optional[str] = None
+
+
+class AdminBlockRemove(BaseModel):
+    code: Optional[str] = None
+
+
+def _require_admin_2fa(conn, admin, code):
+    row = conn.execute("SELECT is_enabled FROM user_2fa WHERE user_id=?", (admin["id"],)).fetchone()
+    if not row or not row["is_enabled"]:
+        raise HTTPException(status_code=409, detail="Enable 2FA on your admin account first — destructive actions require it.")
+    _verify_second_factor(conn, admin["id"], code or "")
 
 
 @router.get("/admin/panel-html", include_in_schema=False)
@@ -654,12 +671,7 @@ def admin_set_suspended(payload: AdminSuspend, authorization: Optional[str] = He
     conn = get_db_connection()
     try:
         # Destructive actions demand the admin's own second factor, every time.
-        row = conn.execute("SELECT is_enabled FROM user_2fa WHERE user_id=?", (admin["id"],)).fetchone()
-        if not row or not row["is_enabled"]:
-            raise HTTPException(
-                status_code=409,
-                detail="Enable 2FA on your admin account first — destructive actions require it.")
-        _verify_second_factor(conn, admin["id"], payload.code or "")
+        _require_admin_2fa(conn, admin, payload.code)
         target = conn.execute("SELECT id, username FROM users WHERE id=?", (payload.user_id,)).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -778,8 +790,99 @@ def report_abuse_submit(payload: AbuseReportIn, request: Request):
 
 
 # ================================
-# GLOBAL SEARCH (snippets + RunSpace apps)
+# ABUSE CONTROLS — explicit, reversible, 2FA-gated
 # ================================
+
+@router.get("/admin/blocks")
+def admin_blocks(authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT b.id,b.scope,b.value,b.reason,b.created_at,b.expires_at,b.revoked_at,"
+            "u.username AS created_by_name FROM admin_blocks b "
+            "LEFT JOIN users u ON u.id=b.created_by ORDER BY b.id DESC LIMIT 200"
+        ).fetchall()
+        now = now_utc_str()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["active"] = not item.get("revoked_at") and (
+                not item.get("expires_at") or item["expires_at"] > now)
+            out.append(item)
+        return {"blocks": out, "active": sum(1 for x in out if x["active"])}
+    finally:
+        conn.close()
+
+
+@router.post("/admin/blocks")
+def admin_create_block(payload: AdminBlockIn,
+                       authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    scope = (payload.scope or "").strip().lower()
+    value = (payload.value or "").strip()
+    if scope not in ("ip", "fingerprint"):
+        raise HTTPException(status_code=400, detail="Block scope must be ip or fingerprint.")
+    if scope == "ip":
+        import ipaddress
+        try:
+            value = str(ipaddress.ip_address(value))
+        except ValueError:
+            # TestClient and some trusted-proxy deployments expose a stable
+            # non-IP network label. Never accept arbitrary long input.
+            if not value or len(value) > 100 or not re.match(r"^[A-Za-z0-9:._-]+$", value):
+                raise HTTPException(status_code=400, detail="Invalid IP address.")
+    elif not re.match(r"^[a-fA-F0-9]{64}$", value):
+        raise HTTPException(status_code=400, detail="Invalid device fingerprint.")
+    hours = int(payload.duration_hours or 0)
+    if hours < 0 or hours > 8760:
+        raise HTTPException(status_code=400, detail="Duration must be 1–8760 hours, or 0 for permanent.")
+    reason = (payload.reason or "").strip()[:300]
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Add a short reason for the audit trail.")
+    created = now_utc_str()
+    expires = ((now_utc() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+               if hours else None)
+    conn = get_db_connection()
+    try:
+        _require_admin_2fa(conn, admin, payload.code)
+        duplicate = conn.execute(
+            "SELECT id FROM admin_blocks WHERE scope=? AND value=? AND revoked_at IS NULL "
+            "AND (expires_at IS NULL OR expires_at > ?)", (scope, value, created)).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="That network or device is already blocked.")
+        cur = conn.execute(
+            "INSERT INTO admin_blocks (scope,value,reason,created_by,created_at,expires_at) "
+            "VALUES (?,?,?,?,?,?)", (scope, value, reason, admin["id"], created, expires))
+        _admin_audit(conn, admin["id"], "block_" + scope, value,
+                     f"until={expires or 'permanent'}; reason={reason}")
+        conn.commit()
+        return {"message": "Block is active.", "id": cur.lastrowid, "expires_at": expires}
+    finally:
+        conn.close()
+
+
+@router.post("/admin/blocks/{block_id}/remove")
+def admin_remove_block(block_id: int, payload: AdminBlockRemove,
+                       authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        _require_admin_2fa(conn, admin, payload.code)
+        row = conn.execute("SELECT id,scope,value,revoked_at FROM admin_blocks WHERE id=?",
+                           (block_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Block not found.")
+        if row["revoked_at"]:
+            return {"message": "Block was already removed."}
+        conn.execute("UPDATE admin_blocks SET revoked_at=?,revoked_by=? WHERE id=?",
+                     (now_utc_str(), admin["id"], block_id))
+        _admin_audit(conn, admin["id"], "unblock_" + row["scope"], row["value"], "")
+        conn.commit()
+        return {"message": "Block removed."}
+    finally:
+        conn.close()
+
 
 @router.get("/admin/fingerprint-clusters")
 def get_fingerprint_clusters(authorization: Optional[str] = Header(None)):

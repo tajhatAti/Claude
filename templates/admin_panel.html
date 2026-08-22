@@ -11,6 +11,24 @@
         <div class="adm-panel-head"><h3>Signups · last 14 days</h3><span class="adm-hint" id="admCap"></span></div>
         <div class="adm-spark" id="admSpark"></div>
       </div>
+      <div class="adm-panel adm-risk-panel">
+        <div class="adm-panel-head">
+          <div><h3>Abuse prevention</h3><span class="adm-hint">shared IP is a signal, not proof — review accounts before blocking</span></div>
+          <button class="btn-ghost sm" id="admRiskRefresh">Refresh</button>
+        </div>
+        <div class="adm-stats" id="admRiskStats"></div>
+        <div class="adm-risk-help">
+          <b>Protection already active</b>
+          <span>Per-account, per-device and per-network job caps; signup rate limits; email verification; admin 2FA; session closure and job stop on suspension.</span>
+        </div>
+        <div class="adm-risk-grid">
+          <section><h4>Shared networks</h4><p class="adm-hint">Multiple accounts on one IP. Mobile carriers, homes and offices can be legitimate.</p><div id="admIpClusters"></div></section>
+          <section><h4>Shared devices</h4><p class="adm-hint">Same browser/device fingerprint is stronger evidence than IP alone.</p><div id="admFpClusters"></div></section>
+          <section><h4>Signup bursts</h4><p class="adm-hint">Rapid account creation is flagged for review, never auto-convicted.</p><div id="admSignupFlags"></div></section>
+        </div>
+        <div class="adm-panel-head adm-risk-block-head"><h4>Active restrictions</h4><span class="adm-hint">Blocks prevent new signups and new jobs; existing users keep access to their data.</span></div>
+        <div id="admActiveBlocks"></div>
+      </div>
       <div class="adm-panel adm-bot-panel">
         <div class="adm-panel-head">
           <h3>Telegram bot usage</h3>
@@ -59,6 +77,18 @@
       <button class="ah-x" data-close>✕</button>
     </div>
     <div id="admUserBody"></div>
+  </div>
+</div>
+
+<div class="ah-modal hidden adm-detail-modal" id="admBlockModal">
+  <div class="ah-modal-card adm-block-card">
+    <div class="ah-modal-head"><h3>Restrict abuse source</h3><button class="ah-x" data-close>✕</button></div>
+    <p class="adm-hint" id="admBlockTarget"></p>
+    <label class="field"><span>Duration</span><select class="input-text" id="admBlockDuration"><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option><option value="0">Permanent</option></select></label>
+    <label class="field"><span>Reason (saved in audit log)</span><textarea class="input-text" id="admBlockReason" maxlength="300" placeholder="Example: 12 rapid signups and repeated quota evasion"></textarea></label>
+    <label class="field"><span>Your admin 2FA code</span><input class="input-text" id="admBlockCode" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="6-digit code"></label>
+    <div class="adm-risk-warning">An IP may belong to a household, office, university or mobile carrier. Prefer suspending confirmed abusive accounts; block a network only when the evidence is clear.</div>
+    <button class="btn-primary block" id="admBlockConfirm">Apply restriction</button>
   </div>
 </div>
 

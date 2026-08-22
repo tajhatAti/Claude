@@ -14,6 +14,7 @@ import pyotp
 import qrcode
 
 from services import email as email_service
+from services import abuse_control
 from services.twofa import _verify_second_factor
 
 router = APIRouter()
@@ -74,6 +75,7 @@ def signup(user: UserSignup, request: Request):
     # Device fingerprint (§3) — stored on the account so §4 can aggregate job
     # counts across every account that shares this device.
     fingerprint = normalise_fingerprint(user.fingerprint)
+    abuse_control.enforce(fingerprint=fingerprint, ip=client_ip(request), action="signup")
 
     username = validate_username(user.username)
     email = str(user.email).strip().lower()

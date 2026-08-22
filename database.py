@@ -698,6 +698,24 @@ _SCHEMA_TABLES = [
     )
     """,
     """
+    -- Admin-managed network/device blocks. A block prevents new signups and
+    -- new jobs; it does not treat a shared IP as proof or lock existing users
+    -- out of their data. Revocation is retained for the audit trail.
+    CREATE TABLE IF NOT EXISTS admin_blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scope TEXT NOT NULL,
+        value TEXT NOT NULL,
+        reason TEXT,
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT,
+        revoked_at TEXT,
+        revoked_by INTEGER,
+        FOREIGN KEY (created_by) REFERENCES users (id),
+        FOREIGN KEY (revoked_by) REFERENCES users (id)
+    )
+    """,
+    """
     -- Durable bot activity. chat_id is retained even when no site account is
     -- linked, so the admin funnel includes the people who have not signed up.
     CREATE TABLE IF NOT EXISTS bot_events (
@@ -824,6 +842,8 @@ def init_db():
         # Read paths filter by time, then group by chat/command.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_created_at ON bot_events (created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_chat_id ON bot_events (chat_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_blocks_lookup "
+                     "ON admin_blocks (scope, value, revoked_at, expires_at)")
 
         conn.commit()
     finally:

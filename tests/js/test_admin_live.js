@@ -77,6 +77,8 @@ const src = [
   'function renderAdminStats(){} function renderAdminSpark(){}',
   'function renderAdminReports(){} function renderAdminAudit(){}',
   'function renderAdminLibs(){} function renderAdminBotUsage(){} function _wireAdminBotUsage(){}',
+  'function renderAdminRisk(){} function _wireAdminRisk(){}',
+  'function _loadAdminRiskData(){return Promise.resolve([{}, {}, {}, {}]);}',
   'let _admLastOk = 0;',
   extract('_admPreserve'),
   extract('_admMarkFresh'),

@@ -44,6 +44,7 @@ from fastapi.responses import StreamingResponse
 
 from services import runner_client
 from services import limits
+from services import abuse_control
 from services.runner_client import MAX_JOBS_PER_USER
 
 logger = logging.getLogger("codenest.runspace")
@@ -53,10 +54,10 @@ logger = logging.getLogger("codenest.runspace")
 SSE_POLL_INTERVAL_S = 1.5
 SSE_MAX_LIFETIME_S = float(os.getenv("SSE_MAX_LIFETIME_S", "900"))  # 15 min, then reconnect
 
-# Cross-account fingerprint/IP cluster limiting is written and tested
-# (services/limits.py) but intentionally DISABLED: current scope is a simple
-# per-account cap. Set CLUSTER_LIMITS_ENABLED=1 to switch it back on.
-CLUSTER_LIMITS_ENABLED = os.getenv("CLUSTER_LIMITS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+# Cross-account limits are on by default. Operators can explicitly disable
+# them, but the safe production default prevents account farms from multiplying
+# the ordinary per-account allowance.
+CLUSTER_LIMITS_ENABLED = os.getenv("CLUSTER_LIMITS_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 
 router = APIRouter()
 
@@ -238,6 +239,7 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
     # in services/limits.py and is re-enabled with CLUSTER_LIMITS_ENABLED=1.
     fp = normalise_fingerprint(request.headers.get("X-Fingerprint", "")[:4000])
     ip = client_ip(request)
+    abuse_control.enforce(fingerprint=fp, ip=ip, action="job")
 
     conn = get_db_connection()
     try:
