@@ -776,6 +776,7 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 .rs-side-list { flex: 1 1 auto; overflow-y: auto; padding: var(--s2); display: flex; flex-direction: column; gap: var(--s-2); }
 .rs-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
 .job-item {
+  contain:layout paint;
   display: flex; align-items: center; gap: var(--s-3);
   padding: var(--s-3) var(--s3);
   background: var(--card); border: 1px solid var(--line);
@@ -788,6 +789,10 @@ body.rs-active .dash-tab-content:not(#tab-jobs):not(.term-page) { display: none;
 }
 .job-item:hover { background: var(--card-2); transform: translateX(2px); box-shadow: var(--e2); }
 .job-item.active { background: var(--card-2); border-color: var(--line-2); box-shadow: var(--e2), inset 3px 0 0 var(--fg); }
+@media (hover:none), (pointer:coarse) {
+  .job-item:hover { transform:none; box-shadow:var(--e1); }
+  .job-item.active { box-shadow:inset 3px 0 0 var(--fg); }
+}
 .job-name { font-weight: 600; font-size: var(--fs-3); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-meta { font-size: var(--fs-1); color: var(--fg-3); font-family: var(--mono); }
 .rs-empty, .jd-empty, .ap-empty, .cmd-empty, .adm-empty {
@@ -1709,7 +1714,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
    removed when the toolbar was consolidated into .rs-head, and
    test_runspace_shell guards against them coming back.) */
 #tab-jobs .rs-meta { flex-wrap: nowrap; overflow-x: auto; }
-.rs-bot-wizard { border-bottom:1px solid var(--line); padding:10px 12px; background:var(--card); }
+.rs-bot-wizard { contain:layout paint; border-bottom:1px solid var(--line); padding:10px 12px; background:var(--card); }
 .rs-wizard-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:10px; }
 .rs-wizard-steps span { display:flex; align-items:center; gap:6px; min-width:0; padding:7px 8px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-3); font-size:var(--fs-2); white-space:nowrap; }
 .rs-wizard-steps span b { width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:var(--card-2); }
@@ -1956,11 +1961,8 @@ textarea { box-sizing: border-box; min-height: calc(var(--ctl-h) * 2); }
   transition: background-color .18s var(--ease), box-shadow .18s var(--ease);
 }
 #tab-jobs .rs-status-dot.ok, .job-dot.running, .jstatus-dot.running {
-  animation: rsStatusPulse 1.8s ease-in-out infinite;
-}
-@keyframes rsStatusPulse {
-  0%, 100% { opacity: 1;  transform: scale(1); }
-  50%      { opacity: .55; transform: scale(.86); }
+  animation: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb,var(--ok) 18%,transparent);
 }
 .jstatus-dot.checking,
 #tab-jobs .rs-status-dot.checking { background: var(--warn); }
@@ -2989,7 +2991,9 @@ body.term-open .wb-term-kbd { display: flex; }
 
 /* The editor pane claims all remaining height. */
 #tab-jobs .rs-ws    { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-#tab-jobs .rs-split { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+#tab-jobs .rs-split { position:relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+#tab-jobs .rs-job-loading .rs-split::after { content:"Loading bot…"; position:absolute; inset:0; z-index:8; display:grid; place-items:center; background:color-mix(in srgb,var(--card) 88%,transparent); color:var(--fg-3); font-family:var(--mono); font-size:var(--fs-2); pointer-events:none; }
+#tab-jobs .rs-job-loading .rs-split { cursor:progress; }
 #tab-jobs .rs-editor { flex: 1 1 auto; min-height: 0; }
 #tab-jobs .rs-cm-host { flex: 1 1 auto; min-height: 0; height: 100%; }
 #tab-jobs .rs-cm-host .cm-editor { height: 100%; }

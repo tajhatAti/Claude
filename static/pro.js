@@ -3262,6 +3262,7 @@ function _updateJobUrl(job, opts) {
 // We never infer state from array length — an empty array while 'loading'
 // must NEVER flash the "no jobs" empty state.
 let _jobsStatus = "idle";
+let _jobsLoadBusy = false;
 
 function _setJobsStatus(status) {
   _jobsStatus = status;
@@ -3338,7 +3339,8 @@ function _setJobsStatus(status) {
 
 async function loadJobs() {
   const list = document.getElementById("jobsList");
-  if (!list) return;
+  if (!list || _jobsLoadBusy) return;
+  _jobsLoadBusy = true;
   // Always enter 'loading' first. Stale-while-revalidate: if we already have
   // job rows on screen from a previous successful load, leave them in place
   // instead of swapping to skeleton (avoids flicker). Only show skeleton
@@ -3346,7 +3348,7 @@ async function loadJobs() {
   const hasPrior = !!(window._lastJobs && window._lastJobs.length) || !!list.querySelector(".job-item");
   // SECOND leak of the same class as the one below, and the one that actually
   // fires FIRST. _setJobsStatus("loading") does `ws.style.display = "none"`.
-  // On an account with zero saved jobs hasPrior is false, so every 7s poll
+  // On an account with zero saved jobs hasPrior is false, so every background poll
   // hid the workspace here — BEFORE the _composingNew guard further down ever
   // ran. An editor the user is typing into owns the main pane; a background
   // refresh may never take it away, so skip the visual state change entirely
@@ -3371,7 +3373,7 @@ async function loadJobs() {
       // above correctly avoids _showEmpty()/_showWorkspace() — but then
       // called _setJobsStatus("empty"), and THAT function does
       // `ws.style.display = "none"` on the workspace (see the "empty" branch).
-      // So on an account with zero saved jobs, every 7s poll hid the blank
+      // So on an account with zero saved jobs, every background poll hid the blank
       // New editor and swapped in the "No bots yet" panel. It looked
       // exactly like a spontaneous page reload, and it also explains the
       // stray word on screen: that panel's subtitle is the sentence
@@ -3399,8 +3401,16 @@ async function loadJobs() {
       // show the "No bot selected" empty panel (different copy from zero-jobs).
       if (_selectedJobId) {
         const cur = jobs.find(x => String(x.id) === String(_selectedJobId));
-        if (cur) { _showWorkspace(cur); _updateJobUrl(cur); }
-        else { _selectedJobId = null; _showEmpty(false); }
+        if (cur) {
+          // A status poll must not remount/refresh CodeMirror. That scheduled
+          // editor work every seven seconds even when nothing changed.
+          window._lastJobs = jobs;
+          _reflectJobStatus(cur);
+          _renderTelegramBot(cur);
+          const ws=document.getElementById("wbWorkspace");
+          if(ws&&ws.style.display==="none")_showWorkspace(cur,false);
+          if(document.body.classList.contains("rs-insp-open"))renderInspector();
+        } else { _selectedJobId = null; _showEmpty(false); }
       } else {
         _showEmpty(false);
       }
@@ -3421,6 +3431,8 @@ async function loadJobs() {
     _lastJobsSig = sig;
     _setJobsStatus("error");
     _loadErrorBox(list, "deployments", loadJobs, e);
+  } finally {
+    _jobsLoadBusy = false;
   }
 }
 
@@ -3435,10 +3447,12 @@ function _fmtUptime(s) {
 let _selectedJobId = null;
 let _logSSE = null;
 let _logFollow = true;
+let _streamChromeAt = 0;
+let _streamChromeState = "";
 let _jobDirty = false;          // code changed since last deploy (enables Run button)
 let _suppressAutoSelect = 0;   // ms epoch until which renderJobs() must NOT auto-select a job (New-flow race guard)
 // TRUE from the moment "New" is clicked until the job is actually deployed.
-// The old guard was a 1500ms timer, but the jobs list polls every 7s — so the
+// The old guard was a 1500ms timer, but the jobs list polls in the background — so the
 // first poll after that window auto-selected an existing job and wiped the
 // blank editor while the user was still typing (it looked like a page reload).
 let _composingNew = false;
@@ -3557,13 +3571,12 @@ function _renderLogs(text, force) {
  *  Removing + reflowing + re-adding is required: re-adding a class that is
  *  already present does not restart a CSS animation. */
 function _playSwap(el) {
-  if (!el) return;
+  if (!el || typeof el.animate !== "function") return;
   try {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    el.classList.remove("rs-swap");
-    void el.offsetWidth;                 // force reflow so the animation restarts
-    el.classList.add("rs-swap");
-    setTimeout(() => el.classList.remove("rs-swap"), 260);
+    // Compositor-only feedback. The old animation forced synchronous layout
+    // on every bot switch, so its decoration caused the perceived lag.
+    el.animate([{opacity:.88},{opacity:1}], {duration:120,easing:"ease-out"});
   } catch (e) {}
 }
 
@@ -3725,13 +3738,14 @@ function _showWorkspace(job, animate) {
   const emp = document.getElementById("wbEmpty");
   const ws = document.getElementById("wbWorkspace");
   const boot = document.getElementById("wbBootLoader");
+  const wasHidden = !ws || ws.style.display === "none";
   if (emp) emp.style.display = "none";
   if (ws)  ws.style.display = "flex";
   if (boot) boot.style.display = "none";
   if (animate) _playSwap(ws);
   _reflectJobStatus(job);
   _renderTelegramBot(job);
-  _jobCmRefresh();
+  if (wasHidden) _jobCmRefresh();
 }
 
 function _clearWorkspaceChrome() {
@@ -3849,9 +3863,8 @@ function _reflectJobStatus(jobOrId) {
   if (_reflectJobStatus._last !== st.label) {
     _reflectJobStatus._last = st.label;
     document.querySelectorAll("#tab-jobs .rs-badge, #tab-jobs .jd-badge").forEach(b => {
-      b.classList.remove("status-changed");
-      void b.offsetWidth;                  // reflow so the animation restarts
-      b.classList.add("status-changed");
+      if (typeof b.animate === "function")
+        b.animate([{opacity:.55},{opacity:1}], {duration:100,easing:"ease-out"});
     });
   }
   const isLive = (stKey === "running" || stKey === "starting" || stKey === "installing");
@@ -4058,6 +4071,13 @@ function _setRunnerStat(text, cls) {
   if (text) s.title = text;
 }
 
+function _setJobSwitching(on) {
+  const ws=document.getElementById("wbWorkspace");
+  if(!ws)return;
+  ws.classList.toggle("rs-job-loading",!!on);
+  ws.setAttribute("aria-busy",on?"true":"false");
+}
+
 function selectJob(id) {
   if (id === null || id === undefined || id === "") { deselectJob(); return; }
   id = String(id);
@@ -4085,15 +4105,28 @@ function selectJob(id) {
   });
   const btn = document.getElementById("btnStartJob");
   if (btn) btn.dataset.editingId = _selectedJobId;
-  // §2: show the bar the instant the switch is initiated (not after the
-  // request resolves), so the wait never looks like a frozen UI.
+  // Paint cached identity/status in the click event itself. Previously the
+  // old bot stayed on screen until /api/jobs/{id} returned, so network time
+  // looked exactly like an ignored tap.
+  const cached=(window._lastJobs||[]).find(x=>String(x.id)===id);
+  if(cached){
+    _showWorkspace(cached,false);
+    const name=document.getElementById("jobName");if(name)name.value=cached.name||"";
+    const lang=document.getElementById("jobLang");if(lang&&cached.language){lang.value=cached.language;_jobCmSetMode(cached.language);}
+    if(Object.prototype.hasOwnProperty.call(cached,"code")){
+      if(_jobCmGetValue()!==(cached.code||""))_jobCmSetValue(cached.code||"");
+      _setJobSwitching(false);
+    } else _setJobSwitching(true);
+  }
+  // Show the slim progress bar immediately; detail data fills behind it.
   _progressStart();
   // Kick off data + log stream but DON'T await them. Instant visual response.
   fetchJobDetail(id).finally(() => _progressDone());
   restartLogStream(id);
   requestAnimationFrame(() => { try { _jobCmRefresh(); } catch(e){} });
-  // Update URL once job detail loads (we need the name)
-  setTimeout(() => { const j = (window._lastJobs||[]).find(x => String(x.id) === _selectedJobId); if (j) _updateJobUrl(j); }, 120);
+  // The list already carries the name; update the address immediately instead
+  // of adding an artificial 120ms delay after every click.
+  if (cached) _updateJobUrl(cached);
   _closeJobsRail();
   const tab = document.getElementById("tab-jobs");
   if (tab) tab.classList.remove("side-open");
@@ -4140,7 +4173,9 @@ async function fetchJobDetail(id, opts) {
     });
     if (!r.ok) {
       // The caller owns the progress bar bracket; do not release it here.
-      // A failed refresh must not blank an open editor.
+      // A failed refresh must not blank an open editor or leave its loading
+      // veil stuck over cached content.
+      _setJobSwitching(false);
       if (!_selectedJobId) _showEmpty(false);
       return;
     }
@@ -4178,8 +4213,8 @@ async function fetchJobDetail(id, opts) {
       _jobDirty = false;
     }
     _updateStats();
-    _showWorkspace(job, true);   // animate: this is a job→job switch (§4)
-    _reflectJobStatus(job);
+    _setJobSwitching(false);
+    _showWorkspace(job, false);  // cached click already provided visual feedback
     _setHint("ok", "");
     // If the detail drawer is open, re-render it with the new job's data so
     // clicking a different job in the sidebar swaps the drawer content too.
@@ -4189,6 +4224,7 @@ async function fetchJobDetail(id, opts) {
     // header's status chip.
     if (document.body.classList.contains("rs-insp-open")) renderInspector();
   } catch (e) {
+    _setJobSwitching(false);
     if (!_selectedJobId) _showEmpty(false);
   }
 }
@@ -4203,6 +4239,8 @@ function stopLogStream() {
   }
   _lastLogText = null;
   _lastLogTarget = null;
+  _streamChromeAt = 0;
+  _streamChromeState = "";
 }
 
 function restartLogStream(id) {
@@ -4236,9 +4274,15 @@ function restartLogStream(id) {
         window._lastJobs = window._lastJobs || [];
         const job = window._lastJobs.find(x => String(x.id) === String(id));
         if (job) { job.status = d.status; job.uptime_s = d.uptime_s; job.restarts = d.restarts; _reflectJobStatus(job); }
-        if (_jdOpen && String(_selectedJobId) === String(id)) renderJobDetails();
-        if (document.body.classList.contains("rs-insp-open")
-            && String(_selectedJobId) === String(id)) renderInspector();
+        const chromeState=`${d.status||""}:${d.restarts||0}`;
+        const now=Date.now();
+        const paintChrome=chromeState!==_streamChromeState||now-_streamChromeAt>=5000;
+        if(paintChrome){
+          _streamChromeState=chromeState;_streamChromeAt=now;
+          if (_jdOpen && String(_selectedJobId) === String(id)) renderJobDetails();
+          if (document.body.classList.contains("rs-insp-open")
+              && String(_selectedJobId) === String(id)) renderInspector();
+        }
         const it = document.querySelector('#jobsList .job-item[data-jid="' + String(id).replace(/"/g,'\\"') + '"]');
         if (it) {
           it.classList.remove("running","crashed");
@@ -4307,12 +4351,9 @@ function renderJobs(jobs) {
   window._lastJobs = jobs || [];
   if (countEl) countEl.textContent = jobs.length;
   if (!list) return;
-  // Staggered fade-in for the list itself; skeleton is already visible.
+  // Replace only when the logical list changed. No forced reflow/stagger: on
+  // mobile those decorative animations delayed the visual response to taps.
   list.innerHTML = "";
-  list.classList.remove("rs-fade-in");
-  // eslint-disable-next-line no-unused-expressions
-  void list.offsetWidth; // reflow to restart animation
-  list.classList.add("rs-fade-in");
   if (!jobs.length) {
     // Confirmed zero jobs server-side
     _setJobsStatus("empty");
@@ -4325,8 +4366,7 @@ function renderJobs(jobs) {
     const st = _fmtStatus(j.status);
     const stKey = (j.status || "").toLowerCase();
     const item = document.createElement("div");
-    item.className = "job-item rs-slide-in";
-    item.style.animationDelay = (Math.min(i, 10) * 18) + "ms";
+    item.className = "job-item";
     if (_selectedJobId == j.id) item.classList.add("active");
     if (stKey === "running" || stKey === "starting" || stKey === "installing") item.classList.add("running");
     if (stKey === "crashed" || stKey === "install_failed") item.classList.add("crashed");
@@ -5714,7 +5754,7 @@ async function startJob() {
         const j = (window._lastJobs || [])
           .find(x => String(x.id) === String(info && info.job_db_id));
         const st = j && j.status;
-        // Settled states need no further chasing; the 7s poll owns it now.
+        // Settled states need no further chasing; the background poll owns it now.
         if (st === "running" || st === "crashed" || st === "stopped") return;
         if (i < DELAYS.length) setTimeout(tick, DELAYS[i++]);
       };
@@ -5783,7 +5823,7 @@ async function deleteJobById(id, btn) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-function startJobPolling()  { loadJobs(); if (_jobsTimer) clearInterval(_jobsTimer); _jobsTimer = setInterval(loadJobs, 7000); }
+function startJobPolling()  { loadJobs(); if (_jobsTimer) clearInterval(_jobsTimer); _jobsTimer = setInterval(loadJobs, 15000); }
 function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobsTimer = null; } }
 
 // Refresh CM when switching TO the jobs tab (CM needs a refresh any time it
