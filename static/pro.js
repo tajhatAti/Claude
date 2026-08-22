@@ -3561,6 +3561,35 @@ function _playSwap(el) {
   } catch (e) {}
 }
 
+let _rsVerifiedBotToken = "";
+let _rsVerifiedBotMeta = null;
+
+async function _verifyRunSpaceTelegramBot() {
+  const input=document.getElementById("rsTgToken");
+  const btn=document.getElementById("rsTgVerify");
+  const state=document.getElementById("rsTgVerifyState");
+  const token=(input && input.value || "").trim();
+  if(!token){ if(state){state.textContent="Paste the token from @BotFather first.";state.className="rs-tg-verify-state err";} return; }
+  try {
+    if(btn){btn.disabled=true;btn.textContent="Verifying…";}
+    if(state){state.textContent="Asking Telegram for the bot identity…";state.className="rs-tg-verify-state";}
+    const meta=await api("/api/telegram-bot/verify","POST",{token},true);
+    _rsVerifiedBotToken=token;
+    _rsVerifiedBotMeta=meta;
+    _renderTelegramBot({...meta,status:"not deployed"});
+    if(state){state.textContent=`Verified @${meta.telegram_bot_username}. Press Save & Run to connect it.`;state.className="rs-tg-verify-state ok";}
+  } catch(e) {
+    _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;
+    if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
+  } finally { if(btn){btn.disabled=false;btn.textContent="Verify bot";} }
+}
+
+function _resetRunSpaceTelegramDraft() {
+  _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;
+  const input=document.getElementById("rsTgToken");if(input)input.value="";
+  const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
+}
+
 function _renderTelegramBot(job) {
   const box=document.getElementById("rsBotCallout");
   if(!box)return;
@@ -3941,6 +3970,7 @@ function selectJob(id) {
   if (_jobDirty || (_composingNew && (_jobCmGetValue() || "").trim())) {
     if (!confirm("You have unsaved changes. Discard them and open this job?")) return;
   }
+  _resetRunSpaceTelegramDraft();
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
@@ -4298,6 +4328,8 @@ function _initWbWiring() {
   const btnStart = document.getElementById("btnStartJob");
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
+  const tgVerify = document.getElementById("rsTgVerify");
+  if(tgVerify && !tgVerify.dataset.wired){tgVerify.dataset.wired="1";tgVerify.addEventListener("click",_verifyRunSpaceTelegramBot);}
 
   const onNew = (ev) => {
     if (ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -4319,6 +4351,7 @@ function _initWbWiring() {
     if (ws) ws.style.display = "flex";
     if (emp) emp.style.display = "none";
     _clearWorkspaceChrome();
+    _resetRunSpaceTelegramDraft();
     _renderLogs("");
     const n = document.getElementById("jobName"); if (n) { n.value = ""; n.classList.remove("rs-inp-err"); }
     const u = document.getElementById("jobRepoUrl"); if (u) u.value = "";
@@ -5441,6 +5474,10 @@ async function startJob() {
   _setHint("warn", "");
   try {
     const payload = { name: finalName, language, code };
+    if (_rsVerifiedBotToken) {
+      const current=(window._lastJobs||[]).find(j=>String(j.id)===String(editingId||""));
+      payload.env={...((current&&current.env)||{}),BOT_TOKEN:_rsVerifiedBotToken};
+    }
     if (repoUrl) payload.repo_url = repoUrl;
     let info;
     if (editingId) {
@@ -5472,6 +5509,13 @@ async function startJob() {
         web_url: info.web_url || null,
         web_slug: info.web_slug || null,
         web_public: info.web_public !== false,
+        telegram_bot_detected: !!info.telegram_bot_detected,
+        telegram_bot_username: info.telegram_bot_username || null,
+        telegram_bot_id: info.telegram_bot_id || null,
+        telegram_check_status: info.telegram_check_status || null,
+        telegram_verified_at: info.telegram_verified_at || null,
+        telegram_bot_url: info.telegram_bot_url || null,
+        env: _rsVerifiedBotToken ? {BOT_TOKEN:"••••••••"} : {},
         code: code,
       };
       window._lastJobs = window._lastJobs || [];
@@ -5616,15 +5660,15 @@ function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobs
 /* ==================== ADMIN CONSOLE (owner-only) ====================
    The sidebar button stays hidden until /profile says is_admin. The server
    answers 404 (not 403) for everybody else, so the panel's existence is
-   never leaked. Destructive actions re-ask the admin's OWN 2FA code. */
+   never leaked. Moderation actions are admin-only and written to the audit log. */
 /* ==================== ADMIN CONSOLE (owner-only) ====================
    The sidebar button stays hidden until /profile says is_admin. The server
    answers 404 (not 403) for everybody else, so the panel's existence is
-   never leaked. Destructive actions re-ask the admin's OWN 2FA code. */
+   never leaked. Moderation actions are admin-only and written to the audit log. */
 /* ==================== ADMIN CONSOLE (owner-only) ====================
    The sidebar button stays hidden until /profile says is_admin. The server
    answers 404 (not 403) for everybody else, so the panel's existence is
-   never leaked. Destructive actions re-ask the admin's OWN 2FA code. */
+   never leaked. Moderation actions are admin-only and written to the audit log. */
 let _admPending = null;   // { user_id, suspended } awaiting 2FA confirm
 
 let _adminFetching = false;  // guard: one in-flight markup fetch at a time
@@ -6071,23 +6115,21 @@ function _admOpenBlock(scope, value) {
   _admBlockDraft={scope,value};
   const target=document.getElementById("admBlockTarget"); if(target)target.textContent=`${scope === "ip" ? "Network" : "Device"}: ${value}`;
   const reason=document.getElementById("admBlockReason"); if(reason)reason.value="";
-  const code=document.getElementById("admBlockCode"); if(code)code.value="";
   openModal("admBlockModal");
 }
 
 async function _admConfirmBlock() {
   if(!_admBlockDraft)return;
   const btn=document.getElementById("admBlockConfirm");
-  const body={..._admBlockDraft,duration_hours:Number(document.getElementById("admBlockDuration")?.value || 24),reason:document.getElementById("admBlockReason")?.value.trim() || "",code:document.getElementById("admBlockCode")?.value.trim() || ""};
+  const body={..._admBlockDraft,duration_hours:Number(document.getElementById("admBlockDuration")?.value || 24),reason:document.getElementById("admBlockReason")?.value.trim() || ""};
   try { if(btn)btn.disabled=true; await api("/admin/blocks","POST",body,true); _admRiskAt=0; closeModal("admBlockModal"); toast("Restriction applied","success"); await loadAdminPanel(true); }
   catch(e){ toast(e.message,"error"); }
   finally{ if(btn)btn.disabled=false; }
 }
 
 async function _admRemoveBlock(id) {
-  const code=prompt("Enter your admin 2FA code to remove this restriction:");
-  if(!code)return;
-  try { await api(`/admin/blocks/${id}/remove`,"POST",{code:code.trim()},true); _admRiskAt=0; toast("Restriction removed","success"); await loadAdminPanel(true); }
+  if(!confirm("Remove this restriction?"))return;
+  try { await api(`/admin/blocks/${id}/remove`,"POST",{},true); _admRiskAt=0; toast("Restriction removed","success"); await loadAdminPanel(true); }
   catch(e){ toast(e.message,"error"); }
 }
 
@@ -6663,22 +6705,18 @@ function askSuspend(userId, suspend, btn) {
   _admPending = { user_id: userId, suspended: !!suspend };
   document.getElementById("adminModalTitle").textContent = suspend ? `Suspend ${uname}?` : `Reactivate ${uname}?`;
   document.getElementById("adminModalText").textContent = suspend
-    ? `${uname} will be signed out on every device and their RunSpace apps will stop. You can reactivate anytime. Confirm with YOUR authenticator code.`
-    : `${uname} gets their access back immediately. Confirm with YOUR authenticator code.`;
-  document.getElementById("adminTfaCode").value = "";
+    ? `${uname} will be signed out on every device and their RunSpace apps will stop. You can reactivate anytime.`
+    : `${uname} gets their access back immediately.`;
   openModal("adminModal");
-  setTimeout(() => { const i = document.getElementById("adminTfaCode"); if (i) i.focus(); }, 80);
 }
 
 async function confirmAdminAction() {
   if (!_admPending) { closeModal("adminModal"); return; }
   const btn = document.getElementById("adminModalGo");
-  const code = document.getElementById("adminTfaCode").value.trim();
-  if (!code) { toast("Enter your 6-digit authenticator code.", "error"); return; }
   setLoading(btn, true);
   try {
     const res = await api("/admin/users/set-suspended", "POST",
-      { user_id: _admPending.user_id, suspended: _admPending.suspended, code }, true);
+      { user_id: _admPending.user_id, suspended: _admPending.suspended }, true);
     _admPending = null;
     closeModal("adminModal");
     toast((res && res.message) || "Done.", "success");
@@ -6689,12 +6727,6 @@ async function confirmAdminAction() {
     setLoading(btn, false);
   }
 }
-
-// Enter inside the admin 2FA box = confirm. (Wired once at boot.)
-(function () {
-  const box = document.getElementById("adminTfaCode");
-  if (box) box.addEventListener("keydown", (e) => { if (e.key === "Enter") confirmAdminAction(); });
-})();
 
 // Code Studio full-bleed: toggle body class so CSS can strip dash-main padding
 (function(){
@@ -7667,6 +7699,14 @@ async function _rsHandleUpload(file) {
   }
 
   _jobCmSetValue(text);
+  // Give uploaded Telegram files an immediate, visible verification path.
+  // The server remains authoritative; this only opens the dedicated section.
+  const tokenMatch=text.match(/(?:^|[^A-Za-z0-9_-])(\d{5,15}:[A-Za-z0-9_-]{20,80})(?![A-Za-z0-9_-])/);
+  if(tokenMatch){
+    const setup=document.getElementById("rsTgSetup");if(setup)setup.open=true;
+    const tokenInput=document.getElementById("rsTgToken");if(tokenInput)tokenInput.value=tokenMatch[1];
+    const verifyState=document.getElementById("rsTgVerifyState");if(verifyState){verifyState.textContent="Telegram token detected in this file. Verify it, then Save & Run.";verifyState.className="rs-tg-verify-state";}
+  }
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);
 
   if (!lang) {

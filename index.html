@@ -967,6 +967,15 @@
             <div class="rs-meta">
               <input class="rs-inp" id="jobName" type="text" placeholder="Untitled job" maxlength="60" spellcheck="false" autocomplete="off" aria-label="Job name">
             </div>
+            <details class="rs-tg-setup" id="rsTgSetup">
+              <summary><span class="rs-bot-logo" aria-hidden="true">✈</span><span><b>Telegram bot</b><small>Verify a BotFather token and connect it to this job</small></span></summary>
+              <div class="rs-tg-setup-body">
+                <label class="field"><span>Bot token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…" aria-describedby="rsTgPrivacy"></label>
+                <button class="btn-primary" id="rsTgVerify" type="button">Verify bot</button>
+                <span class="rs-tg-verify-state" id="rsTgVerifyState"></span>
+              </div>
+              <p id="rsTgPrivacy">The token is verified with Telegram and saved as this job’s <code>BOT_TOKEN</code> environment variable. It is never shown in admin metadata.</p>
+            </details>
             <aside class="rs-bot-callout" id="rsBotCallout" hidden aria-live="polite">
               <span class="rs-bot-logo" aria-hidden="true">✈</span>
               <div class="rs-bot-copy"><b id="rsBotName">Telegram bot detected</b><span id="rsBotState">Checking bot…</span></div>
@@ -1537,7 +1546,7 @@
   </div>
 </div>
 
-<!-- ============ MODAL: ADMIN ACTION CONFIRM (own 2FA required) ============ -->
+<!-- ============ MODAL: ADMIN ACTION CONFIRM ============ -->
 <div class="ah-modal hidden" id="adminModal">
   <div class="ah-modal-card">
     <div class="ah-modal-head">
@@ -1545,7 +1554,6 @@
       <button class="ah-x" data-close>✕</button>
     </div>
     <p class="auth-hint" id="adminModalText"></p>
-    <label class="field"><span>Your authenticator code (2FA)</span><input type="text" id="adminTfaCode" class="input-text" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code"></label>
     <button class="btn-primary block" id="adminModalGo" onclick="confirmAdminAction()">Confirm</button>
   </div>
 </div>

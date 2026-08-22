@@ -4,6 +4,8 @@ When a job is run or updated, CodeNest scans its source and environment values f
 
 If a token is found, the server makes a short Telegram `getMe` request. Only safe identity metadata is retained: bot username, bot id, verification status and verification time. The token is never copied into metadata, API responses, deployment history or the admin console. Request exception text is not retained because it may contain the token-bearing URL.
 
+RunSpace also has a dedicated **Telegram bot** setup section. The owner pastes a BotFather token, presses **Verify bot**, receives the verified `@username` and a clickable bot link, then presses **Save & Run**. The verified token is included as that job's `BOT_TOKEN` environment variable. Uploaded files containing a token automatically open this verification section; direct Run still performs authoritative server-side detection.
+
 The RunSpace workspace displays:
 
 - the detected bot username;

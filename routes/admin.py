@@ -1,5 +1,5 @@
 """Admin console (owner-only, 404-stealth for everyone else) plus the
-public abuse inbox. Destructive actions re-verify the admin's own 2FA."""
+public abuse inbox. Moderation actions are session-authenticated and audited."""
 from typing import Optional, List
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -12,7 +12,6 @@ from fastapi.responses import HTMLResponse, Response
 from services import runner_client
 from services import limits
 from services.runner_client import MAX_JOBS_PER_USER
-from services.twofa import _verify_second_factor
 
 # "Active now" window. Long enough that someone reading logs still counts,
 # short enough that it means present rather than "visited today".
@@ -92,13 +91,6 @@ class AdminBlockIn(BaseModel):
 
 class AdminBlockRemove(BaseModel):
     code: Optional[str] = None
-
-
-def _require_admin_2fa(conn, admin, code):
-    row = conn.execute("SELECT is_enabled FROM user_2fa WHERE user_id=?", (admin["id"],)).fetchone()
-    if not row or not row["is_enabled"]:
-        raise HTTPException(status_code=409, detail="Enable 2FA on your admin account first — destructive actions require it.")
-    _verify_second_factor(conn, admin["id"], code or "")
 
 
 @router.get("/admin/panel-html", include_in_schema=False)
@@ -719,8 +711,8 @@ def admin_set_suspended(payload: AdminSuspend, authorization: Optional[str] = He
         raise HTTPException(status_code=400, detail="You cannot suspend your own account.")
     conn = get_db_connection()
     try:
-        # Destructive actions demand the admin's own second factor, every time.
-        _require_admin_2fa(conn, admin, payload.code)
+        # The owner explicitly chose session-auth-only moderation actions.
+        # Authentication + admin role + audit logging still apply.
         target = conn.execute("SELECT id, username FROM users WHERE id=?", (payload.user_id,)).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -839,7 +831,7 @@ def report_abuse_submit(payload: AbuseReportIn, request: Request):
 
 
 # ================================
-# ABUSE CONTROLS — explicit, reversible, 2FA-gated
+# ABUSE CONTROLS — explicit, reversible, admin-only and audited
 # ================================
 
 @router.get("/admin/blocks")
@@ -894,7 +886,6 @@ def admin_create_block(payload: AdminBlockIn,
                if hours else None)
     conn = get_db_connection()
     try:
-        _require_admin_2fa(conn, admin, payload.code)
         duplicate = conn.execute(
             "SELECT id FROM admin_blocks WHERE scope=? AND value=? AND revoked_at IS NULL "
             "AND (expires_at IS NULL OR expires_at > ?)", (scope, value, created)).fetchone()
@@ -917,7 +908,6 @@ def admin_remove_block(block_id: int, payload: AdminBlockRemove,
     admin, _ = require_admin(authorization)
     conn = get_db_connection()
     try:
-        _require_admin_2fa(conn, admin, payload.code)
         row = conn.execute("SELECT id,scope,value,revoked_at FROM admin_blocks WHERE id=?",
                            (block_id,)).fetchone()
         if not row:

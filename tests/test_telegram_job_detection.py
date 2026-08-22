@@ -42,6 +42,10 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     client=TestClient(app)
     token=client.post("/login",json={"username":"owner@gmail.com","email":"owner@gmail.com","password":"Passw0rd!x"}).json()["token"]
     headers={"Authorization":"Bearer "+token}
+    monkeypatch.setattr(telegram_detector.requests,"post",lambda *a,**k:Resp(200,{"ok":True,"result":{"id":777,"is_bot":True,"username":"DemoHelperBot"}}))
+    verified=client.post("/api/telegram-bot/verify",headers=headers,json={"token":TOKEN})
+    assert verified.status_code==200 and verified.json()["telegram_bot_username"]=="DemoHelperBot"
+    assert TOKEN not in verified.text
     meta={"detected":True,"username":"DemoHelperBot","bot_id":"777","check_status":"verified","verified_at":now}
     monkeypatch.setattr(runspace.telegram_detector,"inspect_bot",lambda *a,**k:meta)
     monkeypatch.setattr(runspace,"CLUSTER_LIMITS_ENABLED",False)

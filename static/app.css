@@ -1413,6 +1413,15 @@ body.signed-out-in .hero {
 .jobs        { display: flex; flex-direction: column; gap: var(--s2); }
 .jlang-icon  { width: 22px; height: 22px; flex: 0 0 auto; }
 /* ── admin ─────────────────────────────────────────────────────────────── */
+.adm-section-nav { position:sticky; top:0; z-index:7; display:flex; gap:6px; overflow-x:auto; padding:8px 0 12px; margin-bottom:var(--s2); background:var(--bg); scrollbar-width:none; }
+.adm-section-nav::-webkit-scrollbar { display:none; }
+.adm-section-nav a { flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border:1px solid var(--line); border-radius:var(--pill); background:var(--card-2); color:var(--fg-2); font-size:var(--fs-2); text-decoration:none; }
+.adm-section-nav a:hover,.adm-section-nav a:focus-visible { border-color:var(--fg-3); color:var(--fg); }
+#tab-admin .adm-panel { box-shadow:none; background:var(--card); }
+#tab-admin .adm-panel[id] { scroll-margin-top:76px; }
+#admSecuritySection { border-top:3px solid var(--warn); }
+#admTelegramSection,#admBotUsageSection { border-top:3px solid #229ED9; }
+#admAppsSection { border-top:3px solid var(--ok); }
 .adm-stats  { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s3); }
 .adm-stat   { padding: var(--s3); background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-row); }
 .adm-hint   { font-size: var(--fs-2); color: var(--fg-3); }
@@ -1463,6 +1472,7 @@ body.signed-out-in .hero {
   #tab-admin > .tab-head { position:sticky; top:0; z-index:8; margin:0 -10px var(--s3); padding:10px 12px; background:color-mix(in srgb,var(--bg) 94%,transparent); backdrop-filter:blur(12px); }
   #tab-admin > .tab-head h2 { font-size:var(--fs-6); }
   .adm-head-right { margin-left:auto; }
+  .adm-section-nav { top:61px; margin-inline:-10px; padding:8px 10px; }
   .adm-fresh { display:none; }
   .adm-stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   .adm-stat { padding:10px; }
@@ -1673,6 +1683,17 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
    removed when the toolbar was consolidated into .rs-head, and
    test_runspace_shell guards against them coming back.) */
 #tab-jobs .rs-meta { flex-wrap: nowrap; overflow-x: auto; }
+.rs-tg-setup { border-bottom:1px solid var(--line); background:var(--card); }
+.rs-tg-setup summary { min-height:48px; display:flex; align-items:center; gap:10px; padding:8px 12px; cursor:pointer; list-style:none; }
+.rs-tg-setup summary::-webkit-details-marker { display:none; }
+.rs-tg-setup summary > span:nth-child(2) { display:flex; flex-direction:column; min-width:0; }
+.rs-tg-setup summary small { color:var(--fg-3); }
+.rs-tg-setup-body { display:grid; grid-template-columns:minmax(220px,1fr) auto; gap:10px; align-items:end; padding:4px 12px 10px 54px; }
+.rs-tg-setup-body .field { margin:0; }
+.rs-tg-verify-state { grid-column:1/-1; min-height:20px; color:var(--fg-3); font-size:var(--fs-2); }
+.rs-tg-verify-state.ok { color:var(--ok); }
+.rs-tg-verify-state.err { color:var(--danger); }
+.rs-tg-setup > p { margin:0; padding:0 12px 10px 54px; color:var(--fg-3); font-size:var(--fs-1); }
 .rs-bot-callout { display:flex; align-items:center; gap:10px; min-height:50px; padding:8px 12px; border-block:1px solid var(--line); background:color-mix(in srgb,#229ED9 9%,var(--card)); }
 .rs-bot-callout[hidden] { display:none; }
 .rs-bot-logo { width:32px; height:32px; flex:0 0 auto; display:grid; place-items:center; border-radius:50%; background:#229ED9; color:white; }
@@ -1682,7 +1703,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
 .rs-bot-callout.is-live { border-left:3px solid var(--ok); }
 .rs-bot-callout.is-bad { border-left:3px solid var(--danger); }
 .rs-bot-go { margin-left:auto; flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--pill); background:#229ED9; color:white; font-weight:650; text-decoration:none; }
-@media(max-width:560px){ .rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-go{width:100%;justify-content:center;min-height:44px;margin-left:42px} }
+@media(max-width:560px){ .rs-tg-setup-body{grid-template-columns:1fr;padding-left:12px}.rs-tg-setup-body .btn-primary{width:100%;min-height:44px}.rs-tg-setup > p{padding-left:12px}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-go{width:100%;justify-content:center;min-height:44px;margin-left:42px} }
 #tab-jobs .rs-tb, #tab-jobs .rs-seg { overflow-x: auto; }
 #btnStartJob.loading { pointer-events: none; opacity: .7; }
 #btnStartJob.dirty   { border-color: var(--warn); }

@@ -9,7 +9,10 @@ import json
 import re
 import requests
 
-TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])(\d{6,12}:[A-Za-z0-9_-]{30,})(?![A-Za-z0-9_-])")
+# Telegram has changed token lengths over time. Keep the structural boundary
+# broad and let getMe be the authority instead of rejecting a valid old/new
+# token before Telegram sees it.
+TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])(\d{5,15}:[A-Za-z0-9_-]{20,80})(?![A-Za-z0-9_-])")
 LINK_RE = re.compile(r"(?:https?://)?(?:t|telegram)\.me/([A-Za-z][A-Za-z0-9_]{3,31})", re.I)
 USER_RE = re.compile(r"(?:BOT_USERNAME|TELEGRAM_BOT_USERNAME)\s*[=:]\s*['\"]?@?([A-Za-z][A-Za-z0-9_]{3,31})", re.I)
 VALID_USERNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")

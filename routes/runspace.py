@@ -69,6 +69,26 @@ class ExecuteCodeRequest(BaseModel):
     stdin: Optional[str] = None
 
 
+class TelegramTokenVerify(BaseModel):
+    token: str
+
+
+@router.post("/api/telegram-bot/verify")
+def verify_telegram_bot(payload: TelegramTokenVerify,
+                        authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    rate_limit_user(user["id"], "telegram_verify")
+    token = (payload.token or "").strip()
+    if not telegram_detector.TOKEN_RE.fullmatch(token):
+        raise HTTPException(status_code=400, detail="That does not look like a Telegram bot token.")
+    meta = telegram_detector.inspect_bot(token)
+    if meta.get("check_status") == "invalid_token":
+        raise HTTPException(status_code=400, detail="Telegram rejected this token. Copy a fresh token from @BotFather.")
+    if meta.get("check_status") != "verified" or not meta.get("username"):
+        raise HTTPException(status_code=503, detail="Telegram could not verify the bot right now. Try again shortly.")
+    return telegram_detector.public_fields(meta)
+
+
 @router.post("/api/execute")
 def execute_code(payload: ExecuteCodeRequest, request: Request, authorization: Optional[str] = Header(None)):
     """Proxy code execution to the separate runner service.
