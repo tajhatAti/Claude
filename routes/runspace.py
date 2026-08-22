@@ -75,6 +75,21 @@ class TelegramTokenVerify(BaseModel):
     token: str
 
 
+class TelegramCodeAnalyze(BaseModel):
+    code: str
+    language: Optional[str] = "python"
+
+
+@router.post("/api/telegram-bot/analyze")
+def analyze_telegram_bot(payload: TelegramCodeAnalyze,
+                         authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    rate_limit_user(user["id"], "telegram_analyze")
+    if not (payload.code or "").strip():
+        raise HTTPException(status_code=400, detail="Paste or upload the bot code first.")
+    return telegram_detector.analyze_code(payload.code, payload.language or "python")
+
+
 @router.post("/api/telegram-bot/verify")
 def verify_telegram_bot(payload: TelegramTokenVerify,
                         authorization: Optional[str] = Header(None)):
@@ -356,8 +371,10 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
     if not bot_meta:
         raise HTTPException(status_code=400,
                             detail="Verify your Telegram bot token first, then add the bot.")
-    canonical_code, env_map = telegram_detector.apply_verified_token(
-        payload.code or "", env_map, verified_token)
+    code_analysis = telegram_detector.analyze_code(
+        payload.code or "", payload.language or "python")
+    canonical_code, env_map = telegram_detector.secure_bot_source(
+        payload.code or "", env_map, verified_token, payload.language or "python")
     body = {
         "language": payload.language or "python",
         "code": canonical_code,
@@ -386,17 +403,23 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
             """
             INSERT INTO jobs (user_id, name, language, code, runner_job_id, env,
                 telegram_bot_detected,telegram_bot_username,telegram_bot_id,
-                telegram_check_status,telegram_verified_at,created_at,updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                telegram_check_status,telegram_verified_at,telegram_framework,
+                telegram_update_mode,telegram_token_source,created_at,updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (user["id"], name, payload.language, canonical_code, info["id"],
-             json.dumps(env_map) if env_map else None, *_telegram_columns(bot_meta), now, now),
+             json.dumps(env_map) if env_map else None, *_telegram_columns(bot_meta),
+             code_analysis["framework"], code_analysis["update_mode"],
+             code_analysis["token_source"], now, now),
         )
         _record_deploy_event(conn, user["id"], cursor.lastrowid, "run", name, bot_meta, now)
         conn.commit()
         telegram_detector.consume_verification(payload.telegram_verification_id)
         info["job_db_id"] = cursor.lastrowid
         info.update(telegram_detector.public_fields(bot_meta))
+        info.update({"telegram_framework": code_analysis["framework"],
+                     "telegram_update_mode": code_analysis["update_mode"],
+                     "telegram_token_source": code_analysis["token_source"]})
         # Remember WHICH worker accepted this job. Every later restart / stop /
         # log call reads it back, so a job on worker-B is never addressed to
         # worker-A once a second worker exists.
@@ -995,8 +1018,9 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     if not bot_meta:
         raise HTTPException(status_code=400,
                             detail="Verify your Telegram bot token before saving this bot.")
-    new_code, new_env = telegram_detector.apply_verified_token(
-        new_code, new_env, verified_token)
+    code_analysis = telegram_detector.analyze_code(new_code, new_lang)
+    new_code, new_env = telegram_detector.secure_bot_source(
+        new_code, new_env, verified_token, new_lang)
     now = now_utc_str()
     if new_name != (row["name"] or ""):
         conn0 = get_db_connection()
@@ -1014,9 +1038,11 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
         conn.execute(
             "UPDATE jobs SET name=?,language=?,code=?,env=?,telegram_bot_detected=?,"
             "telegram_bot_username=?,telegram_bot_id=?,telegram_check_status=?,"
-            "telegram_verified_at=?,updated_at=? WHERE id=?",
+            "telegram_verified_at=?,telegram_framework=?,telegram_update_mode=?,"
+            "telegram_token_source=?,updated_at=? WHERE id=?",
             (new_name, new_lang, new_code, json.dumps(new_env) if new_env else None,
-             *_telegram_columns(bot_meta), now, job_id),
+             *_telegram_columns(bot_meta), code_analysis["framework"],
+             code_analysis["update_mode"], code_analysis["token_source"], now, job_id),
         )
         _record_deploy_event(conn, user["id"], job_id, "update", new_name, bot_meta, now)
         conn.commit()
@@ -1078,6 +1104,9 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     info["job_db_id"] = job_id
     info.update(runner_client._job_web_fields(info, _worker_of(row)))
     info.update(telegram_detector.public_fields(bot_meta))
+    info.update({"telegram_framework": code_analysis["framework"],
+                 "telegram_update_mode": code_analysis["update_mode"],
+                 "telegram_token_source": code_analysis["token_source"]})
     return info
 
 

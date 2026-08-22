@@ -23,12 +23,14 @@ def test_detector_verifies_identity_without_returning_token(monkeypatch):
     assert public["telegram_bot_url"]=="https://t.me/DemoHelperBot" and TOKEN not in repr(public)
 
 
-def test_verified_token_replaces_old_and_example_tokens_everywhere():
+def test_verified_token_becomes_env_secret_and_source_is_auto_fixed():
     old="987654321:AA"+"z"*32
     code=f'''BOT_TOKEN = "example-token"\nTOKEN = "{old}"\nbot = telegram.Bot(token="placeholder")\napp = ApplicationBuilder().token("another").build()'''
-    clean,env=telegram_detector.apply_verified_token(code,{"BOT_TOKEN":old,"TELEGRAM_BOT_TOKEN":"sample"},TOKEN)
+    analysis=telegram_detector.analyze_code(code,"python")
+    assert analysis["framework"]=="python-telegram-bot" and analysis["needs_token_fix"]
+    clean,env=telegram_detector.secure_bot_source(code,{"BOT_TOKEN":old,"TELEGRAM_BOT_TOKEN":"sample"},TOKEN,"python")
     assert old not in clean and "example-token" not in clean and "placeholder" not in clean
-    assert clean.count(TOKEN)==4
+    assert TOKEN not in clean and clean.count('os.getenv("BOT_TOKEN")')==4 and "import os" in clean
     assert env["BOT_TOKEN"]==TOKEN and env["TELEGRAM_BOT_TOKEN"]==TOKEN
 
 
@@ -51,6 +53,9 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     client=TestClient(app)
     token=client.post("/login",json={"username":"owner@gmail.com","email":"owner@gmail.com","password":"Passw0rd!x"}).json()["token"]
     headers={"Authorization":"Bearer "+token}
+    analyzed=client.post("/api/telegram-bot/analyze",headers=headers,json={"language":"python","code":"from telegram.ext import ApplicationBuilder\nTOKEN='example'\nApplicationBuilder().token(TOKEN).run_polling()"})
+    assert analyzed.status_code==200 and analyzed.json()["framework"]=="python-telegram-bot"
+    assert analyzed.json()["update_mode"]=="polling" and analyzed.json()["needs_token_fix"]
     monkeypatch.setattr(telegram_detector.requests,"post",lambda *a,**k:Resp(200,{"ok":True,"result":{"id":777,"is_bot":True,"username":"DemoHelperBot"}}))
     verified=client.post("/api/telegram-bot/verify",headers=headers,json={"token":TOKEN})
     assert verified.status_code==200 and verified.json()["telegram_bot_username"]=="DemoHelperBot"
@@ -73,8 +78,8 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     r=client.post("/api/jobs",headers=headers,json={"name":"demo-bot","language":"python","code":f'TOKEN="{old_token}"',"env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":verification_id})
     assert r.status_code==200,r.text
     assert r.json()["telegram_bot_url"]=="https://t.me/DemoHelperBot" and TOKEN not in r.text
-    assert old_token not in sent[0]["code"] and TOKEN in sent[0]["code"]
-    assert sent[0]["env"]["BOT_TOKEN"]==TOKEN
+    assert old_token not in sent[0]["code"] and TOKEN not in sent[0]["code"]
+    assert 'os.getenv("BOT_TOKEN")' in sent[0]["code"] and sent[0]["env"]["BOT_TOKEN"]==TOKEN
     reused=client.post("/api/jobs",headers=headers,json={"name":"reuse-proof","language":"python","code":"TOKEN='x'","env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":verification_id})
     assert reused.status_code==400 and "Verify" in reused.text
     listed=client.get("/api/jobs",headers=headers).json()["jobs"][0]

@@ -136,37 +136,129 @@ def consume_verification(verification_id):
         conn.close()
 
 
-_ASSIGN_RE = re.compile(
-    r"((?:(?:TELEGRAM_)?BOT_TOKEN|TOKEN)\s*=\s*(?:[rubfRUBF]*)[\"'])(.*?)([\"'])",
-    re.S,
-)
-_DICT_RE = re.compile(
-    r"([\"'](?:TELEGRAM_)?BOT_TOKEN[\"']\s*:\s*[\"'])(.*?)([\"'])",
-    re.S,
-)
-_BOT_CTOR_RE = re.compile(
-    r"((?:(?:TeleBot|telegram\.Bot|Bot)\s*\(\s*(?:token\s*=\s*)?|"
-    r"ApplicationBuilder\(\)\.token\s*\()[\"'])(.*?)([\"'])",
-    re.S,
+FRAMEWORKS = (
+    ("aiogram", (r"\baiogram\b",)),
+    ("python-telegram-bot", (r"telegram\.ext", r"ApplicationBuilder")),
+    ("pyTelegramBotAPI", (r"\btelebot\b", r"TeleBot\s*\(")),
+    ("Telethon", (r"\btelethon\b", r"TelegramClient\s*\(")),
+    ("Pyrogram", (r"\bpyrogram\b",)),
+    ("Telegraf", (r"\btelegraf\b", r"new\s+Telegraf")),
+    ("grammY", (r"from\s+[\"']grammy[\"']", r"require\([\"']grammy")),
+    ("node-telegram-bot-api", (r"node-telegram-bot-api",)),
 )
 
 
-def apply_verified_token(code, env, token):
-    """Make the verified token authoritative over examples/old bot tokens."""
+def analyze_code(code, language="python"):
+    """Describe Telegram-specific structure without returning source/secrets."""
+    source = str(code or "")[:1_000_000]
+    low = source.lower()
+    framework = "unknown"
+    for name, patterns in FRAMEWORKS:
+        if any(re.search(pattern, source, re.I) for pattern in patterns):
+            framework = name
+            break
+    if re.search(r"setWebhook|set_webhook|webhook", source, re.I):
+        mode = "webhook"
+    elif re.search(r"run_polling|start_polling|infinity_polling|polling\s*\(|getUpdates", source, re.I):
+        mode = "polling"
+    else:
+        mode = "unknown"
+    hard = TOKEN_RE.search(source)
+    env_ref = re.search(
+        r"(?:os\.(?:getenv|environ)|process\.env|ENV\[|getenv\s*\().{0,80}(?:BOT_TOKEN|TELEGRAM_BOT_TOKEN)",
+        source, re.I | re.S)
+    assignment = re.search(
+        r"(?m)^\s*(?:(?:TELEGRAM_)?BOT_TOKEN|TOKEN)\s*=\s*([^\n#;]+)", source)
+    if env_ref:
+        token_source = "environment"
+    elif hard:
+        token_source = "hardcoded"
+    elif assignment:
+        token_source = "example_or_literal"
+    else:
+        token_source = "not_found"
+    match = hard or assignment
+    line = source.count("\n", 0, match.start()) + 1 if match else None
+    packages = []
+    for name, patterns in FRAMEWORKS:
+        if any(re.search(pattern, source, re.I) for pattern in patterns):
+            packages.append(name)
+    detected = bool(packages or hard or assignment or
+                    re.search(r"telegram|botfather|t\.me/", low, re.I))
+    return {
+        "telegram_detected": detected,
+        "framework": framework,
+        "update_mode": mode,
+        "token_source": token_source,
+        "token_line": line,
+        "needs_token_fix": token_source in ("hardcoded", "example_or_literal"),
+        "packages": packages,
+        "language": language or "python",
+    }
+
+
+def _token_expression(language):
+    lang = (language or "python").lower()
+    if lang in ("javascript", "node", "nodejs", "typescript"):
+        return "process.env.BOT_TOKEN"
+    if lang == "ruby":
+        return 'ENV.fetch("BOT_TOKEN")'
+    if lang == "php":
+        return "getenv('BOT_TOKEN')"
+    if lang in ("bash", "sh"):
+        return '"$BOT_TOKEN"'
+    return 'os.getenv("BOT_TOKEN")'
+
+
+def secure_bot_source(code, env, token, language="python"):
+    """Remove embedded bot secrets and make BOT_TOKEN env authoritative."""
     source = str(code or "")
-    source = TOKEN_RE.sub(token, source)
-    source = _ASSIGN_RE.sub(lambda m: m.group(1) + token + m.group(3), source)
-    source = _DICT_RE.sub(lambda m: m.group(1) + token + m.group(3), source)
-    source = _BOT_CTOR_RE.sub(lambda m: m.group(1) + token + m.group(3), source)
+    expr = _token_expression(language)
+    lang = (language or "python").lower()
+
+    # Named token assignments, including placeholders and old real tokens.
+    assign = re.compile(
+        r"(?m)^(\s*(?:(?:const|let|var)\s+)?(?:(?:TELEGRAM_)?BOT_TOKEN|TOKEN)\s*=\s*)([^\n;]+)(;?)")
+    source = assign.sub(lambda m: m.group(1) + expr + m.group(3), source)
+
+    # Direct literals passed to common Telegram constructors/builders.
+    ctor = re.compile(
+        r"((?:TeleBot|telegram\.Bot|Bot)\s*\(\s*(?:token\s*=\s*)?)([\"'])[^\"']*\2",
+        re.S,
+    )
+    source = ctor.sub(lambda m: m.group(1) + expr, source)
+    builder = re.compile(
+        r"(ApplicationBuilder\(\)\.token\s*\()([\"'])[^\"']*\2",
+        re.S,
+    )
+    source = builder.sub(lambda m: m.group(1) + expr, source)
+
+    # Any remaining literal that is structurally a real Telegram token.
+    quoted = re.compile(r"([\"'])" + TOKEN_RE.pattern + r"\1")
+    source = quoted.sub(lambda _m: expr, source)
+
+    # Python expressions need os; add it once, after a shebang when present.
+    if lang == "python" and "os.getenv(" in source and not re.search(r"(?:^|\n)\s*(?:import\s+os|from\s+os\s+import)", source):
+        if source.startswith("#!") and "\n" in source:
+            first, rest = source.split("\n", 1)
+            source = first + "\nimport os\n" + rest
+        else:
+            source = "import os\n" + source
+
     clean_env = dict(env or {})
     for key, value in list(clean_env.items()):
-        text = str(value)
-        clean_env[key] = TOKEN_RE.sub(token, text)
+        clean_env[key] = TOKEN_RE.sub(token, str(value))
     clean_env["BOT_TOKEN"] = token
     for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN"):
         if key in clean_env:
             clean_env[key] = token
     return source, clean_env
+
+
+# Backward-compatible internal name; semantics are now secure env injection,
+# not putting the verified secret into source code.
+def apply_verified_token(code, env, token, language="python"):
+    return secure_bot_source(code, env, token, language)
 
 
 def public_fields(meta):

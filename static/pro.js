@@ -3138,6 +3138,12 @@ function initJobCodeMirror() {
         if (_jobCmLoading) return;          // programmatic load, not a user edit
         const wasDirty = _jobDirty;
         _jobDirty = true;
+        if (_composingNew && _rsBotAnalysis) {
+          _rsBotAnalysis=null;
+          const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
+          const review=document.getElementById("rsTgReview");if(review)review.hidden=true;
+          _rsWizardStep("code");
+        }
         if (_chgRaf) return;
         _chgRaf = requestAnimationFrame(() => {
           _chgRaf = 0;
@@ -3564,34 +3570,87 @@ function _playSwap(el) {
 let _rsVerifiedBotToken = "";
 let _rsVerifiedBotMeta = null;
 let _rsTelegramVerificationId = "";
+let _rsBotAnalysis = null;
+
+function _rsWizardStep(step) {
+  const order=["code","connect","review","deploy"];
+  const at=Math.max(0,order.indexOf(step));
+  document.querySelectorAll("#rsTgSetup [data-rs-step]").forEach(el=>{
+    const i=order.indexOf(el.dataset.rsStep);
+    el.classList.toggle("is-active",i===at);
+    el.classList.toggle("is-done",i<at);
+  });
+}
+
+async function _analyzeRunSpaceBot() {
+  const code=_jobCmGetValue();
+  const language=(document.getElementById("jobLang")||{}).value||"python";
+  const btn=document.getElementById("rsTgAnalyze");
+  if(!code.trim()){toast("Paste or upload the bot code first","error");_jobCmFocus();return;}
+  try {
+    if(btn){btn.disabled=true;btn.textContent="Analyzing…";}
+    const data=await api("/api/telegram-bot/analyze","POST",{code,language},true);
+    _rsBotAnalysis=data;
+    const box=document.getElementById("rsTgAnalysis");
+    if(box){
+      box.textContent="";box.hidden=false;
+      const grid=document.createElement("div");grid.className="rs-analysis-grid";
+      [["Framework",data.framework],["Updates",data.update_mode],["Token source",data.token_source],["Runtime",data.language]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v||"unknown";cell.append(sm,b);grid.appendChild(cell);});
+      box.appendChild(grid);
+      const note=document.createElement("div");note.className="rs-analysis-note";
+      note.textContent=data.needs_token_fix
+        ? `A hardcoded/example token${data.token_line?` was found near line ${data.token_line}`:" was found"}. CodeNest will safely change it to read BOT_TOKEN from the environment.`
+        : data.token_source==="environment"
+          ? "Good: this code already reads the token from an environment variable."
+          : "No token reference was found. The verified token will still be provided as BOT_TOKEN.";
+      box.appendChild(note);
+    }
+    document.getElementById("rsTgConnectStage").hidden=false;
+    _rsWizardStep("connect");
+    const token=document.getElementById("rsTgToken");if(token)token.focus();
+  } catch(e){toast(e.message,"error");}
+  finally{if(btn){btn.disabled=false;btn.textContent="Re-analyze code";}}
+}
 
 async function _verifyRunSpaceTelegramBot() {
   const input=document.getElementById("rsTgToken");
   const btn=document.getElementById("rsTgVerify");
   const state=document.getElementById("rsTgVerifyState");
-  const token=(input && input.value || "").trim();
-  if(!token){ if(state){state.textContent="Paste the token from @BotFather first.";state.className="rs-tg-verify-state err";} return; }
-  try {
+  const token=(input&&input.value||"").trim();
+  if(!_rsBotAnalysis){toast("Analyze the code first","error");return;}
+  if(!token){if(state){state.textContent="Paste the token from @BotFather first.";state.className="rs-tg-verify-state err";}return;}
+  try{
     if(btn){btn.disabled=true;btn.textContent="Verifying…";}
     if(state){state.textContent="Asking Telegram for the bot identity…";state.className="rs-tg-verify-state";}
     const meta=await api("/api/telegram-bot/verify","POST",{token},true);
-    _rsVerifiedBotToken=token;
-    _rsVerifiedBotMeta=meta;
-    _rsTelegramVerificationId=meta.telegram_verification_id || "";
-    _renderTelegramBot({...meta,status:"not deployed"});
-    document.body.classList.remove("rs-awaiting-bot");
-    if(state){state.textContent=`Verified @${meta.telegram_bot_username}. Press Save & Run to connect it.`;state.className="rs-tg-verify-state ok";}
-  } catch(e) {
+    _rsVerifiedBotToken=token;_rsVerifiedBotMeta=meta;
+    _rsTelegramVerificationId=meta.telegram_verification_id||"";
+    _renderTelegramBot({...meta,status:"ready to deploy"});
+    if(state){state.textContent=`Connected @${meta.telegram_bot_username}`;state.className="rs-tg-verify-state ok";}
+    const review=document.getElementById("rsTgReview");
+    if(review){
+      review.textContent="";review.hidden=false;
+      const text=document.createElement("div");text.className="rs-analysis-grid";
+      [["Bot",`@${meta.telegram_bot_username}`],["Framework",_rsBotAnalysis.framework],["Updates",_rsBotAnalysis.update_mode],["Token","Verified · stored as secret"]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v;cell.append(sm,b);text.appendChild(cell);});
+      const deploy=document.createElement("button");deploy.type="button";deploy.className="btn-primary";deploy.id="rsTgDeploy";deploy.textContent="Deploy Bot";deploy.addEventListener("click",startJob);
+      review.append(text,deploy);
+    }
+    _rsWizardStep("review");
+  }catch(e){
     _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
-    document.body.classList.add("rs-awaiting-bot");
     if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
-  } finally { if(btn){btn.disabled=false;btn.textContent="Verify bot";} }
+  }finally{if(btn){btn.disabled=false;btn.textContent="Verify & connect";}}
 }
 
-function _resetRunSpaceTelegramDraft() {
-  _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
+function _resetRunSpaceTelegramDraft(){
+  _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";_rsBotAnalysis=null;
   const input=document.getElementById("rsTgToken");if(input)input.value="";
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
+  const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
+  const connect=document.getElementById("rsTgConnectStage");if(connect)connect.hidden=true;
+  const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
+  const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Analyze code";
+  _rsWizardStep("code");
 }
 
 function _renderTelegramBot(job) {
@@ -3975,7 +4034,7 @@ function selectJob(id) {
     if (!confirm("You have unsaved changes. Discard them and open this job?")) return;
   }
   _resetRunSpaceTelegramDraft();
-  document.body.classList.remove("rs-awaiting-bot");
+  const wizard=document.getElementById("rsTgSetup");if(wizard)wizard.hidden=true;
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
@@ -4333,6 +4392,8 @@ function _initWbWiring() {
   const btnStart = document.getElementById("btnStartJob");
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
+  const tgAnalyze = document.getElementById("rsTgAnalyze");
+  if(tgAnalyze && !tgAnalyze.dataset.wired){tgAnalyze.dataset.wired="1";tgAnalyze.addEventListener("click",_analyzeRunSpaceBot);}
   const tgVerify = document.getElementById("rsTgVerify");
   if(tgVerify && !tgVerify.dataset.wired){tgVerify.dataset.wired="1";tgVerify.addEventListener("click",_verifyRunSpaceTelegramBot);}
 
@@ -4357,8 +4418,7 @@ function _initWbWiring() {
     if (emp) emp.style.display = "none";
     _clearWorkspaceChrome();
     _resetRunSpaceTelegramDraft();
-    document.body.classList.add("rs-awaiting-bot");
-    const tgSetup=document.getElementById("rsTgSetup");if(tgSetup)tgSetup.open=true;
+    const wizard=document.getElementById("rsTgSetup");if(wizard)wizard.hidden=false;
     _renderLogs("");
     const n = document.getElementById("jobName"); if (n) { n.value = ""; n.classList.remove("rs-inp-err"); }
     const u = document.getElementById("jobRepoUrl"); if (u) u.value = "";
@@ -5442,11 +5502,16 @@ async function startJob() {
   const nameEl = document.getElementById("jobName");
   const btn = document.getElementById("btnStartJob");
   const editingId = btn && btn.dataset.editingId;
+  if (!editingId && !_rsBotAnalysis) {
+    toast("Analyze the bot code first", "error");
+    await _analyzeRunSpaceBot();
+    return;
+  }
   if (!editingId && (!_rsVerifiedBotToken || !_rsTelegramVerificationId)) {
-    document.body.classList.add("rs-awaiting-bot");
-    const setup=document.getElementById("rsTgSetup");if(setup)setup.open=true;
-    const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="Verify a Telegram bot token before adding code.";state.className="rs-tg-verify-state err";}
-    toast("Verify your bot token first", "error");
+    document.getElementById("rsTgConnectStage").hidden=false;
+    _rsWizardStep("connect");
+    const token=document.getElementById("rsTgToken");if(token)token.focus();
+    toast("Connect the BotFather token before deploying", "error");
     return;
   }
   let name = (nameEl && nameEl.value || "").trim();
@@ -5528,6 +5593,9 @@ async function startJob() {
         telegram_check_status: info.telegram_check_status || null,
         telegram_verified_at: info.telegram_verified_at || null,
         telegram_bot_url: info.telegram_bot_url || null,
+        telegram_framework: info.telegram_framework || (_rsBotAnalysis&&_rsBotAnalysis.framework) || null,
+        telegram_update_mode: info.telegram_update_mode || (_rsBotAnalysis&&_rsBotAnalysis.update_mode) || null,
+        telegram_token_source: "environment",
         env: _rsVerifiedBotToken ? {BOT_TOKEN:"••••••••"} : {},
         code: code,
       };
@@ -6051,7 +6119,7 @@ function renderAdminTelegramJobs(data) {
       const head=document.createElement("div");head.className="adm-tg-job-head";
       const identity=document.createElement("div");identity.append(_botText("b",bot.telegram_bot_username?`@${bot.telegram_bot_username}`:"Telegram bot"),_botText("span",`${bot.owner} · ${bot.name}`));
       const state=_botText("span",bot.status||"offline","adm-pill"+(bot.status==="running"?" ok":""));head.append(identity,state);card.appendChild(head);
-      card.appendChild(_botText("div",`Token check: ${bot.telegram_check_status||"unverified"}${bot.uptime_s?` · uptime ${_fmtUptime(bot.uptime_s)}`:""}`,"adm-hint"));
+      card.appendChild(_botText("div",`${bot.telegram_framework||"framework unknown"} · ${bot.telegram_update_mode||"mode unknown"} · token ${bot.telegram_check_status||"unverified"}${bot.uptime_s?` · uptime ${_fmtUptime(bot.uptime_s)}`:""}`,"adm-hint"));
       const actions=document.createElement("div");actions.className="adm-tg-job-actions";
       const inspect=document.createElement("button");inspect.className="btn-ghost sm";inspect.textContent="View job";inspect.onclick=()=>openAdminJob(bot.id);actions.appendChild(inspect);
       if(bot.telegram_bot_url){const go=document.createElement("a");go.className="btn-ghost sm adm-go-bot";go.textContent="Go to bot";go.href=bot.telegram_bot_url;go.target="_blank";go.rel="noopener noreferrer";actions.appendChild(go);}
@@ -6426,6 +6494,9 @@ function renderAdminJobDetail(d) {
   if (j.telegram_bot_detected) {
     t.appendChild(_admRow("Telegram bot", j.telegram_bot_username ? `@${j.telegram_bot_username}` : "detected"));
     t.appendChild(_admRow("Telegram check", j.telegram_check_status || "unverified"));
+    t.appendChild(_admRow("Framework", j.telegram_framework || "unknown"));
+    t.appendChild(_admRow("Update delivery", j.telegram_update_mode || "unknown"));
+    t.appendChild(_admRow("Token source before fix", j.telegram_token_source || "unknown"));
     if (j.telegram_bot_url) {
       const go=document.createElement("a");go.className="adm-go-bot";go.href=j.telegram_bot_url;go.target="_blank";go.rel="noopener noreferrer";go.textContent="Go to bot";
       t.appendChild(_admRow("Open",go));
@@ -7662,12 +7733,6 @@ const RS_EXT_LANG = {
 
 async function _rsHandleUpload(file) {
   if (!file) return;
-  if (_composingNew && (!_rsVerifiedBotToken || !_rsTelegramVerificationId)) {
-    document.body.classList.add("rs-awaiting-bot");
-    const setup=document.getElementById("rsTgSetup");if(setup)setup.open=true;
-    toast("Verify the bot token first, then upload its code.","error");
-    return;
-  }
   const ext = _csExt(file.name);
 
   if (ext === "zip") {
@@ -7718,20 +7783,15 @@ async function _rsHandleUpload(file) {
   }
 
   _jobCmSetValue(text);
-  // Give uploaded Telegram files an immediate, visible verification path.
-  // The server remains authoritative; this only opens the dedicated section.
-  const tokenMatch=text.match(/(?:^|[^A-Za-z0-9_-])(\d{5,15}:[A-Za-z0-9_-]{20,80})(?![A-Za-z0-9_-])/);
-  if(tokenMatch){
-    const setup=document.getElementById("rsTgSetup");if(setup)setup.open=true;
-    const tokenInput=document.getElementById("rsTgToken");if(tokenInput)tokenInput.value=tokenMatch[1];
-    const verifyState=document.getElementById("rsTgVerifyState");if(verifyState){verifyState.textContent="Telegram token detected in this file. Verify it, then Save & Run.";verifyState.className="rs-tg-verify-state";}
-  }
+  _rsBotAnalysis=null;
+  const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
+  _rsWizardStep("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);
 
   if (!lang) {
     toast("Opened " + file.name + " — pick a runtime before running it.", "info");
   } else {
-    toast("Opened " + file.name + " — press Run to deploy.", "success");
+    toast("Opened " + file.name + " — analyze the bot code next.", "success");
   }
 }
 

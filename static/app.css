@@ -1683,21 +1683,25 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
    removed when the toolbar was consolidated into .rs-head, and
    test_runspace_shell guards against them coming back.) */
 #tab-jobs .rs-meta { flex-wrap: nowrap; overflow-x: auto; }
-.rs-tg-setup { border-bottom:1px solid var(--line); background:var(--card); }
-body.rs-awaiting-bot #rsTgSetup { border:2px solid #229ED9; background:color-mix(in srgb,#229ED9 8%,var(--card)); }
-body.rs-awaiting-bot #wbSplit { opacity:.28; pointer-events:none; user-select:none; }
-body.rs-awaiting-bot #btnRunQuick { opacity:.45; }
-body.rs-awaiting-bot #rsTgSetup summary small::after { content:" · required first"; color:#229ED9; font-weight:650; }
-.rs-tg-setup summary { min-height:48px; display:flex; align-items:center; gap:10px; padding:8px 12px; cursor:pointer; list-style:none; }
-.rs-tg-setup summary::-webkit-details-marker { display:none; }
-.rs-tg-setup summary > span:nth-child(2) { display:flex; flex-direction:column; min-width:0; }
-.rs-tg-setup summary small { color:var(--fg-3); }
-.rs-tg-setup-body { display:grid; grid-template-columns:minmax(220px,1fr) auto; gap:10px; align-items:end; padding:4px 12px 10px 54px; }
-.rs-tg-setup-body .field { margin:0; }
-.rs-tg-verify-state { grid-column:1/-1; min-height:20px; color:var(--fg-3); font-size:var(--fs-2); }
+.rs-bot-wizard { border-bottom:1px solid var(--line); padding:10px 12px; background:var(--card); }
+.rs-wizard-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:10px; }
+.rs-wizard-steps span { display:flex; align-items:center; gap:6px; min-width:0; padding:7px 8px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-3); font-size:var(--fs-2); white-space:nowrap; }
+.rs-wizard-steps span b { width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:var(--card-2); }
+.rs-wizard-steps span.is-active { border-color:#229ED9; color:var(--fg); background:color-mix(in srgb,#229ED9 9%,transparent); }
+.rs-wizard-steps span.is-done b { background:var(--ok); color:#fff; }
+.rs-wizard-stage { display:flex; align-items:end; justify-content:space-between; gap:12px; }
+.rs-wizard-stage > div:first-child { display:flex; flex-direction:column; }
+.rs-wizard-stage small { color:var(--fg-3); }
+.rs-wizard-stage .field { flex:1; margin:0; }
+.rs-analysis-result,.rs-wizard-review { margin:8px 0; padding:10px; border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); font-size:var(--fs-2); }
+.rs-analysis-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.rs-analysis-grid span { display:flex; flex-direction:column; gap:2px; min-width:0; overflow-wrap:anywhere; }
+.rs-analysis-grid small { color:var(--fg-3); }
+.rs-analysis-note { margin-top:8px; color:var(--fg-2); }
+.rs-tg-verify-state { display:block; min-height:20px; color:var(--fg-3); font-size:var(--fs-2); }
 .rs-tg-verify-state.ok { color:var(--ok); }
 .rs-tg-verify-state.err { color:var(--danger); }
-.rs-tg-setup > p { margin:0; padding:0 12px 10px 54px; color:var(--fg-3); font-size:var(--fs-1); }
+.rs-bot-wizard > p { margin:8px 0 0; color:var(--fg-3); font-size:var(--fs-1); }
 .rs-bot-callout { display:flex; align-items:center; gap:10px; min-height:50px; padding:8px 12px; border-block:1px solid var(--line); background:color-mix(in srgb,#229ED9 9%,var(--card)); }
 .rs-bot-callout[hidden] { display:none; }
 .rs-bot-logo { width:32px; height:32px; flex:0 0 auto; display:grid; place-items:center; border-radius:50%; background:#229ED9; color:white; }
@@ -1707,7 +1711,7 @@ body.rs-awaiting-bot #rsTgSetup summary small::after { content:" · required fir
 .rs-bot-callout.is-live { border-left:3px solid var(--ok); }
 .rs-bot-callout.is-bad { border-left:3px solid var(--danger); }
 .rs-bot-go { margin-left:auto; flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--pill); background:#229ED9; color:white; font-weight:650; text-decoration:none; }
-@media(max-width:560px){ .rs-tg-setup-body{grid-template-columns:1fr;padding-left:12px}.rs-tg-setup-body .btn-primary{width:100%;min-height:44px}.rs-tg-setup > p{padding-left:12px}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-go{width:100%;justify-content:center;min-height:44px;margin-left:42px} }
+@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:1fr 1fr}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-go{width:100%;justify-content:center;min-height:44px;margin-left:42px} }
 #tab-jobs .rs-tb, #tab-jobs .rs-seg { overflow-x: auto; }
 #btnStartJob.loading { pointer-events: none; opacity: .7; }
 #btnStartJob.dirty   { border-color: var(--warn); }

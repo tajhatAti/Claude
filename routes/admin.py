@@ -434,7 +434,8 @@ def admin_telegram_jobs(authorization: Optional[str] = Header(None)):
     try:
         rows = conn.execute(
             "SELECT j.id,j.name,j.runner_job_id,j.telegram_bot_username,j.telegram_bot_id,"
-            "j.telegram_check_status,j.telegram_verified_at,j.updated_at,u.id AS user_id,"
+            "j.telegram_check_status,j.telegram_verified_at,j.telegram_framework,"
+            "j.telegram_update_mode,j.telegram_token_source,j.updated_at,u.id AS user_id,"
             "u.username AS owner FROM jobs j JOIN users u ON u.id=j.user_id "
             "WHERE j.telegram_bot_detected=1 ORDER BY j.updated_at DESC LIMIT 300"
         ).fetchall()
@@ -477,6 +478,7 @@ def admin_jobs_route(authorization: Optional[str] = Header(None)):
                    j.worker_url, j.user_id, j.telegram_bot_detected,
                    j.telegram_bot_username, j.telegram_bot_id,
                    j.telegram_check_status, j.telegram_verified_at,
+                   j.telegram_framework,j.telegram_update_mode,j.telegram_token_source,
                    u.username AS owner, u.telegram_id AS owner_telegram,
                    u.telegram_name AS owner_telegram_name,
                    u.is_suspended AS owner_suspended
@@ -544,7 +546,8 @@ def admin_job_detail_route(job_id: int, authorization: Optional[str] = Header(No
             SELECT j.id, j.name, j.language, j.created_at, j.updated_at,
                    j.runner_job_id, j.worker_url, j.user_id,
                    j.telegram_bot_detected,j.telegram_bot_username,j.telegram_bot_id,
-                   j.telegram_check_status,j.telegram_verified_at,
+                   j.telegram_check_status,j.telegram_verified_at,j.telegram_framework,
+                   j.telegram_update_mode,j.telegram_token_source,
                    u.username AS owner, u.email AS owner_email,
                    u.telegram_id AS owner_telegram,
                    u.telegram_name AS owner_telegram_name,

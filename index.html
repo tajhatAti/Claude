@@ -967,15 +967,26 @@
             <div class="rs-meta">
               <input class="rs-inp" id="jobName" type="text" placeholder="Bot name" maxlength="60" spellcheck="false" autocomplete="off" aria-label="Bot name">
             </div>
-            <details class="rs-tg-setup" id="rsTgSetup">
-              <summary><span class="rs-bot-logo" aria-hidden="true">✈</span><span><b>Telegram bot</b><small>Verify a BotFather token and connect it to this job</small></span></summary>
-              <div class="rs-tg-setup-body">
-                <label class="field"><span>Bot token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…" aria-describedby="rsTgPrivacy"></label>
-                <button class="btn-primary" id="rsTgVerify" type="button">Verify bot</button>
+            <section class="rs-bot-wizard" id="rsTgSetup" aria-label="Add Telegram bot">
+              <div class="rs-wizard-steps" aria-label="Setup progress">
+                <span class="is-active" data-rs-step="code"><b>1</b> Code</span>
+                <span data-rs-step="connect"><b>2</b> Connect bot</span>
+                <span data-rs-step="review"><b>3</b> Review</span>
+                <span data-rs-step="deploy"><b>4</b> Deploy</span>
+              </div>
+              <div class="rs-wizard-stage" id="rsTgCodeStage">
+                <div><b>Paste or upload your bot code</b><small>We’ll detect the framework, token usage and polling/webhook mode.</small></div>
+                <button class="btn-primary" id="rsTgAnalyze" type="button">Analyze code</button>
+              </div>
+              <div class="rs-analysis-result" id="rsTgAnalysis" hidden></div>
+              <div class="rs-wizard-stage" id="rsTgConnectStage" hidden>
+                <label class="field"><span>BotFather token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…" aria-describedby="rsTgPrivacy"></label>
+                <button class="btn-primary" id="rsTgVerify" type="button">Verify &amp; connect</button>
                 <span class="rs-tg-verify-state" id="rsTgVerifyState"></span>
               </div>
-              <p id="rsTgPrivacy">The token is verified with Telegram and saved as this job’s <code>BOT_TOKEN</code> environment variable. It is never shown in admin metadata.</p>
-            </details>
+              <div class="rs-wizard-review" id="rsTgReview" hidden></div>
+              <p id="rsTgPrivacy">Your token stays in the secret <code>BOT_TOKEN</code> environment variable. Hardcoded/example tokens are automatically changed to read that secret; the token is never shown to admins.</p>
+            </section>
             <aside class="rs-bot-callout" id="rsBotCallout" hidden aria-live="polite">
               <span class="rs-bot-logo" aria-hidden="true">✈</span>
               <div class="rs-bot-copy"><b id="rsBotName">Telegram bot detected</b><span id="rsBotState">Checking bot…</span></div>

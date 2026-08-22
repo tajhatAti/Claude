@@ -596,6 +596,9 @@ _SCHEMA_TABLES = [
         telegram_bot_id TEXT,
         telegram_check_status TEXT,
         telegram_verified_at TEXT,
+        telegram_framework TEXT,
+        telegram_update_mode TEXT,
+        telegram_token_source TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -880,6 +883,9 @@ def init_db():
             ("telegram_bot_id", "TEXT"),
             ("telegram_check_status", "TEXT"),
             ("telegram_verified_at", "TEXT"),
+            ("telegram_framework", "TEXT"),
+            ("telegram_update_mode", "TEXT"),
+            ("telegram_token_source", "TEXT"),
         ):
             if not _column_exists(conn, "jobs", _col):
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {_col} {_ddl}")
