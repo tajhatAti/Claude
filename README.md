@@ -113,6 +113,16 @@ Bot source and encrypted environment configuration live in the main database. Ru
 
 ## Tests
 
+GitHub Actions runs the same core gate used locally:
+
+```bash
+pip install -r requirements-dev.txt
+npm ci --ignore-scripts
+PYTHON_BIN=.venv/bin/python scripts/test-core.sh
+```
+
+The gate compiles Python/JavaScript, runs backend security and bot-hosting tests, executes jsdom UI suites, parses emitted SQL as PostgreSQL, checks npm high-severity advisories, and rejects whitespace errors.
+
 Focused suites live under `tests/` and `tests/js/`. Typical commands:
 
 ```bash

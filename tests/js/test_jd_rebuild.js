@@ -94,7 +94,7 @@ ok('destructive action is styled as destructive',
 // ── 4. tab row is a NEW component ───────────────────────────────────────
 console.log('[4] pill tab row');
 const tabEls = panel ? [...panel.querySelectorAll('.jd-tab')] : [];
-ok('six tabs', tabEls.length === 6, String(tabEls.length));
+ok('seven tabs', tabEls.length === 7, String(tabEls.length));
 ['Code', 'Logs', 'Env', 'Files', 'Metrics', 'Settings'].forEach(label =>
   ok(`tab "${label}" exists`, tabEls.some(t => t.textContent.trim() === label)));
 ok('tabs are pill-shaped', /\.jd-tab \{[^}]*border-radius:\s*var\(--r-pill\)/.test(CSS));
@@ -114,9 +114,9 @@ ok('every tab points at its panel', tabEls.every(t => {
 // ── 5. panels are mutually exclusive ────────────────────────────────────
 console.log('[5] one view at a time');
 const panels = panel ? [...panel.querySelectorAll('.jd-panel')] : [];
-ok('six panels', panels.length === 6, String(panels.length));
+ok('seven panels', panels.length === 7, String(panels.length));
 ok('exactly one panel is active', panels.filter(p => p.classList.contains('is-active')).length === 1);
-ok('the other five are hidden', panels.filter(p => p.hidden).length === 5,
+ok('the other six are hidden', panels.filter(p => p.hidden).length === 6,
    String(panels.filter(p => p.hidden).length));
 ok('hidden panels are display:none in CSS', /\.jd-panel \{[^}]*display:\s*none/.test(CSS));
 ok('tab router exists', /function jdSwitchTab\(/.test(JS));
