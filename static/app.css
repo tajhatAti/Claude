@@ -1710,8 +1710,9 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
 .rs-bot-copy span { color:var(--fg-3); font-size:var(--fs-2); }
 .rs-bot-callout.is-live { border-left:3px solid var(--ok); }
 .rs-bot-callout.is-bad { border-left:3px solid var(--danger); }
-.rs-bot-go { margin-left:auto; flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--pill); background:#229ED9; color:white; font-weight:650; text-decoration:none; }
-@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:1fr 1fr}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-go{width:100%;justify-content:center;min-height:44px;margin-left:42px} }
+.rs-bot-health { margin-left:auto; min-height:36px; padding:0 10px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-2); }
+.rs-bot-go { flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--pill); background:#229ED9; color:white; font-weight:650; text-decoration:none; }
+@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:1fr 1fr}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-health{margin-left:42px;min-height:44px}.rs-bot-go{flex:1;justify-content:center;min-height:44px} }
 #tab-jobs .rs-tb, #tab-jobs .rs-seg { overflow-x: auto; }
 #btnStartJob.loading { pointer-events: none; opacity: .7; }
 #btnStartJob.dirty   { border-color: var(--warn); }

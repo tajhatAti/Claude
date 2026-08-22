@@ -3653,6 +3653,21 @@ function _resetRunSpaceTelegramDraft(){
   _rsWizardStep("code");
 }
 
+async function _checkRunSpaceBotHealth() {
+  const btn=document.getElementById("rsBotHealth");
+  const state=document.getElementById("rsBotState");
+  if(!_selectedJobId)return;
+  try{
+    if(btn){btn.disabled=true;btn.textContent="Checking…";}
+    const h=await api(`/api/jobs/${_selectedJobId}/telegram-health`,"GET",null,true);
+    const labels={healthy:"Webhook healthy",running_unconfirmed:"Process running · waiting for Telegram activity signal",duplicate_poller:"Blocked: another server is polling this token",webhook_conflict:"Polling blocked by an active webhook",webhook_missing:"Webhook mode detected, but no webhook is configured",webhook_error:"Telegram reports a webhook error",invalid_token:"Token rejected by Telegram",telegram_ready:"Telegram ready",unknown:"Health unknown"};
+    if(state)state.textContent=labels[h.delivery_status]||h.delivery_status;
+    const box=document.getElementById("rsBotCallout");
+    if(box){box.classList.toggle("is-bad",["duplicate_poller","webhook_conflict","webhook_missing","webhook_error","invalid_token"].includes(h.delivery_status));box.classList.toggle("is-live",h.process_status==="running"&&!box.classList.contains("is-bad"));}
+  }catch(e){if(state)state.textContent=e.message;}
+  finally{if(btn){btn.disabled=false;btn.textContent="Check health";}}
+}
+
 function _renderTelegramBot(job) {
   const box=document.getElementById("rsBotCallout");
   if(!box)return;
@@ -4396,6 +4411,8 @@ function _initWbWiring() {
   if(tgAnalyze && !tgAnalyze.dataset.wired){tgAnalyze.dataset.wired="1";tgAnalyze.addEventListener("click",_analyzeRunSpaceBot);}
   const tgVerify = document.getElementById("rsTgVerify");
   if(tgVerify && !tgVerify.dataset.wired){tgVerify.dataset.wired="1";tgVerify.addEventListener("click",_verifyRunSpaceTelegramBot);}
+  const tgHealth = document.getElementById("rsBotHealth");
+  if(tgHealth && !tgHealth.dataset.wired){tgHealth.dataset.wired="1";tgHealth.addEventListener("click",_checkRunSpaceBotHealth);}
 
   const onNew = (ev) => {
     if (ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -6298,6 +6315,8 @@ function renderAdminStats(ov) {
     chip("suspended", ov.suspended ?? 0, ov.suspended ? "warn" : "") +
     chip("apps live", ov.jobs_deployed ?? 0) +
     chip("on telegram", ov.telegram_linked ?? 0) +
+    chip("bot secrets", ov.bot_secrets_encrypted ? "encrypted" : "NOT ENCRYPTED", ov.bot_secrets_encrypted ? "" : "warn") +
+    chip("runner", ov.runner_isolation === "remote" ? "isolated service" : "embedded", ov.runner_isolation === "remote" ? "" : "warn") +
     chip("memory", ov.mem_safe_mb != null
         ? `${Math.round(ov.mem_used_mb ?? 0)}MB / ${ov.mem_safe_mb}MB`
         : "—",

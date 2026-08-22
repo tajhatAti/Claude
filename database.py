@@ -594,6 +594,7 @@ _SCHEMA_TABLES = [
         telegram_bot_detected INTEGER NOT NULL DEFAULT 0,
         telegram_bot_username TEXT,
         telegram_bot_id TEXT,
+        telegram_token_fingerprint TEXT,
         telegram_check_status TEXT,
         telegram_verified_at TEXT,
         telegram_framework TEXT,
@@ -881,6 +882,7 @@ def init_db():
             ("telegram_bot_detected", "INTEGER NOT NULL DEFAULT 0"),
             ("telegram_bot_username", "TEXT"),
             ("telegram_bot_id", "TEXT"),
+            ("telegram_token_fingerprint", "TEXT"),
             ("telegram_check_status", "TEXT"),
             ("telegram_verified_at", "TEXT"),
             ("telegram_framework", "TEXT"),
@@ -907,6 +909,8 @@ def init_db():
                      "ON job_deploy_events (user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tg_verify_user_expiry "
                      "ON telegram_token_verifications (user_id, expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_tg_token_fingerprint "
+                     "ON jobs (telegram_token_fingerprint)")
 
         conn.commit()
     finally:

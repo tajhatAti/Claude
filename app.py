@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from services import secrets_store
 from database import DIALECT, init_db  # noqa: F401  (init_db already ran via routes.deps)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -64,6 +65,19 @@ async def _self_ping_loop():
 
 @app.on_event("startup")
 async def startup_event():
+    # Encrypt any pre-existing plaintext bot environments before serving user
+    # traffic. Local SQLite remains zero-config; production health reports a
+    # missing key explicitly.
+    try:
+        from services import secrets_store
+        secrets_store.migrate_job_envs()
+    except Exception as exc:
+        logger.error("Bot secret migration failed: %s", exc)
+    try:
+        from services import retention
+        retention.cleanup()
+    except Exception as exc:
+        logger.warning("Retention cleanup failed: %s", exc)
     asyncio.create_task(_self_ping_loop())
     # Telegram server-alive bot — starts automatically if TELEGRAM_PING_BOT_TOKEN is set
     try:
@@ -125,11 +139,16 @@ def _enable_embedded_runner() -> bool:
 
 EMBEDDED_RUNNER = _enable_embedded_runner()
 
+_cors_origins = [x.strip().rstrip("/") for x in
+                 os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if x.strip()]
+for _origin in (os.getenv("SITE_BASE_URL", ""), os.getenv("RENDER_EXTERNAL_URL", "")):
+    if _origin.strip().rstrip("/") and _origin.strip().rstrip("/") not in _cors_origins:
+        _cors_origins.append(_origin.strip().rstrip("/"))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Fingerprint"],
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -449,6 +468,8 @@ def health():
         "status": "ok",
         "database": DIALECT,
         "runner": "embedded" if EMBEDDED_RUNNER else "remote",
+        "bot_secrets_encrypted": secrets_store.configured(),
+        "production_isolation": "unsafe-embedded" if EMBEDDED_RUNNER else "remote-runner",
         "ping_bot": "running" if bool(os.getenv("BOT_TOKEN", "").strip()
                                        or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()) else "not configured",
         # Which bot this server verifies Mini App sign-ins for. The bot ID half

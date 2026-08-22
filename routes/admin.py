@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from services import runner_client
 from services import limits
+from services import secrets_store
 from services.runner_client import MAX_JOBS_PER_USER
 
 # "Active now" window. Long enough that someone reading logs still counts,
@@ -230,6 +231,8 @@ def admin_overview_route(authorization: Optional[str] = Header(None)):
             "active_users": active_users,
             "active_window_min": ACTIVE_WINDOW_MIN,
             "telegram_linked": tg_linked,
+            "bot_secrets_encrypted": secrets_store.configured(),
+            "runner_isolation": "embedded" if runner_client.embedded_mode() else "remote",
         }
     finally:
         conn.close()

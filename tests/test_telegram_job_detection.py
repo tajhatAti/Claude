@@ -1,6 +1,7 @@
 import os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["DB_PATH"] = tempfile.mktemp(suffix=".db")
+os.environ["JOB_SECRETS_KEY"] = "test-only-secret-key-material"
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp())
 
 import database
@@ -32,6 +33,17 @@ def test_verified_token_becomes_env_secret_and_source_is_auto_fixed():
     assert old not in clean and "example-token" not in clean and "placeholder" not in clean
     assert TOKEN not in clean and clean.count('os.getenv("BOT_TOKEN")')==4 and "import os" in clean
     assert env["BOT_TOKEN"]==TOKEN and env["TELEGRAM_BOT_TOKEN"]==TOKEN
+
+
+def test_delivery_health_detects_polling_webhook_conflict(monkeypatch):
+    def post(url, **kwargs):
+        if url.endswith('/getMe'):
+            return Resp(200,{"ok":True,"result":{"id":777,"is_bot":True,"username":"DemoHelperBot"}})
+        return Resp(200,{"ok":True,"result":{"url":"https://old.example/secret-path","pending_update_count":4}})
+    monkeypatch.setattr(telegram_detector.requests,"post",post)
+    out=telegram_detector.telegram_delivery_health(TOKEN,"polling")
+    assert out["delivery_status"]=="webhook_conflict"
+    assert out["webhook_host"]=="old.example" and "secret-path" not in repr(out)
 
 
 def test_detector_handles_username_only_and_network_failure(monkeypatch):
@@ -69,6 +81,7 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
             sent.append(args[0] if args else kwargs)
             return Resp(201,{"id":"rid-bot","status":"running"})
         if method=="GET" and path=="/internal/jobs": return Resp(200,{"jobs":[{"id":"rid-bot","status":"running","uptime_s":5}]})
+        if method=="GET" and path.startswith("/internal/jobs/"): return Resp(200,{"id":"rid-bot","status":"running","uptime_s":5,"logs":"bot started"})
         return Resp(404,{})
     monkeypatch.setattr(runner_client,"_runner_http",fake)
     monkeypatch.setattr(runner_client,"fleet_jobs",lambda refresh=False:{"rid-bot":{"status":"running","uptime_s":5}})
@@ -80,17 +93,26 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     assert r.json()["telegram_bot_url"]=="https://t.me/DemoHelperBot" and TOKEN not in r.text
     assert old_token not in sent[0]["code"] and TOKEN not in sent[0]["code"]
     assert 'os.getenv("BOT_TOKEN")' in sent[0]["code"] and sent[0]["env"]["BOT_TOKEN"]==TOKEN
+    db=database.get_db_connection(); stored=db.execute("SELECT env FROM jobs WHERE name='demo-bot'").fetchone()["env"]; db.close()
+    assert stored.startswith("enc:v1:") and TOKEN not in stored
+    health=client.get(f"/api/jobs/{r.json()['job_db_id']}/telegram-health",headers=headers)
+    assert health.status_code==200 and health.json()["process_status"]=="running"
     reused=client.post("/api/jobs",headers=headers,json={"name":"reuse-proof","language":"python","code":"TOKEN='x'","env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":verification_id})
     assert reused.status_code==400 and "Verify" in reused.text
+    duplicate_proof=client.post("/api/telegram-bot/verify",headers=headers,json={"token":TOKEN}).json()["telegram_verification_id"]
+    duplicate=client.post("/api/jobs",headers=headers,json={"name":"duplicate-token","language":"python","code":"TOKEN='example'","env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":duplicate_proof})
+    assert duplicate.status_code==409 and "already attached" in duplicate.text
     listed=client.get("/api/jobs",headers=headers).json()["jobs"][0]
     assert listed["telegram_bot_detected"] and listed["telegram_bot_username"]=="DemoHelperBot"
+    assert listed["env"]["BOT_TOKEN"]=="••••••••" and TOKEN not in repr(listed)
     # One account may run three verified bots, never a fourth.
-    for i in (2,3):
-        proof=client.post("/api/telegram-bot/verify",headers=headers,json={"token":TOKEN}).json()["telegram_verification_id"]
-        made=client.post("/api/jobs",headers=headers,json={"name":f"bot-{i}","language":"python","code":"TOKEN='example'","env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":proof})
+    for i, bot_token in ((2,"223456789:AA"+"y"*32),(3,"323456789:AA"+"z"*32)):
+        proof=client.post("/api/telegram-bot/verify",headers=headers,json={"token":bot_token}).json()["telegram_verification_id"]
+        made=client.post("/api/jobs",headers=headers,json={"name":f"bot-{i}","language":"python","code":"TOKEN='example'","env":{"BOT_TOKEN":bot_token},"telegram_verification_id":proof})
         assert made.status_code==200,made.text
-    fourth=client.post("/api/telegram-bot/verify",headers=headers,json={"token":TOKEN}).json()["telegram_verification_id"]
-    denied=client.post("/api/jobs",headers=headers,json={"name":"bot-4","language":"python","code":"TOKEN='example'","env":{"BOT_TOKEN":TOKEN},"telegram_verification_id":fourth})
+    fourth_token="423456789:AA"+"w"*32
+    fourth=client.post("/api/telegram-bot/verify",headers=headers,json={"token":fourth_token}).json()["telegram_verification_id"]
+    denied=client.post("/api/jobs",headers=headers,json={"name":"bot-4","language":"python","code":"TOKEN='example'","env":{"BOT_TOKEN":fourth_token},"telegram_verification_id":fourth})
     assert denied.status_code==429 and "3 Telegram bots" in denied.text
     assert client.get("/admin/telegram-jobs").status_code==404
     admin=client.get("/admin/telegram-jobs",headers=headers)

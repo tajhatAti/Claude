@@ -48,6 +48,7 @@ from services import runner_client
 from services import limits
 from services import abuse_control
 from services import telegram_detector
+from services import secrets_store
 from services.runner_client import MAX_JOBS_PER_USER
 
 logger = logging.getLogger("codenest.runspace")
@@ -211,7 +212,7 @@ def _row_env(row) -> dict:
     """Env vars saved for a job row (empty when unset / unparsable)."""
     try:
         raw = dict(row).get("env")
-        return json.loads(raw) if raw else {}
+        return secrets_store.unpack_env(raw)
     except Exception:
         return {}
 
@@ -259,6 +260,31 @@ def _telegram_columns(meta):
             meta.get("bot_id"), meta.get("check_status"), meta.get("verified_at"))
 
 
+def _reject_duplicate_bot_token(fingerprint, exclude_job_id=None):
+    """One Telegram token may have only one deployed poller on CodeNest."""
+    conn = get_db_connection()
+    try:
+        sql = ("SELECT id,runner_job_id FROM jobs WHERE telegram_token_fingerprint=? "
+               "AND runner_job_id IS NOT NULL")
+        params = [fingerprint]
+        if exclude_job_id is not None:
+            sql += " AND id != ?"
+            params.append(exclude_job_id)
+        rows = [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
+    finally:
+        conn.close()
+    if not rows:
+        return
+    live = limits.running_runner_ids()
+    # Fail closed when the runner cannot answer: launching a duplicate is more
+    # damaging than asking the owner to stop/delete the existing deployment.
+    if not live or any(r.get("runner_job_id") in live for r in rows):
+        raise HTTPException(
+            status_code=409,
+            detail="This Telegram token is already attached to another deployed bot. Stop or delete that bot before reusing the token.",
+        )
+
+
 def _record_deploy_event(conn, user_id, job_id, action, job_name, meta, created_at):
     conn.execute(
         "INSERT INTO job_deploy_events (user_id,job_id,action,job_name,"
@@ -270,6 +296,7 @@ def _record_deploy_event(conn, user_id, job_id, action, job_name, meta, created_
 
 
 def _attach_telegram_public(row):
+    row.pop("telegram_token_fingerprint", None)
     row.update(telegram_detector.public_fields({
         "detected": bool(row.get("telegram_bot_detected")),
         "username": row.get("telegram_bot_username"),
@@ -278,6 +305,23 @@ def _attach_telegram_public(row):
         "verified_at": row.get("telegram_verified_at"),
     }))
     return row
+
+
+_SECRET_MASK = "••••••••"
+_SECRET_KEY_RE = re.compile(r"(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)", re.I)
+
+
+def _public_env(values):
+    return {k: (_SECRET_MASK if _SECRET_KEY_RE.search(k) else v)
+            for k, v in dict(values or {}).items()}
+
+
+def _restore_masked_env(values, existing):
+    out = dict(values or {})
+    for key, value in list(out.items()):
+        if value == _SECRET_MASK and key in existing:
+            out[key] = existing[key]
+    return out
 
 
 def _clean_env_map(raw) -> dict:
@@ -371,6 +415,8 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
     if not bot_meta:
         raise HTTPException(status_code=400,
                             detail="Verify your Telegram bot token first, then add the bot.")
+    token_fingerprint = telegram_detector.token_fingerprint(verified_token)
+    _reject_duplicate_bot_token(token_fingerprint)
     code_analysis = telegram_detector.analyze_code(
         payload.code or "", payload.language or "python")
     canonical_code, env_map = telegram_detector.secure_bot_source(
@@ -403,12 +449,12 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
             """
             INSERT INTO jobs (user_id, name, language, code, runner_job_id, env,
                 telegram_bot_detected,telegram_bot_username,telegram_bot_id,
-                telegram_check_status,telegram_verified_at,telegram_framework,
-                telegram_update_mode,telegram_token_source,created_at,updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                telegram_check_status,telegram_verified_at,telegram_token_fingerprint,
+                telegram_framework,telegram_update_mode,telegram_token_source,created_at,updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (user["id"], name, payload.language, canonical_code, info["id"],
-             json.dumps(env_map) if env_map else None, *_telegram_columns(bot_meta),
+             secrets_store.pack_env(env_map), *_telegram_columns(bot_meta), token_fingerprint,
              code_analysis["framework"], code_analysis["update_mode"],
              code_analysis["token_source"], now, now),
         )
@@ -469,7 +515,7 @@ def list_jobs(authorization: Optional[str] = Header(None)):
             # Runner unreachable: we do NOT know the state. Saying "offline"
             # here is what made running jobs appear stopped after a tab switch.
             r.update({"status": "unknown", "status_stale": True})
-        r["env"] = _row_env(r)          # saved env vars (Details page)
+        r["env"] = _public_env(_row_env(r))  # values that look secret are write-only
         _attach_telegram_public(r)
         r.pop("code", None)  # never ship stored code back in list payloads
         jobs.append(r)
@@ -519,9 +565,46 @@ def get_job(job_id: int, authorization: Optional[str] = Header(None)):
             row["status_stale"] = True
     else:
         row["status"] = "offline"
-    row["env"] = _row_env(row)
+    row["env"] = _public_env(_row_env(row))
     _attach_telegram_public(row)
     return row
+
+
+@router.get("/api/jobs/{job_id}/telegram-health")
+def telegram_job_health(job_id: int, authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    rate_limit_user(user["id"], "telegram_health")
+    row = dict(_get_own_job(job_id, user))
+    token = str(_row_env(row).get("BOT_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(status_code=404, detail="This bot has no configured BOT_TOKEN.")
+    health = telegram_detector.telegram_delivery_health(
+        token, row.get("telegram_update_mode") or "unknown")
+    health.update({"process_status": "offline", "runtime_conflict": False,
+                   "checked_at": now_utc_str()})
+    rid = row.get("runner_job_id")
+    if rid:
+        try:
+            resp = runner_client._runner_http("GET", f"/internal/jobs/{rid}", worker=_worker_of(row))
+            if resp.status_code == 200:
+                live = resp.json() or {}
+                health["process_status"] = live.get("status") or "unknown"
+                logs = str(live.get("logs") or "").lower()
+                conflict = ("terminated by other getupdates" in logs or
+                            "terminated by other getupdates request" in logs or
+                            ("409 conflict" in logs and "getupdates" in logs))
+                unauthorized = ("unauthorized" in logs and "telegram" in logs)
+                health["runtime_conflict"] = conflict
+                if conflict:
+                    health["delivery_status"] = "duplicate_poller"
+                elif unauthorized:
+                    health["delivery_status"] = "invalid_token"
+                elif (health["delivery_status"] == "telegram_ready" and
+                      health["process_status"] == "running"):
+                    health["delivery_status"] = "running_unconfirmed"
+        except Exception:
+            health["process_status"] = "unknown"
+    return health
 
 
 # ── FILE BROWSER ───────────────────────────────────────────────────────────
@@ -1003,7 +1086,9 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     new_repo = (payload.repo_url or "").strip()
     new_entry = (payload.entry or "").strip()
     # env omitted from the request => keep what is already saved.
-    new_env = _clean_env_map(payload.env) if payload.env is not None else _row_env(row)
+    existing_env = _row_env(row)
+    new_env = (_restore_masked_env(_clean_env_map(payload.env), existing_env)
+               if payload.env is not None else existing_env)
     verified_token = str(new_env.get("BOT_TOKEN") or "").strip()
     if payload.telegram_verification_id:
         bot_meta = telegram_detector.validate_verification(
@@ -1018,6 +1103,8 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     if not bot_meta:
         raise HTTPException(status_code=400,
                             detail="Verify your Telegram bot token before saving this bot.")
+    token_fingerprint = telegram_detector.token_fingerprint(verified_token)
+    _reject_duplicate_bot_token(token_fingerprint, exclude_job_id=job_id)
     code_analysis = telegram_detector.analyze_code(new_code, new_lang)
     new_code, new_env = telegram_detector.secure_bot_source(
         new_code, new_env, verified_token, new_lang)
@@ -1038,10 +1125,10 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
         conn.execute(
             "UPDATE jobs SET name=?,language=?,code=?,env=?,telegram_bot_detected=?,"
             "telegram_bot_username=?,telegram_bot_id=?,telegram_check_status=?,"
-            "telegram_verified_at=?,telegram_framework=?,telegram_update_mode=?,"
+            "telegram_verified_at=?,telegram_token_fingerprint=?,telegram_framework=?,telegram_update_mode=?,"
             "telegram_token_source=?,updated_at=? WHERE id=?",
-            (new_name, new_lang, new_code, json.dumps(new_env) if new_env else None,
-             *_telegram_columns(bot_meta), code_analysis["framework"],
+            (new_name, new_lang, new_code, secrets_store.pack_env(new_env),
+             *_telegram_columns(bot_meta), token_fingerprint, code_analysis["framework"],
              code_analysis["update_mode"], code_analysis["token_source"], now, job_id),
         )
         _record_deploy_event(conn, user["id"], job_id, "update", new_name, bot_meta, now)

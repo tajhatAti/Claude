@@ -50,6 +50,7 @@ import re
 from database import get_db_connection
 from routes.deps import now_utc_str
 from services import runner_client
+from services import secrets_store
 # Re-exported: pingbot reads bot_ops.MAX_JOBS_PER_USER when showing how many
 
 # slots an account has left, so there is one value, not two.
@@ -132,7 +133,7 @@ def _row_env(row) -> dict:
     services/, but kept in sync deliberately."""
     try:
         raw = dict(row).get("env")
-        return json.loads(raw) if raw else {}
+        return secrets_store.unpack_env(raw)
     except Exception:
         return {}
 

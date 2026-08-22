@@ -6,7 +6,9 @@ already holds the user's source/env as required to restart their app.
 """
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
 import json
+import os
 import re
 import secrets
 import requests
@@ -78,6 +80,14 @@ def inspect_bot(code, env=None, timeout=4):
 
 def _token_hash(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def token_fingerprint(token):
+    """Stable, irreversible identity used only to prevent duplicate pollers."""
+    key = (os.getenv("JOB_TOKEN_HASH_KEY", "").strip()
+           or os.getenv("JOB_SECRETS_KEY", "").strip()
+           or "local-development-token-fingerprint")
+    return hmac.new(key.encode(), token.encode(), hashlib.sha256).hexdigest()
 
 
 def issue_verification(user_id, token, meta, ttl_minutes=15):
@@ -259,6 +269,47 @@ def secure_bot_source(code, env, token, language="python"):
 # not putting the verified secret into source code.
 def apply_verified_token(code, env, token, language="python"):
     return secure_bot_source(code, env, token, language)
+
+
+def telegram_delivery_health(token, expected_mode="unknown", timeout=4):
+    """Safe current Telegram identity/webhook diagnostics; never returns token."""
+    result = {"telegram_reachable": False, "token_valid": None,
+              "delivery_status": "unknown", "webhook_configured": False,
+              "webhook_host": None, "pending_updates": None,
+              "last_error": None}
+    try:
+        me = requests.post(f"https://api.telegram.org/bot{token}/getMe", json={}, timeout=timeout)
+        mp = me.json() if me is not None else {}
+        if not mp.get("ok"):
+            if me is not None and me.status_code in (401, 404):
+                result.update(telegram_reachable=True, token_valid=False,
+                              delivery_status="invalid_token")
+            return result
+        result.update(telegram_reachable=True, token_valid=True)
+        wh = requests.post(f"https://api.telegram.org/bot{token}/getWebhookInfo", json={}, timeout=timeout)
+        wp = wh.json() if wh is not None else {}
+        info = wp.get("result") or {}
+        url = str(info.get("url") or "")
+        if url:
+            from urllib.parse import urlparse
+            result["webhook_configured"] = True
+            result["webhook_host"] = urlparse(url).hostname
+        result["pending_updates"] = info.get("pending_update_count")
+        result["last_error"] = str(info.get("last_error_message") or "")[:240] or None
+        mode = (expected_mode or "unknown").lower()
+        if mode == "polling" and url:
+            result["delivery_status"] = "webhook_conflict"
+        elif mode == "webhook" and not url:
+            result["delivery_status"] = "webhook_missing"
+        elif result["last_error"]:
+            result["delivery_status"] = "webhook_error"
+        elif mode == "webhook":
+            result["delivery_status"] = "healthy"
+        else:
+            result["delivery_status"] = "telegram_ready"
+    except Exception:
+        pass
+    return result
 
 
 def public_fields(meta):

@@ -1,238 +1,135 @@
-# Ahad Co - Authentication System
+# CodeNest — Managed Telegram Bot Hosting
 
-A complete authentication system with beautiful glassmorphism UI, 2FA support, and database management.
+CodeNest is a FastAPI + vanilla-JavaScript platform for analyzing, connecting, deploying, and monitoring Telegram bots. Users can paste/upload bot code, verify a BotFather token, review framework and delivery-mode analysis, and run up to three bots.
 
-## Features
+## Add Bot flow
 
-✅ **User Authentication**
-- Sign Up with email verification (OTP)
-- Login with username or email
-- Password strength indicator
-- Remember me functionality
-- Password reset with OTP
+1. **Code** — paste, upload, or import bot source.
+2. **Analyze** — detect framework, polling/webhook mode, dependencies, and unsafe token usage.
+3. **Connect** — verify a BotFather token through Telegram `getMe`.
+4. **Review and deploy** — hardcoded tokens are changed to read the write-only `BOT_TOKEN` environment secret.
 
-✅ **Dashboard**
-- Profile management
-- Links management
-- Security settings
-- Session management
+Supported analysis signals include aiogram, python-telegram-bot, pyTelegramBotAPI/telebot, Telethon, Pyrogram, Telegraf, grammY, and node-telegram-bot-api.
 
-✅ **Security**
-- Two-Factor Authentication (2FA) with TOTP
-- Backup codes for 2FA
-- Session management (view/revoke sessions)
-- Login history tracking
-- Rate limiting
-- Password hashing with bcrypt
+## Main capabilities
 
-✅ **UI/UX**
-- Beautiful glassmorphism design
-- Dark/Light theme toggle
-- Responsive design
-- Keyboard shortcuts
-- Toast notifications
-- Loading animations
+- Email and Telegram authentication
+- Telegram Mini App sign-in verification
+- Code-first bot hosting wizard
+- Encrypted bot environment secrets at rest
+- Duplicate-token deployment prevention
+- Polling/webhook diagnostics and duplicate-poller detection
+- Run/stop/restart, live logs, CPU/memory and uptime
+- Per-job URLs and direct `t.me` links
+- Bot workspace snapshots and restore
+- Admin bot inventory, usage history, abuse controls, and audit log
+- SQLite locally; PostgreSQL/Supabase in production
+- Embedded runner for development and remote runner pool support
 
-## Quick Start
+## Security model
 
-### Local Development
+- Raw BotFather tokens are never returned in bot/admin metadata.
+- Secret-looking environment values are write-only in owner APIs.
+- `JOB_SECRETS_KEY` encrypts bot environments at rest with Fernet.
+- A keyed token fingerprint prevents the same Telegram token from being deployed twice on CodeNest.
+- Verification proofs are authenticated, expire after 15 minutes, and are consumed after creation.
+- Admin routes are 404-stealth for non-admin callers.
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+> **Production warning:** the embedded runner executes user code in the main container and is intended for development/single-owner deployments. Public multi-tenant production should set `RUNNER_SERVICE_URL` and `RUNNER_SERVICE_SECRET` and run the execution service separately. Strong per-job container/microVM isolation is still recommended for hostile public code.
 
-# Run the server
-uvicorn app:app --reload
-```
-
-### Docker
+## Quick start
 
 ```bash
-# Build and run
-docker-compose up
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt httpx websockets
 
-# Or with Docker directly
-docker build -t ahad-co .
-docker run -p 8000:8000 \
-  -e BREVO_API_KEY=your_api_key \
-  -e SENDER_EMAIL=your@email.com \
-  ahad-co
+DB_PATH=/tmp/codenest.db \
+DATA_DIR=/tmp/codenest-data \
+RUNNER_MODE=embedded \
+.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `BREVO_API_KEY` | Brevo/Sendinblue API key for emails | Yes |
-| `SENDER_EMAIL` | Email address to send from | Yes |
-| `SENDER_NAME` | Sender name (default: "Ahad Co") | No |
-| `DATABASE_URL` | PostgreSQL connection string (Supabase). If set → **permanent PostgreSQL storage**; if unset → local SQLite | No |
-| `DB_PATH` | Path to SQLite database (only used when `DATABASE_URL` is unset) | No |
-| `PG_SSLMODE` | PostgreSQL SSL mode (default: `prefer`) | No |
-| `OTP_EXPIRY_MINUTES` | OTP expiry time (default: 10) | No |
-
-## Database: SQLite vs PostgreSQL (Supabase)
-
-The app supports **two** database backends and picks one automatically:
-
-* **PostgreSQL (Supabase)** — used when `DATABASE_URL` is set. Your data is
-  stored permanently in Supabase and survives every redeploy. **Recommended for
-  production.**
-* **SQLite** — used when `DATABASE_URL` is unset. A single file at `DB_PATH`.
-  Great for local development (zero setup), but data does not survive container
-  redeploy unless you mount a persistent disk.
-
-> 💡 The code uses the same query syntax for both engines; the `database.py`
-> layer transparently handles placeholder style (`?` → `%s`), `lastrowid`
-> (via `RETURNING id`), `SERIAL`/`CITEXT`, and upserts (`ON CONFLICT`).
-
-### Switch to Supabase (permanent data, free, no credit card)
-
-1. Sign up at [supabase.com](https://supabase.com) and create a **free** project.
-2. Open **Project Settings → Database → Connection string** and copy the
-   **Session pooler** URL (port `5432`). Replace `[YOUR-PASSWORD]` with your
-   database password:
-   ```
-   postgresql://postgres.xxxx:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres
-   ```
-3. Set it as your `DATABASE_URL` environment variable (in `.env` locally, or the
-   Render/Render dashboard in production).
-4. Restart the app. On startup it auto-creates all tables (incl. the `citext`
-   extension for case-insensitive usernames/emails).
-
-**Bring your existing SQLite data over** — run the included migration script:
+For encrypted local bot secrets, also set a stable key:
 
 ```bash
-# 1. Make sure DATABASE_URL points at Supabase
-export DATABASE_URL='postgresql://postgres.xxxx:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres'
-export DB_PATH='./database.db'   # your existing local file
-
-# 2. Create the schema in Supabase, then copy everything
-python migrate_to_supabase.py --init-schema --force
+export JOB_SECRETS_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 ```
 
-The script preserves all user ids, sessions, vault entries, notes, bookmarks,
-2FA settings, etc., and advances each table's sequence so nothing collides. It
-runs in a single transaction and rolls back on any error, so it is safe to re-run.
+Do not rotate or lose this key while encrypted bot environments exist.
 
-## Deploy to Render
+## Production topology
 
-1. Push to GitHub
-2. Go to [Render](https://render.com)
-3. Connect your GitHub repo
-4. Create a Web Service:
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
-5. Add environment variables from Render Dashboard
-6. Enable Persistent Disk for `/data`
+Recommended:
 
-### Preventing Render Free Tier Spin-Down (Uptime & Reliability)
+```text
+Browser / Telegram Mini App
+            |
+       Main FastAPI site
+       (users + Postgres)
+            |
+   authenticated runner API
+            |
+      Isolated runner pool
+```
 
-Render's free tier web services automatically spin down after 15 minutes of no external/internal HTTP traffic, causing a ~30–60s cold start on the next request. To ensure seamless uptime, Ahad Co includes built-in mitigations and recommends an external guard:
+Required/important environment variables:
 
-1. **Built-in Self-Ping Mechanism**: 
-   The app runs a background asyncio scheduled task that sends a lightweight HTTP GET request to its own `/health` endpoint every 10–14 minutes. This keeps the service from ever going fully idle long enough to spin down.
-2. **RunSpace Proxy Retry-with-Backoff**: 
-   When requests hit a RunSpace job URL after an idle period, the proxy layer automatically retries up to 3 times with short delays (2s, 4s, 8s) if the initial request fails or times out, smoothing over brief cold-start windows without requiring manual page refreshes.
-3. **Clear Status Messaging**: 
-   During a cold-start window, users see a clear, informative status message (`"Waking up your RunSpace... this can take up to a minute on the free tier"`) instead of a raw error.
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Durable PostgreSQL database |
+| `JOB_SECRETS_KEY` | Encrypt hosted-bot environment secrets |
+| `ADMIN_EMAILS` | Comma-separated platform owners |
+| `RUNNER_SERVICE_URL` | Remote execution service |
+| `RUNNER_SERVICE_SECRET` | Shared main-site/runner credential |
+| `SITE_BASE_URL` | Public custom domain override |
+| `TELEGRAM_PING_BOT_TOKEN` | CodeNest control/login bot |
+| `TELEGRAM_BOT_USERNAME` | Public control bot username |
+| `BREVO_API_KEY` | Email OTP delivery |
+| `SENDER_EMAIL` | Verified email sender |
+| `CORS_ALLOWED_ORIGINS` | Optional comma-separated trusted external origins |
 
-#### Is Self-Ping Sufficient, or Should You Also Set Up an External Ping Service?
-* **Self-Ping is highly effective** for preventing idle spin-downs under normal container operation.
-* **External Ping (Recommended Second Layer)**: We recommend also setting up a free external ping service (such as **UptimeRobot**, which was used earlier in this project) configured to ping `https://<your-app>.onrender.com/health` every 5–10 minutes.
-* **Conclusion**: For the most consistent, bulletproof 24/7 uptime on the free tier, **use both** the built-in self-ping mechanism and an external UptimeRobot monitor.
+`render.yaml` generates `JOB_SECRETS_KEY`; configure the remaining secret values in Render.
 
-## Deploy to Friendhost/FriendsHost
+## Bot health
+
+The owner bot card separates:
+
+- Telegram token validity
+- Runner process status
+- Polling/webhook configuration
+- Webhook error and pending-update information
+- Duplicate `getUpdates` poller conflicts detected from runtime logs
+
+“Process running” is not presented as proof that every command handler works.
+
+## Persistence
+
+Bot source and encrypted environment configuration live in the main database. Runtime workspaces live on the runner. A snapshot service stores bot-generated SQLite/JSON/data files for cold-start recovery. For larger production workloads, move snapshot payloads from PostgreSQL to object storage.
+
+## Tests
+
+Focused suites live under `tests/` and `tests/js/`. Typical commands:
 
 ```bash
-# SSH into your server
-ssh user@your-server
+PYTHONPATH=. .venv/bin/pytest -q \
+  tests/test_telegram_job_detection.py \
+  tests/test_admin_abuse_controls.py \
+  tests/test_bot_analytics.py
 
-# Clone your repo
-git clone https://github.com/yourusername/ahad-co.git
-cd ahad-co
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run with systemd (create a service file)
-sudo nano /etc/systemd/system/ahad-co.service
+node tests/js/test_telegram_job_ui.js
+node tests/js/test_admin_live.js
 ```
 
-```ini
-[Unit]
-Description=Ahad Co Auth System
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/path/to/ahad-co
-Environment="BREVO_API_KEY=your_key"
-Environment="SENDER_EMAIL=your@email.com"
-ExecStart=/usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
+Some integration scripts require isolated paths:
 
 ```bash
-sudo systemctl enable ahad-co
-sudo systemctl start ahad-co
+DATA_DIR=$(mktemp -d) DB_PATH=$(mktemp -d)/test.db \
+  .venv/bin/python tests/test_admin_dashboard.py
 ```
 
-## API Endpoints
+## Additional documentation
 
-### Authentication
-- `POST /signup` - Create new account
-- `POST /verify` - Verify email OTP
-- `POST /resend-otp` - Resend verification code
-- `POST /login` - Sign in
-- `POST /logout` - Sign out
-
-### Password Reset
-- `POST /forgot-password` - Request reset code
-- `POST /verify-reset-otp` - Verify reset code
-- `POST /reset-password` - Set new password
-
-### Profile
-- `GET /profile` - Get profile data
-- `POST /profile/update` - Update profile
-
-### Two-Factor Authentication
-- `GET /2fa/status` - Get 2FA status
-- `POST /2fa/setup` - Setup 2FA
-- `POST /2fa/verify-setup` - Verify and enable 2FA
-- `POST /2fa/verify-login` - Verify 2FA during login
-
-### Sessions
-- `GET /sessions` - List all sessions
-- `POST /sessions/revoke` - Revoke a session
-
-### Vault
-- `GET /vault` - List vault entries
-- `POST /vault/add` - Add entry
-- `POST /vault/update` - Update entry
-- `POST /vault/delete` - Delete entry
-
-### Utility
-- `GET /health` - Health check
-- `GET /login-history` - Login history
-- `POST /account/delete` - Delete account
-
-## Database Schema
-
-The app works with **SQLite** (local dev) or **PostgreSQL / Supabase** (permanent
-storage). The same tables are created either way:
-- `users` - User accounts (case-insensitive username/email via `CITEXT`/`NOCASE`)
-- `sessions` - Active sessions
-- `vault_entries` - User data vault
-- `user_2fa` - 2FA settings
-- `login_history` - Login tracking
-- `user_notes`, `user_bookmarks`, `user_categories`, `user_preferences`,
-  `api_keys`, `activity_log`, `notifications`
-
-## License
-
-MIT License - Use freely for personal and commercial projects.
+- `TELEGRAM_JOB_DETECTION.md`
+- `JOB_URLS_AND_BOT_ANALYTICS.md`
+- `runner/README.md`
+- `runner/SYSTEM_TOOLS.md`

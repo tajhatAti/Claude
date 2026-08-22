@@ -17,4 +17,5 @@ if(!/telegram_verification_id=_rsTelegramVerificationId/.test(JS))throw Error('v
 if(/rs-awaiting-bot/.test(JS+CSS))throw Error('token-first editor lock still exists');
 if(!/Opened .*analyze the bot code next/.test(JS))throw Error('upload does not lead to analysis');
 if(!/Add Bot 🤖/.test(HTML))throw Error('old job creation label remains');
-console.log('13 code-first Telegram hosting UI checks passed');
+if(!dom.window.document.getElementById('rsBotHealth')||!/telegram-health/.test(JS))throw Error('live Telegram delivery health is missing');
+console.log('14 code-first Telegram hosting UI checks passed');
