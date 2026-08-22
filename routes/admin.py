@@ -1,6 +1,11 @@
 """Admin console (owner-only, 404-stealth for everyone else) plus the
 public abuse inbox. Moderation actions are session-authenticated and audited."""
 from typing import Optional, List
+import secrets as _secrets
+from urllib.parse import urlparse
+import ipaddress
+import socket
+import requests
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -94,6 +99,16 @@ class AdminBlockRemove(BaseModel):
     code: Optional[str] = None
 
 
+class AdminRunnerIn(BaseModel):
+    label: str
+    url: str
+    secret: str
+
+
+class AdminRunnerToggle(BaseModel):
+    enabled: bool
+
+
 @router.get("/admin/panel-html", include_in_schema=False)
 def admin_panel_html(authorization: Optional[str] = Header(None)):
     """The console's MARKUP, behind the same 404 gate as its data.
@@ -111,6 +126,157 @@ def admin_panel_html(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=404, detail="Not found.")
     return HTMLResponse(frag.read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-store"})
+
+
+@router.get("/admin/runners")
+def admin_runners(authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id,label,url,enabled,created_at,updated_at FROM runner_nodes ORDER BY id"
+        ).fetchall()]
+        for row in rows:
+            row["assigned_jobs"] = dict(conn.execute(
+                "SELECT COUNT(*) AS c FROM jobs WHERE worker_url=? AND runner_job_id IS NOT NULL",
+                (row["url"],)).fetchone())["c"]
+    finally:
+        conn.close()
+    health = runner_client.worker_health(max_age_s=ADMIN_HEALTH_MAX_AGE_S) or {}
+    for row in rows:
+        h = health.get(row["url"]) or {}
+        row.update(online=bool(h.get("online")), jobs=h.get("jobs", 0),
+                   capacity=h.get("capacity", 0), mem_mb=h.get("mem_mb", 0),
+                   safe_mb=h.get("safe_mb", 0), full=bool(h.get("full")))
+    env_nodes = [u for u in runner_client.runner_pool()
+                 if not any(r["url"] == u for r in rows)]
+    embedded = None
+    if runner_client.embedded_mode() or runner_client._has_embedded_assignments():
+        try:
+            h = runner_client._runner_http("GET", "/health", worker="embedded").json()
+            embedded = {"online": True, "jobs": h.get("jobs", 0),
+                        "capacity": h.get("capacity", 0), "mem_mb": h.get("mem_mb", 0),
+                        "safe_mb": h.get("safe_mb", 0)}
+        except Exception:
+            embedded = {"online": False, "jobs": 0, "capacity": 0, "mem_mb": 0, "safe_mb": 0}
+    return {"runners": rows, "environment_runners": env_nodes,
+            "embedded": embedded,
+            "total_enabled": sum(1 for r in rows if r["enabled"]) + len(env_nodes) + (1 if embedded else 0),
+            "setup": {"root_directory": "runner", "runtime": "Docker",
+                      "health_path": "/health", "secret_variable": "RUNNER_SERVICE_SECRET",
+                      "public_url_variable": "PUBLIC_BASE_URL"}}
+
+
+@router.post("/admin/runners/generate-secret")
+def admin_runner_secret(authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    return {"secret": _secrets.token_urlsafe(48),
+            "note": "Shown once. Set this as RUNNER_SERVICE_SECRET on the new runner."}
+
+
+@router.post("/admin/runners")
+def admin_add_runner(payload: AdminRunnerIn,
+                     authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    if not secrets_store.configured():
+        raise HTTPException(status_code=409,
+                            detail="Configure JOB_SECRETS_KEY before storing runner credentials.")
+    label = (payload.label or "").strip()[:60] or "Runner"
+    url = (payload.url or "").strip().rstrip("/")
+    secret = (payload.secret or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Paste the runner's public https:// URL.")
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, 443)}
+        if not addresses or any(ipaddress.ip_address(ip).is_private or
+                                ipaddress.ip_address(ip).is_loopback or
+                                ipaddress.ip_address(ip).is_link_local
+                                for ip in addresses):
+            raise ValueError("private address")
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Runner URL must resolve to a public service.")
+    if len(secret) < 24:
+        raise HTTPException(status_code=400, detail="Runner secret must be at least 24 characters.")
+    try:
+        health = requests.get(url + "/health", timeout=8)
+        auth_check = requests.get(url + "/internal/jobs",
+                                  headers={"Authorization": "Bearer " + secret}, timeout=10)
+    except requests.RequestException:
+        raise HTTPException(status_code=400, detail="Runner is unreachable. Wait for Render deploy to finish, then retry.")
+    if health.status_code != 200:
+        raise HTTPException(status_code=400, detail="The URL does not expose a healthy CodeNest runner.")
+    if auth_check.status_code != 200:
+        raise HTTPException(status_code=400, detail="Runner answered, but RUNNER_SERVICE_SECRET does not match.")
+    had_remote_pool = bool(runner_client.runner_pool())
+    conn = get_db_connection()
+    try:
+        existing = conn.execute("SELECT id FROM runner_nodes WHERE url=?", (url,)).fetchone()
+        now = now_utc_str()
+        encrypted = secrets_store.pack_env({"secret": secret})
+        if existing:
+            conn.execute("UPDATE runner_nodes SET label=?,encrypted_secret=?,enabled=1,updated_at=? WHERE id=?",
+                         (label, encrypted, now, existing["id"]))
+            node_id = existing["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO runner_nodes (label,url,encrypted_secret,enabled,created_by,created_at,updated_at) "
+                "VALUES (?,?,?,1,?,?,?)", (label, url, encrypted, admin["id"], now, now))
+            node_id = cur.lastrowid
+        if not had_remote_pool:
+            # Preserve jobs already running in the in-process engine. New jobs
+            # use the remote pool; old ones remain explicitly addressable.
+            conn.execute("UPDATE jobs SET worker_url='embedded' "
+                         "WHERE worker_url IS NULL AND runner_job_id IS NOT NULL")
+        _admin_audit(conn, admin["id"], "runner_add", url, label)
+        conn.commit()
+    finally:
+        conn.close()
+    runner_client.invalidate_runner_registry()
+    return {"message": "Runner verified and added to the placement pool.", "id": node_id}
+
+
+@router.post("/admin/runners/{node_id}/toggle")
+def admin_toggle_runner(node_id: int, payload: AdminRunnerToggle,
+                        authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT id,label,url FROM runner_nodes WHERE id=?", (node_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Runner not found.")
+        conn.execute("UPDATE runner_nodes SET enabled=?,updated_at=? WHERE id=?",
+                     (1 if payload.enabled else 0, now_utc_str(), node_id))
+        _admin_audit(conn, admin["id"], "runner_enable" if payload.enabled else "runner_disable",
+                     row["url"], row["label"])
+        conn.commit()
+    finally:
+        conn.close()
+    runner_client.invalidate_runner_registry()
+    return {"message": "Runner enabled." if payload.enabled else "Runner drained. Existing jobs remain addressable."}
+
+
+@router.delete("/admin/runners/{node_id}")
+def admin_delete_runner(node_id: int, authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT id,label,url FROM runner_nodes WHERE id=?", (node_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Runner not found.")
+        assigned = dict(conn.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE worker_url=? AND runner_job_id IS NOT NULL",
+            (row["url"],)).fetchone())["c"]
+        if assigned:
+            raise HTTPException(status_code=409,
+                                detail=f"This runner still owns {assigned} deployed job(s). Drain it instead of deleting it.")
+        conn.execute("DELETE FROM runner_nodes WHERE id=?", (node_id,))
+        _admin_audit(conn, admin["id"], "runner_delete", row["url"], row["label"])
+        conn.commit()
+    finally:
+        conn.close()
+    runner_client.invalidate_runner_registry()
+    return {"message": "Runner removed."}
 
 
 @router.get("/admin/telegram-diagnostic")

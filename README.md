@@ -58,6 +58,18 @@ export JOB_SECRETS_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsaf
 
 Do not rotate or lose this key while encrypted bot environments exist.
 
+## Adding runner capacity
+
+Admins can add runners from **Admin → Runners → Add runner** without editing `RUNNER_SERVICE_URLS` or redeploying the main site:
+
+1. In Render create a Web Service from this repository.
+2. Set Root Directory to `runner` and Runtime to Docker.
+3. In CodeNest click **Generate secret**, then set it as the runner's `RUNNER_SERVICE_SECRET`.
+4. Deploy the Render service.
+5. Paste its public URL and the same secret into CodeNest; **Test & add runner** verifies health and authentication before enabling placement.
+
+Runner credentials are encrypted with `JOB_SECRETS_KEY` and never returned by the API. **Drain** removes a runner from new-job placement while keeping existing assigned jobs addressable. Deletion is blocked until no deployed jobs remain. When the first remote runner is added, already-running embedded jobs are explicitly pinned to the embedded engine while new bots use the remote pool. Environment-configured runners continue to work beside database-managed runners.
+
 ## Production topology
 
 Recommended:

@@ -1442,6 +1442,20 @@ body.signed-out-in .hero {
 .adm-bot-row { display: flex; justify-content: space-between; gap: var(--s2); padding: 7px 0; border-bottom: 1px solid var(--line); }
 .adm-bot-row span { color: var(--fg-3); text-align: right; }
 @media (max-width: 760px) { .adm-bot-grid { grid-template-columns: 1fr; } .adm-range { margin-left: 0; } }
+.adm-runner-panel { border-top:3px solid #7c5cff; }
+.adm-runner-panel .adm-panel-head > div { flex:1; }
+.adm-runner-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; margin-top:12px; }
+.adm-runner-card { padding:12px; border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); display:flex; flex-direction:column; gap:9px; }
+.adm-runner-card.is-online { border-left:3px solid var(--ok); }
+.adm-runner-card.is-offline { border-left:3px solid var(--danger); }
+.adm-runner-main { display:flex; flex-direction:column; min-width:0; }
+.adm-runner-main span { overflow:hidden; text-overflow:ellipsis; color:var(--fg-3); font-size:var(--fs-2); }
+.adm-runner-metrics,.adm-runner-card-actions,.adm-runner-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
+.adm-runner-metrics > span:not(.adm-pill) { color:var(--fg-3); font-size:var(--fs-2); }
+.adm-runner-setup { margin-top:12px; padding:14px; border:1px solid #7c5cff; border-radius:var(--r-row); background:var(--card-2); }
+.adm-runner-setup ol { margin:8px 0 14px; padding-left:20px; color:var(--fg-2); }
+.adm-runner-fields { display:grid; grid-template-columns:1fr 2fr 2fr; gap:10px; }
+.adm-runner-fields .field { margin:0; }
 .adm-tg-job-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:var(--s3); margin:var(--s3) 0; }
 .adm-tg-job { padding:var(--s3); border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); }
 .adm-tg-job.is-live { border-left:3px solid var(--ok); }
@@ -1491,7 +1505,9 @@ body.signed-out-in .hero {
   .adm-panel-head { align-items:flex-start; flex-wrap:wrap; gap:7px; }
   .adm-panel-head > .adm-hint { flex-basis:100%; }
   .adm-panel-head button,.adm-panel-head select,.adm-act,.adm-risk-actions button,.adm-block-row button { min-height:44px; }
-  .adm-risk-grid,.adm-tg-job-grid { grid-template-columns:1fr; gap:10px; }
+  .adm-risk-grid,.adm-tg-job-grid,.adm-runner-list { grid-template-columns:1fr; gap:10px; }
+  .adm-runner-fields { grid-template-columns:1fr; }
+  .adm-runner-actions button { min-height:44px; flex:1; }
   .adm-tg-job-actions a,.adm-tg-job-actions button { min-height:44px; flex:1; }
   .adm-risk-grid > section { padding:10px; }
   .adm-risk-card { padding:10px; }

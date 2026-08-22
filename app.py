@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from services import secrets_store
+from services import secrets_store, runner_client
 from database import DIALECT, init_db  # noqa: F401  (init_db already ran via routes.deps)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -467,9 +467,9 @@ def health():
     return {
         "status": "ok",
         "database": DIALECT,
-        "runner": "embedded" if EMBEDDED_RUNNER else "remote",
+        "runner": "embedded" if runner_client.embedded_mode() else "remote",
         "bot_secrets_encrypted": secrets_store.configured(),
-        "production_isolation": "unsafe-embedded" if EMBEDDED_RUNNER else "remote-runner",
+        "production_isolation": "unsafe-embedded" if runner_client.embedded_mode() else "remote-runner",
         "ping_bot": "running" if bool(os.getenv("BOT_TOKEN", "").strip()
                                        or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()) else "not configured",
         # Which bot this server verifies Mini App sign-ins for. The bot ID half

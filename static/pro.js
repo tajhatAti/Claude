@@ -6039,7 +6039,7 @@ async function loadAdminPanel(force) {
   }
   try {
     const botDays = document.getElementById("admBotDays")?.value || 30;
-    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR, tgJobsR, riskR] = await Promise.all([
+    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR, tgJobsR, runnerR, riskR] = await Promise.all([
       api("/admin/overview", "GET", null, true),
       api("/admin/users", "GET", null, true),
       api("/admin/jobs", "GET", null, true),
@@ -6048,6 +6048,7 @@ async function loadAdminPanel(force) {
       api("/admin/libraries", "GET", null, true).catch(() => null),
       api("/admin/bot-usage?days=" + encodeURIComponent(botDays), "GET", null, true).catch(() => null),
       api("/admin/telegram-jobs", "GET", null, true).catch(() => null),
+      api("/admin/runners", "GET", null, true).catch(() => null),
       _loadAdminRiskData(),
     ]);
     _admPreserve(() => {
@@ -6060,11 +6061,13 @@ async function loadAdminPanel(force) {
       renderAdminLibs(libsR || {});
       renderAdminBotUsage(botR || {});
       renderAdminTelegramJobs(tgJobsR || {});
+      renderAdminRunners(runnerR || {});
       const risk = riskR || [];
       renderAdminRisk(risk[0] || {}, risk[1] || {}, risk[2] || {}, risk[3] || {});
     });
     _wireAdminBotUsage();
     _wireAdminRisk();
+    _wireAdminRunners();
     _admMarkFresh();
     stats.dataset.loaded = "1";
   } catch (e) {
@@ -6181,6 +6184,39 @@ function renderAdminLibs(data) {
     row.append(main, count);
     el.appendChild(row);
   });
+}
+
+function renderAdminRunners(data) {
+  const stats=document.getElementById("admRunnerStats");
+  const list=document.getElementById("admRunners");
+  if(!stats||!list)return;
+  const rows=data.runners||[], envRows=data.environment_runners||[], embedded=data.embedded;
+  stats.textContent="";
+  [["total engines",data.total_enabled||0],["managed remote",rows.length],["online",rows.filter(r=>r.online).length+(embedded&&embedded.online?1:0)],["jobs",rows.reduce((n,r)=>n+(r.jobs||0),0)+(embedded?embedded.jobs||0:0)]].forEach(([label,value])=>{const box=document.createElement("div");box.className="adm-stat";box.append(_botText("b",value),_botText("span",label));stats.appendChild(box);});
+  list.textContent="";
+  if(embedded){const card=document.createElement("article");card.className="adm-runner-card"+(embedded.online?" is-online":" is-offline");const main=document.createElement("div");main.className="adm-runner-main";main.append(_botText("b","Embedded engine"),_botText("span","Main website container · existing/local jobs"));const metrics=document.createElement("div");metrics.className="adm-runner-metrics";metrics.append(_botText("span",embedded.online?"online":"offline","adm-pill"+(embedded.online?" ok":" warn")),_botText("span",`${embedded.jobs||0}/${embedded.capacity||0} jobs`),_botText("span",`${Math.round(embedded.mem_mb||0)}MB used`));card.append(main,metrics,_botText("span","Add a remote runner to isolate new bot deployments.","adm-hint"));list.appendChild(card);}
+  rows.forEach(r=>{
+    const card=document.createElement("article");card.className="adm-runner-card"+(r.online?" is-online":" is-offline");
+    const main=document.createElement("div");main.className="adm-runner-main";main.append(_botText("b",r.label),_botText("span",r.url));
+    const metrics=document.createElement("div");metrics.className="adm-runner-metrics";metrics.append(_botText("span",r.online?"online":"offline","adm-pill"+(r.online?" ok":" warn")),_botText("span",`${r.jobs||0}/${r.capacity||0} jobs`),_botText("span",`${Math.round(r.mem_mb||0)}MB used`),_botText("span",`${r.assigned_jobs||0} assigned`));
+    const actions=document.createElement("div");actions.className="adm-runner-card-actions";
+    const toggle=document.createElement("button");toggle.className="btn-ghost sm";toggle.textContent=r.enabled?"Drain":"Enable";toggle.onclick=()=>_admToggleRunner(r.id,!r.enabled);actions.appendChild(toggle);
+    if(!r.assigned_jobs){const del=document.createElement("button");del.className="btn-ghost sm danger";del.textContent="Remove";del.onclick=()=>_admDeleteRunner(r.id);actions.appendChild(del);}
+    card.append(main,metrics,actions);list.appendChild(card);
+  });
+  envRows.forEach(url=>{const card=document.createElement("article");card.className="adm-runner-card";const main=document.createElement("div");main.className="adm-runner-main";main.append(_botText("b","Environment runner"),_botText("span",url));card.append(main,_botText("span","managed in Render environment","adm-hint"));list.appendChild(card);});
+  if(!rows.length&&!envRows.length&&!embedded)list.appendChild(_botText("div","No runner engine is available.","adm-empty"));
+}
+
+async function _admToggleRunner(id,enabled){try{await api(`/admin/runners/${id}/toggle`,"POST",{enabled},true);toast(enabled?"Runner enabled":"Runner drained","success");loadAdminPanel(true);}catch(e){toast(e.message,"error");}}
+async function _admDeleteRunner(id){if(!confirm("Remove this runner from the registry?"))return;try{await api(`/admin/runners/${id}`,"DELETE",null,true);toast("Runner removed","success");loadAdminPanel(true);}catch(e){toast(e.message,"error");}}
+
+function _wireAdminRunners(){
+  const setup=document.getElementById("admRunnerSetup");
+  const open=document.getElementById("admRunnerAddOpen");if(open&&!open.dataset.wired){open.dataset.wired="1";open.onclick=()=>{setup.hidden=false;document.getElementById("admRunnerLabel").focus();};}
+  const cancel=document.getElementById("admRunnerCancel");if(cancel&&!cancel.dataset.wired){cancel.dataset.wired="1";cancel.onclick=()=>{setup.hidden=true;};}
+  const generate=document.getElementById("admRunnerGenerate");if(generate&&!generate.dataset.wired){generate.dataset.wired="1";generate.onclick=async()=>{try{const d=await api("/admin/runners/generate-secret","POST",{},true);const input=document.getElementById("admRunnerSecret");input.value=d.secret;input.type="text";input.select();try{await navigator.clipboard.writeText(d.secret);toast("Secret generated and copied","success");}catch(e){toast("Secret generated — copy it now","info");}}catch(e){toast(e.message,"error");}};}
+  const save=document.getElementById("admRunnerSave");if(save&&!save.dataset.wired){save.dataset.wired="1";save.onclick=async()=>{const body={label:document.getElementById("admRunnerLabel").value.trim(),url:document.getElementById("admRunnerUrl").value.trim(),secret:document.getElementById("admRunnerSecret").value.trim()};try{save.disabled=true;save.textContent="Testing runner…";const d=await api("/admin/runners","POST",body,true);toast(d.message,"success");setup.hidden=true;document.getElementById("admRunnerSecret").value="";await loadAdminPanel(true);}catch(e){toast(e.message,"error");}finally{save.disabled=false;save.textContent="Test & add runner";}};}
 }
 
 function renderAdminTelegramJobs(data) {

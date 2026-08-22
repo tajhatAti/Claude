@@ -725,6 +725,21 @@ _SCHEMA_TABLES = [
     )
     """,
     """
+    -- Dynamically managed runner services. Secrets are Fernet-encrypted; the
+    -- admin API never returns them after registration.
+    CREATE TABLE IF NOT EXISTS runner_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        encrypted_secret TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (created_by) REFERENCES users (id)
+    )
+    """,
+    """
     -- Immutable source revisions. Environment secrets are deliberately not
     -- duplicated here; rollback reuses the job's current encrypted env.
     CREATE TABLE IF NOT EXISTS bot_revisions (
@@ -933,6 +948,8 @@ def init_db():
                      "ON jobs (telegram_token_fingerprint)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_revisions_job_version "
                      "ON bot_revisions (job_id, version)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_runner_nodes_enabled "
+                     "ON runner_nodes (enabled)")
 
         conn.commit()
     finally:

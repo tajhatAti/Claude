@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test": "npm run test:js",
-    "test:js": "node tests/js/test_telegram_job_ui.js && node tests/js/test_admin_live.js && node tests/js/test_admin_risk_mobile.js && node tests/js/test_admin_bot_usage.js && node tests/js/test_job_urls.js && node tests/js/test_jd_rebuild.js",
+    "test:js": "node tests/js/test_telegram_job_ui.js && node tests/js/test_admin_live.js && node tests/js/test_admin_runner_ui.js && node tests/js/test_admin_risk_mobile.js && node tests/js/test_admin_bot_usage.js && node tests/js/test_job_urls.js && node tests/js/test_jd_rebuild.js",
     "check:js": "node --check static/pro.js"
   },
   "devDependencies": {
