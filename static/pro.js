@@ -4097,6 +4097,7 @@ function selectJob(id) {
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
+  document.body.classList.remove("rs-composing");
   // 👉 Paint sidebar selection + swap to workspace IMMEDIATELY (don't wait for
   // fetch/SSE to round-trip — that's what makes tab switches feel laggy).
   // Data fills in behind the paint with a subtle fade.
@@ -4134,6 +4135,8 @@ function selectJob(id) {
 
 function deselectJob() {
   _selectedJobId = null;
+  _composingNew = false;
+  document.body.classList.remove("rs-composing");
   stopLogStream();
   document.querySelectorAll("#jobsList .job-item.active").forEach(el => el.classList.remove("active"));
   const btn = document.getElementById("btnStartJob");
@@ -4490,6 +4493,7 @@ function _initWbWiring() {
     // Stays true until this job is deployed or the user picks another job, so
     // background polling can never replace the blank editor mid-typing.
     _composingNew = true;
+    document.body.classList.add("rs-composing");
     document.querySelectorAll("#jobsList .job-item.active").forEach(el => el.classList.remove("active"));
     const btn = document.getElementById("btnStartJob");
     if (btn) delete btn.dataset.editingId;
@@ -4512,7 +4516,7 @@ function _initWbWiring() {
     _jobCmSetMode("python");
     _setHint("", "Ready");
     _updateStats();
-    document.body.classList.remove("rs-side-open","rs-logs-open");
+    document.body.classList.remove("rs-side-open","rs-logs-open","rs-menu-open");
     const tab = document.getElementById("tab-jobs");
     if (tab) tab.classList.remove("side-open");
     // Reset URL to /runspace
@@ -4965,6 +4969,9 @@ function _initSplitDrag() {
   });
   // Touch support
   divider.addEventListener("touchstart", (e) => {
+    // In the mobile Add Bot document the divider participates in page scroll;
+    // resizing there hijacked a normal one-finger swipe.
+    if (_composingNew && window.innerWidth <= 760) return;
     const t = e.touches[0];
     dragging = true; startY = t.clientY;
     startCodeH = codePane.getBoundingClientRect().height;
@@ -5688,6 +5695,7 @@ async function startJob() {
     _setHint("ok", "");
     _jobDirty = false;
     _composingNew = false;      // deployed — polling may take over again
+    document.body.classList.remove("rs-composing");
     // 👉 Optimistic UI update: insert the new job into _lastJobs immediately
     // with status="starting" so sidebar + stats reflect the launch right away
     // instead of waiting 7s for the next poll round. SSE will correct to

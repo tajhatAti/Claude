@@ -2994,6 +2994,38 @@ body.term-open .wb-term-kbd { display: flex; }
 #tab-jobs .rs-split { position:relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 #tab-jobs .rs-job-loading .rs-split::after { content:"Loading bot…"; position:absolute; inset:0; z-index:8; display:grid; place-items:center; background:color-mix(in srgb,var(--card) 88%,transparent); color:var(--fg-3); font-family:var(--mono); font-size:var(--fs-2); pointer-events:none; }
 #tab-jobs .rs-job-loading .rs-split { cursor:progress; }
+/* Add Bot is a document-like flow on phones (wizard → code → output), not a
+   fixed desktop IDE squeezed into one viewport. Giving .rs-main the native
+   scrollport is what makes ordinary one-finger scrolling work; the old
+   overflow:hidden chain left no vertical scroll owner at all. */
+@media (max-width:760px) {
+  body.rs-composing #tab-jobs .rs-main {
+    display:block;
+    overflow-y:auto !important;
+    overscroll-behavior-y:contain;
+    touch-action:pan-y;
+    -webkit-overflow-scrolling:touch;
+    scroll-behavior:auto;
+    padding-bottom:max(20px,env(safe-area-inset-bottom));
+  }
+  body.rs-composing #tab-jobs .rs-ws {
+    display:block !important;
+    min-height:auto;
+    overflow:visible;
+  }
+  body.rs-composing #tab-jobs .rs-bot-wizard { touch-action:pan-y; }
+  body.rs-composing #tab-jobs .rs-meta { touch-action:pan-y; }
+  body.rs-composing #tab-jobs .cm-scroller {
+    touch-action:pan-y !important;
+    overscroll-behavior-y:auto;
+  }
+  body.rs-composing #tab-jobs .rs-divider { touch-action:pan-y; }
+  body.rs-composing #tab-jobs .rs-split {
+    flex:none;
+    height:72dvh;
+    min-height:520px;
+  }
+}
 #tab-jobs .rs-editor { flex: 1 1 auto; min-height: 0; }
 #tab-jobs .rs-cm-host { flex: 1 1 auto; min-height: 0; height: 100%; }
 #tab-jobs .rs-cm-host .cm-editor { height: 100%; }
