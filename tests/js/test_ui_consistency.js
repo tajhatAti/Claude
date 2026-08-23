@@ -170,13 +170,12 @@ ok('no runaway z-index survives',
    (css.match(/z-index:\s*\d{4,}/g) || []).join(', '));
 
 // ---------------------------------------------------------------------------
-console.log('[6] full-screen RunSpace');
+console.log('[6] RunSpace keeps global navigation');
 // ---------------------------------------------------------------------------
-ok('the bottom nav is hidden while RunSpace is open',
-   /body\.rs-active \.bottom-nav \{ display: none !important; \}/.test(css),
-   'it floated over the editor and covered the last ~64px of the code area');
-ok('and the space reserved for it is released',
-   /body\.rs-active \.dash-main \{ padding-bottom: 0; \}/.test(css));
+ok('the mobile bottom nav remains visible in RunSpace',
+   /body\.rs-active:not\(\.rs-detail-open\) \.bottom-nav \{ display:flex !important; \}/.test(css));
+ok('RunSpace reserves the real nav height instead of covering the editor',
+   /body\.rs-active:not\(\.rs-detail-open\) \.dash-main \{[^}]*padding-bottom:calc\(var\(--bottom-nav-h\)/.test(css));
 
 // ---------------------------------------------------------------------------
 console.log('[7] touch hygiene');

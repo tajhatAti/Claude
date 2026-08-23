@@ -1656,20 +1656,16 @@ body.rs-detail-open #tab-jobs .rs-insp { display: none; }
 /* Lock the page behind so a scroll gesture cannot chain through. */
 body.rs-detail-open { overflow: hidden; }
 
-/* RUNSPACE IS FULL-SCREEN, SO THE BOTTOM NAV MUST GO.
-   body.rs-active already makes .dash-main a full-height flex column with
-   overflow hidden (see the rule near the top of the RunSpace section), and
-   .dash-main reserves --bottom-nav-h of bottom padding for a bar that is
-   still floating over the editor. The result on a phone: the last ~64px of
-   the code area sits underneath the nav, the editor's own footer controls
-   are unreachable, and the Details page — which DOES hide the bar — jumps
-   the layout as you move between the two.
-   The Details rule above proves the intent; this is the same rule for the
-   view it was missing from. !important because .bottom-nav's own
-   display:flex is set inside the 760px media query, which wins on order. */
-body.rs-active .bottom-nav { display: none !important; }
-/* With the bar gone, stop reserving room for it. */
+/* RunSpace remains part of the product, not a navigation dead-end. On phones
+   the global Home / Code / RunSpace / Menu bar stays visible and RunSpace
+   reserves its real height, so it neither disappears nor covers the editor. */
 body.rs-active .dash-main { padding-bottom: 0; }
+@media (max-width:760px) {
+  body.rs-active:not(.rs-detail-open) .bottom-nav { display:flex !important; }
+  body.rs-active:not(.rs-detail-open) .dash-main {
+    padding-bottom:calc(var(--bottom-nav-h) + env(safe-area-inset-bottom,0px) + 12px);
+  }
+}
 #tab-jobs .jd-top { padding-top: calc(var(--s3) + env(safe-area-inset-top, 0px)); }
 #tab-jobs .jd-scroll {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -2507,9 +2503,12 @@ html[data-theme="dark"] {
   position: fixed; inset: 0;
   z-index: var(--z-scrim-nav);
   background: rgba(0,0,0,.6);
+  opacity:1; visibility:visible;
   pointer-events: auto;
+  transition:opacity .14s var(--ease),visibility .14s var(--ease);
 }
 .side-overlay.hidden, .activity-overlay.hidden {
+  opacity:0; visibility:hidden;
   pointer-events: none;
 }
 /* The activity panel opens OVER the nav drawer, so its own scrim has to

@@ -73,9 +73,11 @@ check("meta strip never wraps",
 check("meta strip scrolls when tight",
   /#tab-jobs \.rs-meta \{[^}]*overflow-x:\s*auto/.test(css));
 
-// ---- 4. clean full-screen ----------------------------------------------
-check("bottom nav hidden on RunSpace",
-  /body\.rs-active \.bottom-nav \{ display: none !important; \}/.test(css));
+// ---- 4. global navigation remains available ----------------------------
+check("bottom nav remains visible on mobile RunSpace",
+  /body\.rs-active:not\(\.rs-detail-open\) \.bottom-nav \{ display:flex !important; \}/.test(css));
+check("RunSpace reserves the bottom-nav height",
+  /body\.rs-active:not\(\.rs-detail-open\) \.dash-main \{[^}]*padding-bottom:calc\(var\(--bottom-nav-h\)/.test(css));
 check("bottom nav hidden on the Details page",
   /body\.rs-detail-open[\s\S]{0,240}?\.bottom-nav[\s\S]{0,240}?display:\s*none/.test(css));
 

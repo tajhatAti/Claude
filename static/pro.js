@@ -120,6 +120,10 @@ function switchTab(tabId) {
   // Pseudo-tabs (e.g. the Activity launcher has no data-tab) must NOT
   // blank the dashboard — a missing/unknown tab target = no-op.
   if (!tabId || !document.getElementById(`tab-${tabId}`)) return;
+  // A real destination always closes the global drawer and its scrim. Before
+  // this, choosing RunSpace from Menu left sideOverlay over the page, which
+  // looked like a grey veil and made every other navigation control vanish.
+  closeSideMenu();
   currentTab = tabId;
   // Leaving the code studio while the editor is fullscreen would trap the
   // overlay over the next section — always collapse it first.
