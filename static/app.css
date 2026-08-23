@@ -1711,7 +1711,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
    test_runspace_shell guards against them coming back.) */
 #tab-jobs .rs-meta { flex-wrap: nowrap; overflow-x: auto; }
 .rs-bot-wizard { contain:layout paint; border-bottom:1px solid var(--line); padding:10px 12px; background:var(--card); }
-.rs-wizard-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; }
+.rs-wizard-steps { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; margin-bottom:10px; }
 .rs-wizard-steps span { display:flex; align-items:center; gap:6px; min-width:0; padding:7px 8px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-3); font-size:var(--fs-2); white-space:nowrap; }
 .rs-wizard-steps span b { width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:var(--card-2); }
 .rs-wizard-steps span.is-active { border-color:#229ED9; color:var(--fg); background:color-mix(in srgb,#229ED9 9%,transparent); }
@@ -1728,8 +1728,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
 .rs-claim-review > div { display:flex; flex-direction:column; }
 .rs-claim-review span { color:var(--fg-3); font-size:var(--fs-2); }
 .rs-claim-review code { padding:7px 9px; border-radius:var(--r-sm); background:var(--card); user-select:all; }
-body.rs-composing.rs-step-connect #wbSplit,
-body.rs-composing.rs-step-review #wbSplit { display:none; }
+body.rs-composing.rs-step-connect #wbSplit { display:none; }
 body.rs-composing.rs-step-code #wbDivider,
 body.rs-composing.rs-step-code .rs-logs { display:none; }
 .rs-template-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
@@ -1778,6 +1777,14 @@ body.rs-composing.rs-step-code .rs-logs { display:none; }
 .rs-tg-verify-state.ok { color:var(--ok); }
 .rs-tg-verify-state.err { color:var(--danger); }
 .rs-bot-wizard > p { margin:8px 0 0; color:var(--fg-3); font-size:var(--fs-1); }
+body.rs-launch-complete .dash-bar,
+body.rs-launch-complete .bottom-nav,
+body.rs-launch-complete #tab-jobs .rs-head { display:none !important; }
+body.rs-launch-complete .dash-main { padding:0 !important; }
+body.rs-launch-complete #tab-jobs { height:100dvh; }
+.rs-launch-success { flex:1 1 auto; min-height:100dvh; display:grid; place-items:center; background:var(--bg); }
+.rs-launch-success[hidden] { display:none; }
+.rs-launch-success a { min-width:min(260px,calc(100vw - 48px)); min-height:54px; display:inline-flex; align-items:center; justify-content:center; padding:0 24px; border-radius:var(--pill); background:#229ED9; color:#fff; font-size:var(--fs-4); font-weight:700; text-decoration:none; box-shadow:0 10px 28px rgba(34,158,217,.2); }
 .rs-bot-callout { display:flex; align-items:center; gap:10px; min-height:50px; padding:8px 12px; border-block:1px solid var(--line); background:color-mix(in srgb,#229ED9 9%,var(--card)); }
 .rs-bot-callout[hidden] { display:none; }
 .rs-bot-logo { width:32px; height:32px; flex:0 0 auto; display:grid; place-items:center; border-radius:50%; background:#229ED9; color:white; }
@@ -1788,7 +1795,7 @@ body.rs-composing.rs-step-code .rs-logs { display:none; }
 .rs-bot-callout.is-bad { border-left:3px solid var(--danger); }
 .rs-bot-health { margin-left:auto; min-height:36px; padding:0 10px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-2); }
 .rs-bot-go { flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--pill); background:#229ED9; color:white; font-weight:650; text-decoration:none; }
-@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:repeat(3,minmax(0,1fr))}.rs-wizard-steps span{white-space:normal;justify-content:center;text-align:center;padding:7px 4px;font-size:11px}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-template-actions{width:100%;display:grid;grid-template-columns:1fr}.rs-template-trigger{width:100%;min-width:0}.rs-template-grid{grid-template-columns:1fr}.rs-template-modal-card{width:calc(100vw - 16px);max-height:88dvh;padding:12px}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-health{margin-left:42px;min-height:44px}.rs-bot-go{flex:1;justify-content:center;min-height:44px} }
+@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.rs-wizard-steps span{white-space:normal;justify-content:center;text-align:center;padding:7px 4px;font-size:11px}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-template-actions{width:100%;display:grid;grid-template-columns:1fr}.rs-template-trigger{width:100%;min-width:0}.rs-template-grid{grid-template-columns:1fr}.rs-template-modal-card{width:calc(100vw - 16px);max-height:88dvh;padding:12px}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-health{margin-left:42px;min-height:44px}.rs-bot-go{flex:1;justify-content:center;min-height:44px} }
 #tab-jobs .rs-tb, #tab-jobs .rs-seg { overflow-x: auto; }
 #btnStartJob.loading { pointer-events: none; opacity: .7; }
 #btnStartJob.dirty   { border-color: var(--warn); }
@@ -3040,47 +3047,40 @@ body.term-open .wb-term-kbd { display: flex; }
 #tab-jobs .rs-split { position:relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 #tab-jobs .rs-job-loading .rs-split::after { content:"Loading bot…"; position:absolute; inset:0; z-index:8; display:grid; place-items:center; background:color-mix(in srgb,var(--card) 88%,transparent); color:var(--fg-3); font-family:var(--mono); font-size:var(--fs-2); pointer-events:none; }
 #tab-jobs .rs-job-loading .rs-split { cursor:progress; }
-/* Add Bot is a document-like flow on phones (wizard → code → output), not a
-   fixed desktop IDE squeezed into one viewport. Giving .rs-main the native
-   scrollport is what makes ordinary one-finger scrolling work; the old
-   overflow:hidden chain left no vertical scroll owner at all. */
+/* Mobile Add Bot is a two-screen flow that fits the viewport: Source uses
+   the remaining space for the editor; Connect removes the editor entirely.
+   There is no long document and therefore no page scroll to fight. */
 @media (max-width:760px) {
   body.rs-composing #tab-jobs .rs-main {
-    display:block;
-    overflow-y:auto !important;
-    overscroll-behavior-y:contain;
-    touch-action:pan-y;
-    -webkit-overflow-scrolling:touch;
-    scroll-behavior:auto;
-    padding-bottom:max(20px,env(safe-area-inset-bottom));
+    display:flex;
+    flex-direction:column;
+    overflow:hidden !important;
+    touch-action:manipulation;
+    padding-bottom:0;
   }
   body.rs-composing #tab-jobs .rs-ws {
-    display:block !important;
-    min-height:auto;
-    overflow:visible;
-  }
-  body.rs-composing #tab-jobs .rs-bot-wizard { touch-action:pan-y; }
-  body.rs-composing #tab-jobs .rs-meta { touch-action:pan-y; }
-  body.rs-composing #tab-jobs .cm-scroller {
-    touch-action:pan-y !important;
-    overscroll-behavior-y:auto;
+    display:flex !important;
+    flex-direction:column;
+    min-height:0;
+    overflow:hidden;
   }
   body.rs-composing #tab-jobs .rs-divider { display:none; }
   body.rs-composing.rs-step-code #tab-jobs .rs-split {
     display:flex;
-    flex:none;
-    height:48dvh;
-    min-height:320px;
+    flex:1 1 auto;
+    height:auto;
+    min-height:180px;
   }
   body.rs-composing.rs-step-code #tab-jobs .rs-logs { display:none; }
-  body.rs-composing.rs-step-code #tab-jobs .rs-editor { min-height:320px; }
+  body.rs-composing.rs-step-code #tab-jobs .rs-editor { min-height:0; }
+  body.rs-composing.rs-step-code #tab-jobs .rs-bot-wizard { flex:0 0 auto; }
+  body.rs-composing.rs-step-connect #tab-jobs .rs-bot-wizard { flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; overflow:hidden; }
   body.rs-composing #tab-jobs .rs-connect-stage { grid-template-columns:1fr; }
   body.rs-composing #tab-jobs .rs-connect-stage > * { grid-column:1; }
   body.rs-composing #tab-jobs .rs-stage-actions { width:100%; }
   body.rs-composing #tab-jobs .rs-stage-actions > * { flex:1; min-height:44px; display:inline-flex; align-items:center; justify-content:center; }
-  body.rs-composing #tab-jobs .rs-claim-review { grid-template-columns:1fr; }
-  body.rs-composing #tab-jobs .rs-claim-review button { min-height:44px; }
 }
+
 #tab-jobs .rs-editor { flex: 1 1 auto; min-height: 0; }
 #tab-jobs .rs-cm-host { flex: 1 1 auto; min-height: 0; height: 100%; }
 #tab-jobs .rs-cm-host .cm-editor { height: 100%; }

@@ -10,8 +10,10 @@ def test_template_catalog_is_practical_safe_and_unique():
     assert {"Basics","Menus","Groups","Utilities","Storage","Node.js","Growth","Business","Admin","Channels"}.issubset({r["category"] for r in rows})
     assert sum(1 for r in rows if r.get("requires_setup"))>=6
     for template_id in ("contact-support","admin-broadcast","order-bot","channel-poster","channel-gate","referral-rewards"):
-        field=bot_templates.get_template(template_id)["env_fields"][0]
+        template=bot_templates.get_template(template_id)
+        field=template["env_fields"][0]
         assert field["key"]=="ADMIN_CLAIM_CODE" and field["type"]=="generated"
+        assert '"claim_" + CLAIM_CODE' in template["code"]
     for row in rows:
         assert row["name"] and row["description"] and row["framework"]
         item=bot_templates.get_template(row["id"])

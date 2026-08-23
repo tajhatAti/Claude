@@ -968,8 +968,7 @@
             <section class="rs-bot-wizard" id="rsTgSetup" aria-label="Add Telegram bot">
               <div class="rs-wizard-steps" aria-label="Setup progress">
                 <span class="is-active" data-rs-step="code"><b>1</b> Source</span>
-                <span data-rs-step="connect"><b>2</b> Connect</span>
-                <span data-rs-step="review"><b>3</b> Review &amp; Deploy</span>
+                <span data-rs-step="connect"><b>2</b> Connect &amp; Deploy</span>
               </div>
               <div class="rs-wizard-stage" id="rsTgCodeStage">
                 <div><b>Add your bot code</b><small>Choose a template, upload a file, or paste code below.</small></div>
@@ -988,13 +987,11 @@
               </div>
               <div class="rs-analysis-result" id="rsTgAnalysis" hidden></div>
               <div class="rs-wizard-stage rs-connect-stage" id="rsTgConnectStage" hidden>
-                <div><b>Connect your Telegram bot</b><small>Paste the token from @BotFather. It will be encrypted.</small></div>
-                <label class="field"><span>BotFather token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…" aria-describedby="rsTgPrivacy"></label>
-                <div class="rs-stage-actions"><button class="btn-ghost" id="rsTgBackToCode" type="button">Back</button><button class="btn-primary" id="rsTgVerify" type="button">Verify &amp; continue</button></div>
+                <div><b>Connect your Telegram bot</b></div>
+                <label class="field"><span>BotFather token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…"></label>
+                <div class="rs-stage-actions"><button class="btn-ghost" id="rsTgBackToCode" type="button">Back</button><button class="btn-primary" id="rsTgVerify" type="button">Verify &amp; deploy</button></div>
                 <span class="rs-tg-verify-state" id="rsTgVerifyState"></span>
               </div>
-              <div class="rs-wizard-review" id="rsTgReview" hidden></div>
-              <p id="rsTgPrivacy">Your token stays in the secret <code>BOT_TOKEN</code> environment variable. Hardcoded/example tokens are automatically changed to read that secret; the token is never shown to admins.</p>
             </section>
             <aside class="rs-bot-callout" id="rsBotCallout" hidden aria-live="polite">
               <span class="rs-bot-logo" aria-hidden="true">✈</span>
@@ -1041,6 +1038,10 @@
             </div>
 
             
+          </div>
+
+          <div class="rs-launch-success" id="rsLaunchSuccess" hidden>
+            <a id="rsLaunchGo" target="_blank" rel="noopener noreferrer">Go to bot</a>
           </div>
 
           <!-- ============================================================

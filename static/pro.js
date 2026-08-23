@@ -116,6 +116,7 @@ function switchTab(tabId) {
   }
   if (tabId !== "jobs") {
     document.body.classList.remove("rs-detail-open", "rs-drawer-open");
+    if(typeof _hideBotLaunchPage==="function")_hideBotLaunchPage();
   }
   // Pseudo-tabs (e.g. the Activity launcher has no data-tab) must NOT
   // blank the dashboard — a missing/unknown tab target = no-op.
@@ -2621,7 +2622,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try { if (typeof _jdOpen !== "undefined" && _jdOpen) closeJobDetails({ noUrl: true }); } catch (e) {}
     document.body.classList.remove(
       "rs-active", "rs-detail-open", "rs-drawer-open",
-      "rs-side-open", "rs-logs-open", "code-active", "term-kbd-up"
+      "rs-side-open", "rs-logs-open", "rs-launch-complete", "code-active", "term-kbd-up"
     );
 
     // Fade out, then swap screens on the next frame so the transition is seen.
@@ -3408,6 +3409,7 @@ async function loadJobs() {
           // editor work every seven seconds even when nothing changed.
           window._lastJobs = jobs;
           _reflectJobStatus(cur);
+          if(_launchSuccessJobId&&String(_launchSuccessJobId)===String(_selectedJobId))return;
           _renderTelegramBot(cur);
           const ws=document.getElementById("wbWorkspace");
           if(ws&&ws.style.display==="none")_showWorkspace(cur,false);
@@ -3588,7 +3590,7 @@ let _rsTelegramVerificationId = "";
 let _rsBotAnalysis = null;
 
 function _rsWizardStep(step) {
-  const order=["code","connect","review"];
+  const order=["code","connect"];
   const at=Math.max(0,order.indexOf(step));
   document.querySelectorAll("#rsTgSetup [data-rs-step]").forEach(el=>{
     const i=order.indexOf(el.dataset.rsStep);
@@ -3598,16 +3600,13 @@ function _rsWizardStep(step) {
 }
 
 function _setBotWizardStage(stage) {
-  const source=stage==="code",connect=stage==="connect",review=stage==="review";
+  const source=stage==="code",connect=stage==="connect";
   document.body.classList.toggle("rs-step-code",source);
   document.body.classList.toggle("rs-step-connect",connect);
-  document.body.classList.toggle("rs-step-review",review);
   const codeStage=document.getElementById("rsTgCodeStage");if(codeStage)codeStage.hidden=!source;
   const connectStage=document.getElementById("rsTgConnectStage");if(connectStage)connectStage.hidden=!connect;
-  const reviewStage=document.getElementById("rsTgReview");if(reviewStage)reviewStage.hidden=!review;
-  const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=source||review||!_rsBotAnalysis;
-  const privacy=document.getElementById("rsTgPrivacy");if(privacy)privacy.hidden=source;
-  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=!source||(!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy);
+  const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
+  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=!connect||(!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy);
   _rsWizardStep(stage);
   const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
 }
@@ -3704,8 +3703,9 @@ async function _analyzeRunSpaceBot() {
   const code=_jobCmGetValue();
   const language=(document.getElementById("jobLang")||{}).value||"python";
   const btn=document.getElementById("rsTgAnalyze");
+  const name=document.getElementById("jobName");
+  if(!name||!name.value.trim()){toast("Give your bot a name first","error");name?.focus();return;}
   if(!code.trim()){toast("Paste or upload the bot code first","error");_jobCmFocus();return;}
-  if(_collectTemplateEnv(true)===null)return;
   try {
     if(btn){btn.disabled=true;btn.textContent="Analyzing…";}
     const data=await api("/api/telegram-bot/analyze","POST",{code,language},true);
@@ -3735,40 +3735,24 @@ async function _verifyRunSpaceTelegramBot() {
   const btn=document.getElementById("rsTgVerify");
   const state=document.getElementById("rsTgVerifyState");
   const token=(input&&input.value||"").trim();
-  if(!_rsBotAnalysis){toast("Analyze the code first","error");return;}
+  if(!_rsBotAnalysis){toast("Add your source first","error");return;}
+  const setupValues=_collectTemplateEnv(true);if(setupValues===null)return;
   if(!token){if(state){state.textContent="Paste the token from @BotFather first.";state.className="rs-tg-verify-state err";}return;}
   try{
     if(btn){btn.disabled=true;btn.textContent="Verifying…";}
-    if(state){state.textContent="Asking Telegram for the bot identity…";state.className="rs-tg-verify-state";}
+    if(state){state.textContent="Verifying bot…";state.className="rs-tg-verify-state";}
     const meta=await api("/api/telegram-bot/verify","POST",{token},true);
     _rsVerifiedBotToken=token;_rsVerifiedBotMeta=meta;
     _rsTelegramVerificationId=meta.telegram_verification_id||"";
-    if(state){state.textContent=`Connected @${meta.telegram_bot_username}`;state.className="rs-tg-verify-state ok";}
-    const review=document.getElementById("rsTgReview");
-    if(review){
-      review.textContent="";review.hidden=false;
-      const text=document.createElement("div");text.className="rs-analysis-grid";
-      [["Bot",`@${meta.telegram_bot_username}`],["Framework",_rsBotAnalysis.framework],["Updates",_rsBotAnalysis.update_mode],["Token",_rsTemplateEnvFields.length?`Verified · ${_rsTemplateEnvFields.length} setup value(s) ready`:"Verified · stored as secret"]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v;cell.append(sm,b);text.appendChild(cell);});
-      const setupValues=_collectTemplateEnv(false)||{};
-      if(setupValues.ADMIN_CLAIM_CODE){
-        const claim=document.createElement("div");claim.className="rs-claim-review";
-        const claimCopy=document.createElement("div");const claimTitle=document.createElement("b");claimTitle.textContent="After deploy: claim admin access";const claimHelp=document.createElement("span");claimHelp.textContent="Send this command to your new bot. It will learn your Telegram ID automatically.";claimCopy.append(claimTitle,claimHelp);
-        const command=document.createElement("code");command.textContent=`/claim ${setupValues.ADMIN_CLAIM_CODE}`;
-        const copyClaim=document.createElement("button");copyClaim.type="button";copyClaim.className="btn-ghost";copyClaim.textContent="Copy claim command";copyClaim.onclick=async()=>{try{await navigator.clipboard.writeText(command.textContent);toast("Claim command copied","success");}catch(e){toast("Select and copy the claim command","info");}};
-        claim.append(claimCopy,command,copyClaim);review.appendChild(claim);
-      }
-      if(_rsTemplateAfterDeploy){const next=document.createElement("div");next.className="rs-after-review";const b=document.createElement("b");b.textContent="Next step";const span=document.createElement("span");span.textContent=_rsTemplateAfterDeploy;next.append(b,span);review.appendChild(next);}
-      const actions=document.createElement("div");actions.className="rs-stage-actions";
-      const back=document.createElement("button");back.type="button";back.className="btn-ghost";back.textContent="Back";back.addEventListener("click",()=>_setBotWizardStage("connect"));
-      const open=document.createElement("a");open.className="btn-ghost";open.textContent="Open bot";open.href=meta.telegram_bot_url;open.target="_blank";open.rel="noopener noreferrer";
-      const deploy=document.createElement("button");deploy.type="button";deploy.className="btn-primary";deploy.id="rsTgDeploy";deploy.textContent="Deploy Bot";deploy.addEventListener("click",startJob);
-      actions.append(back,open,deploy);review.append(text,actions);
-    }
-    _setBotWizardStage("review");
+    if(state){state.textContent="Verified. Deploying…";state.className="rs-tg-verify-state ok";}
+    let launchUrl=meta.telegram_bot_url||"";
+    if(setupValues.ADMIN_CLAIM_CODE&&launchUrl)launchUrl+=(launchUrl.includes("?")?"&":"?")+"start=claim_"+encodeURIComponent(setupValues.ADMIN_CLAIM_CODE);
+    await startJob({launchAfterDeploy:true,launchUrl});
+    if(!document.body.classList.contains("rs-launch-complete")&&state){state.textContent="Deployment did not finish. Try again.";state.className="rs-tg-verify-state err";}
   }catch(e){
     _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
     if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
-  }finally{if(btn){btn.disabled=false;btn.textContent="Verify & connect";}}
+  }finally{if(btn){btn.disabled=false;btn.textContent="Verify & deploy";}}
 }
 
 function _resetRunSpaceTelegramDraft(){
@@ -3776,7 +3760,6 @@ function _resetRunSpaceTelegramDraft(){
   const input=document.getElementById("rsTgToken");if(input)input.value="";
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
-  const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
   const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||21} practical bots`;
   _renderTemplateConfig([]);
@@ -3854,7 +3837,19 @@ function _renderTelegramBot(job) {
   }
 }
 
+let _launchSuccessJobId=null;
+function _hideBotLaunchPage(){_launchSuccessJobId=null;document.body.classList.remove("rs-launch-complete");const page=document.getElementById("rsLaunchSuccess");if(page)page.hidden=true;}
+function _showBotLaunchPage(job,url){
+  _launchSuccessJobId=String(job.id||job.job_db_id||"");document.body.classList.add("rs-launch-complete");
+  const page=document.getElementById("rsLaunchSuccess"),go=document.getElementById("rsLaunchGo");
+  const ws=document.getElementById("wbWorkspace"),emp=document.getElementById("wbEmpty"),boot=document.getElementById("wbBootLoader");
+  if(ws)ws.style.display="none";if(emp)emp.style.display="none";if(boot)boot.style.display="none";
+  if(go){go.href=url||job.telegram_bot_url||"#";go.textContent="Go to bot";}
+  if(page)page.hidden=false;
+}
+
 function _showWorkspace(job, animate) {
+  _hideBotLaunchPage();
   const emp = document.getElementById("wbEmpty");
   const ws = document.getElementById("wbWorkspace");
   const boot = document.getElementById("wbBootLoader");
@@ -3897,6 +3892,7 @@ function _showMissingJob(slug) {
 }
 
 function _showEmpty(zeroJobs) {
+  _hideBotLaunchPage();
   const emp = document.getElementById("wbEmpty");
   const ws  = document.getElementById("wbWorkspace");
   const boot = document.getElementById("wbBootLoader");
@@ -4540,6 +4536,7 @@ function renderJobs(jobs) {
     list.appendChild(item);
   });
   const openMenu=document.getElementById("rsMoreMenu");if(openMenu&&!openMenu.hidden)_rsJobsPopRender();
+  if(_launchSuccessJobId&&String(_selectedJobId)===String(_launchSuccessJobId))return;
   // Deep-link: pick the requested job regardless of running state.
   if (window.__rs_deep_invalid) {
     window.__rs_deep_invalid = false;
@@ -4646,6 +4643,7 @@ function _initWbWiring() {
     // Suppress auto-select for the next 1500ms so any in-flight poll/loadJobs
     // race cannot steal our blank editor and reload an old job.
     _suppressAutoSelect = Date.now() + 1500;
+    _hideBotLaunchPage();
     const ws = document.getElementById("wbWorkspace");
     const emp = document.getElementById("wbEmpty");
     if (ws) ws.style.display = "flex";
@@ -5779,7 +5777,8 @@ async function toggleJobAccess(id, makePublic) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-async function startJob() {
+async function startJob(options) {
+  options=(options&&options.launchAfterDeploy)?options:{};
   const nameEl = document.getElementById("jobName");
   const btn = document.getElementById("btnStartJob");
   const editingId = btn && btn.dataset.editingId;
@@ -5847,7 +5846,7 @@ async function startJob() {
        coming up. Keep that state visible on the actual menu button. */
     if(btn){const runLabel=btn.querySelector(".rs-seg-label");if(runLabel)runLabel.textContent="Starting…";}
     if (typeof rsRunState === "function") rsRunState("starting");
-    toast("Deployed \u2713", "success");
+    if(!options.launchAfterDeploy)toast("Deployed \u2713", "success");
     _setHint("ok", "");
     _jobDirty = false;
     _composingNew = false;      // deployed — polling may take over again
@@ -5885,9 +5884,16 @@ async function startJob() {
       window._lastJobs = window._lastJobs.filter(x => String(x.id) !== String(info.job_db_id));
       window._lastJobs.unshift(stub);
       _lastJobsSig = "";  // force renderJobs to repaint
-      renderJobs(window._lastJobs);
-      selectJob(info.job_db_id);
-      if (info.web_url) setTimeout(() => toast("Live URL ready \u2014 tap Details to open", "info"), 800);
+      if(options.launchAfterDeploy){
+        _selectedJobId=String(info.job_db_id);_suppressAutoSelect=Date.now()+1200;
+        if(btn)btn.dataset.editingId=String(info.job_db_id);
+        renderJobs(window._lastJobs);
+        _updateJobUrl(stub);
+        _showBotLaunchPage(stub,options.launchUrl||info.telegram_bot_url);
+      }else{
+        renderJobs(window._lastJobs);selectJob(info.job_db_id);
+        if (info.web_url) setTimeout(() => toast("Live URL ready — tap Bot details to open", "info"), 800);
+      }
     } else {
       await loadJobs();
     }

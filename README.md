@@ -4,9 +4,8 @@ CodeNest is a FastAPI + vanilla-JavaScript platform for analyzing, connecting, d
 
 ## Add Bot flow
 
-1. **Source** — choose a practical template, paste, upload, or import bot source; Continue performs analysis automatically.
-2. **Connect** — verify a BotFather token through Telegram `getMe`.
-3. **Review & Deploy** — confirm identity/configuration; hardcoded tokens are changed to read the write-only `BOT_TOKEN` environment secret.
+1. **Source** — optionally choose a practical template, or simply name the bot and paste/upload custom code. Continue performs analysis automatically.
+2. **Connect & Deploy** — enter the BotFather token; successful verification deploys immediately and opens a single-action **Go to bot** page. Hardcoded tokens are changed to read the write-only `BOT_TOKEN` environment secret.
 
 Supported analysis signals include aiogram, python-telegram-bot, pyTelegramBotAPI/telebot, Telethon, Pyrogram, Telegraf, grammY, and node-telegram-bot-api.
 
@@ -14,7 +13,7 @@ Supported analysis signals include aiogram, python-telegram-bot, pyTelegramBotAP
 
 The Add Bot flow includes 21 searchable, categorized starters rather than demo snippets: a master channel-referral/reward system, Livegram-style two-way support, simpler referral modes, self-claimed admin broadcasts, channel posting, channel join gates, group welcome/rules/warnings, order notifications, deep-link file sharing, inline menus, polls, reminders, SQLite notes, URL checks, and Python/Node foundations.
 
-Admin-capable templates do not ask users to discover a numeric Telegram ID. The wizard generates a one-time `ADMIN_CLAIM_CODE`; after deployment the owner sends `/claim CODE` to the new bot. The bot stores that sender's real Telegram user ID in its own SQLite database and refuses future claims. Claim codes and all other setup values are encrypted job environment secrets.
+Admin-capable templates do not ask users to discover a numeric Telegram ID. The wizard generates an encrypted one-time `ADMIN_CLAIM_CODE`, then puts it into the **Go to bot** deep link after deployment. Pressing Start through that link makes the bot store the sender's real Telegram user ID and refuse future claims—no ID or command needs to be typed. The Master Referral template follows the requested first-opener rule instead.
 
 ## Main capabilities
 

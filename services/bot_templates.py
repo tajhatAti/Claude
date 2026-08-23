@@ -496,6 +496,10 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid claim code.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and context.args and context.args[0] == "claim_" + CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id', ?)", (str(update.effective_user.id),)); DB.commit()
+        await update.message.reply_text("You are now the support admin. Reply to copied messages to answer users.")
+        return
     DB.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (update.effective_user.id,))
     DB.commit()
     await update.message.reply_text("Send any message, photo, or file. Support will reply here.")
@@ -567,6 +571,10 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else: await update.message.reply_text("Invalid claim code.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and context.args and context.args[0] == "claim_" + CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id', ?)", (str(update.effective_user.id),)); DB.commit()
+        await update.message.reply_text("Admin connected. Use /stats and /broadcast message.")
+        return
     DB.execute("INSERT OR IGNORE INTO users VALUES(?)", (update.effective_user.id,)); DB.commit()
     await update.message.reply_text("You are subscribed to announcements.")
 
@@ -658,6 +666,10 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else: await update.message.reply_text("Invalid claim code.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and context.args and context.args[0] == "claim_" + CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id', ?)", (str(update.effective_user.id),)); DB.commit()
+        await update.message.reply_text("Admin connected. New orders will arrive here.")
+        return
     buttons=[[InlineKeyboardButton(label,callback_data=f"order:{key}")] for key,label in PRODUCTS.items()]
     await update.message.reply_text("Choose a product:",reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -691,6 +703,11 @@ async def claim(update:Update,context:ContextTypes.DEFAULT_TYPE):
     elif context.args and context.args[0]==CLAIM_CODE:
         DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(update.effective_user.id),));DB.commit();await update.message.reply_text("Admin connected. Add this bot as channel admin, then /setchannel @channel.")
     else: await update.message.reply_text("Invalid claim code.")
+async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and context.args and context.args[0] == "claim_" + CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(update.effective_user.id),));DB.commit()
+        await update.message.reply_text("Admin connected. Add this bot as channel admin, then /setchannel @channel.")
+    elif admin_id(): await update.message.reply_text("Use /setchannel @channel or /post message.")
 async def setchannel(update:Update,context:ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id!=admin_id(): return
     if not context.args: await update.message.reply_text("Use: /setchannel @channelusername"); return
@@ -712,7 +729,7 @@ async def post(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(channel,text)
     await update.message.reply_text("Posted to channel.")
 app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-app.add_handler(CommandHandler("claim",claim));app.add_handler(CommandHandler("setchannel",setchannel));app.add_handler(CommandHandler("post",post));app.run_polling()
+app.add_handler(CommandHandler("claim",claim));app.add_handler(CommandHandler("start",start));app.add_handler(CommandHandler("setchannel",setchannel));app.add_handler(CommandHandler("post",post));app.run_polling()
 ''', "Channels", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE, then add the bot as a channel admin.","required":True}], "Claim admin, add the bot as channel admin, then send /setchannel @channel."),
 
     "channel-gate": _item(
@@ -736,6 +753,8 @@ async def membership(user_id,c):
     try:return (await c.bot.get_chat_member(get("channel"),user_id)).status in ("member","administrator","creator")
     except Exception:return False
 async def start(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and c.args and c.args[0] == "claim_" + CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(u.effective_user.id),));DB.commit();await u.message.reply_text("Admin connected. Use /setchannel @channel.");return
     channel=get("channel")
     if channel and await membership(u.effective_user.id,c):await u.message.reply_text("Access granted. Welcome!");return
     name=channel.lstrip("@")
@@ -789,6 +808,8 @@ def admin_id():
 async def claim(u:Update,c:ContextTypes.DEFAULT_TYPE):
     if not admin_id() and c.args and c.args[0]==CLAIM_CODE:DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(u.effective_user.id),));DB.commit();await u.message.reply_text("Admin connected.")
 async def start(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and c.args and c.args[0] == "claim_" + CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(u.effective_user.id),));DB.commit();await u.message.reply_text("Admin connected.");return
     uid=u.effective_user.id;exists=DB.execute("SELECT 1 FROM users WHERE user_id=?",(uid,)).fetchone();ref=None
     if not exists and c.args and c.args[0].isdigit() and int(c.args[0])!=uid and DB.execute("SELECT 1 FROM users WHERE user_id=?",(int(c.args[0]),)).fetchone():ref=int(c.args[0])
     DB.execute("INSERT OR IGNORE INTO users(user_id,referrer) VALUES(?,?)",(uid,ref))

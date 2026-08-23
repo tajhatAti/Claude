@@ -2,7 +2,7 @@
 
 ## Admin identity without numeric IDs
 
-Templates that need a private owner use a generated `ADMIN_CLAIM_CODE`. After deployment, the owner sends `/claim CODE` from their own Telegram account. Telegram supplies `effective_user.id`; the bot stores it in its SQLite settings table and refuses later claims. The claim code is an encrypted job secret and is shown in Review before deployment.
+Templates that need a private owner use a generated, encrypted `ADMIN_CLAIM_CODE`. After token verification CodeNest deploys immediately and builds the **Go to bot** URL with `start=claim_CODE`. The owner taps it and presses Start; Telegram supplies `effective_user.id`, the bot stores that ID in SQLite, and later claim attempts are refused. The user never discovers or types a numeric Telegram ID or claim command.
 
 The **Master referral rewards** template intentionally follows a different requested rule: the first Telegram user to send `/start` becomes master admin. Open it immediately after deployment.
 
