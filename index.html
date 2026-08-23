@@ -972,13 +972,13 @@
                 <span data-rs-step="connect"><b>2</b> Connect &amp; Deploy</span>
               </div>
               <div class="rs-wizard-stage" id="rsTgCodeStage">
-                <div><b>Add your bot code</b><small>Choose a template, upload a file, or paste code below.</small></div>
+                <div><b>Choose your source</b><small>A template is optional. Paste your own Python code directly in the editor.</small></div>
                 <div class="rs-template-actions">
-                  <button class="rs-template-trigger" id="rsBrowseTemplates" type="button">
-                    <span class="rs-template-emoji" aria-hidden="true">🤖</span>
-                    <span><b>Choose a bot</b><small id="rsSelectedTemplate">101 production bots</small></span>
-                    <span aria-hidden="true">›</span>
-                  </button>
+                  <div class="rs-source-options" aria-label="Bot source">
+                    <button class="rs-source-option is-active" id="rsUseOwnCode" type="button"><b>Own code</b><small>Paste below</small></button>
+                    <button class="rs-source-option" id="rsBrowseTemplates" type="button"><b>Templates</b><small id="rsSelectedTemplate">101 production bots</small></button>
+                    <button class="rs-source-option" id="rsUploadCode" type="button"><b>Upload</b><small>.py file</small></button>
+                  </div>
                   <button class="btn-primary" id="rsTgAnalyze" type="button">Continue</button>
                 </div>
               </div>

@@ -2,7 +2,9 @@ const fs=require('fs');const HTML=fs.readFileSync('index.html','utf8'),CSS=fs.re
 let p=0,f=0;const ok=(n,c)=>c?p++:(f++,console.log('  FAIL '+n));
 console.log('[1] custom picker replaces native select');
 ok('native template select is gone',!HTML.includes('id="rsBotTemplate"'));
-ok('clear browse trigger exists',HTML.includes('id="rsBrowseTemplates"')&&HTML.includes('Choose a bot'));
+ok('clear browse trigger exists',HTML.includes('id="rsBrowseTemplates"')&&HTML.includes('>Templates<'));
+ok('own code is explicit and template-free',HTML.includes('id="rsUseOwnCode"')&&HTML.includes('A template is optional'));
+ok('code upload is a first-class source',HTML.includes('id="rsUploadCode"')&&/_setRunSpaceSourceMode\("upload"\)/.test(JS));
 ok('picker is a real modal',HTML.includes('id="rsTemplateModal"')&&HTML.includes('id="rsTemplateGrid"'));
 ok('search is available',HTML.includes('id="rsTemplateSearch"'));
 ok('category rail is available',HTML.includes('id="rsTemplateCategories"'));

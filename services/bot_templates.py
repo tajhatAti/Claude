@@ -858,19 +858,25 @@ for _retired in ("command-bot","aiogram-echo","telebot-menu","inline-buttons","w
 from services.premium_templates import build_premium_templates
 TEMPLATES.update(build_premium_templates())
 
+# Remove low-value/regional lookup entries and replace them one-for-one with
+# products that repeatedly rank as real Telegram utilities.
+for _retired in ("bangladesh-job-alerts","bangla-quran-search","bangla-hadith-search","anime-discovery","english-dictionary-pro","country-intelligence"):
+    TEMPLATES.pop(_retired, None)
+from services.popular_tools import build_popular_tools
+TEMPLATES.update(build_popular_tools())
+
 
 def list_templates():
     # The first screen is a deliberately mixed Telegram/Bangladesh product
     # ranking, not 17 cosmetic variants from one family.
     featured = [
-        "ai-business-bangla", "bd-online-shop", "paid-channel-manager",
-        "contact-support", "master-referral", "group-helper",
-        "ai-support-desk", "digital-product-store", "force-join-referral",
-        "live-cricket-bangladesh", "bangladesh-job-alerts",
-        "bangla-quran-search", "bangla-hadith-search",
-        "channel-post-scheduler", "virus-total-scanner",
-        "image-to-pdf-pro", "bangla-ocr-scanner", "github-repo-monitor",
-        "bangladesh-news-desk", "remittance-converter",
+        "file-share-pro", "rose-style-moderator", "ai-business-bangla",
+        "voice-to-text-pro", "text-to-voice-pro", "universal-converter-pro",
+        "image-to-pdf-pro", "rss-channel-publisher", "paid-channel-manager",
+        "contact-support", "bd-online-shop", "master-referral",
+        "ai-support-desk", "force-join-referral", "channel-post-scheduler",
+        "bangla-ocr-scanner", "virus-total-scanner", "github-repo-monitor",
+        "crypto-market-bd", "remittance-converter",
     ]
     position = {template_id: index for index, template_id in enumerate(featured)}
     ranked = sorted(TEMPLATES.items(), key=lambda pair: (

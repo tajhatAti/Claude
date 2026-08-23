@@ -9,7 +9,7 @@ def test_template_catalog_is_practical_safe_and_unique():
     assert all(r["language"]=="python" for r in rows)
     assert len({r["category"] for r in rows})>=20
     assert len({r["id"] for r in rows})==len(rows)
-    assert {"Groups","Growth","Business","Admin","Channels","Finance","Education","AI","Commerce","Files","Islamic","Developer","Security","Sports","Bangladesh"}.issubset({r["category"] for r in rows})
+    assert {"Groups","Growth","Business","Admin","Channels","Finance","Education","AI","AI Audio","Automation","Commerce","Files","Developer","Security","Sports","Bangladesh"}.issubset({r["category"] for r in rows})
     assert sum(1 for r in rows if r.get("requires_setup"))>=6
     for template_id in ("contact-support","admin-broadcast","order-bot","channel-poster","channel-gate","referral-rewards"):
         template=bot_templates.get_template(template_id)
@@ -73,10 +73,10 @@ def test_ranked_products_replace_quantity_first_fillers():
     rows=bot_templates.list_templates()
     assert len(rows) == 101
     assert [r["id"] for r in rows[:6]] == [
-        "ai-business-bangla", "bd-online-shop", "paid-channel-manager",
-        "contact-support", "master-referral", "group-helper",
+        "file-share-pro", "rose-style-moderator", "ai-business-bangla",
+        "voice-to-text-pro", "text-to-voice-pro", "universal-converter-pro",
     ]
-    retired={"appointment-booking","expense-tracker","habit-tracker","water-log","notes-bot","reminder-bot","command-bot","url-checker"}
+    retired={"appointment-booking","expense-tracker","habit-tracker","water-log","notes-bot","reminder-bot","command-bot","url-checker","bangladesh-job-alerts","bangla-quran-search","bangla-hadith-search","anime-discovery"}
     assert not retired & {r["id"] for r in rows}
     assert all(bot_templates.get_template(slug) is None for slug in retired)
 
@@ -90,10 +90,16 @@ def test_premium_products_have_real_integrations_and_controls():
         assert marker in shop
     cricket=bot_templates.get_template("live-cricket-bangladesh")["code"]
     assert "api.cricapi.com" in cricket and "DATA_API_KEY" in cricket and "CREATE TABLE IF NOT EXISTS cache" in cricket
-    quran=bot_templates.get_template("bangla-quran-search")["code"]
-    assert "api.alquran.cloud" in quran and "bn.bengali" in quran
-    bd_law=bot_templates.get_template("bangladesh-laws-search")["code"]
-    assert "bd-laws-api.bdit.community" in bd_law
+    sharing=bot_templates.get_template("file-share-pro")["code"]
+    for marker in ("file_id", "token_urlsafe", "max_downloads", "downloads=downloads+1", "?start=f_"):
+        assert marker in sharing
+    stt=bot_templates.get_template("voice-to-text-pro")["code"]
+    assert "/audio/transcriptions" in stt and "20*1024*1024" in stt and "AUDIO_API_KEY" in stt
+    tts=bot_templates.get_template("text-to-voice-pro")["code"]
+    assert "/audio/speech" in tts and "response_format" in tts
+    moderator=bot_templates.get_template("rose-style-moderator")["code"]
+    for marker in ("captcha", "restrict_chat_member", "automatic warning", "Link guard", "audit"):
+        assert marker in moderator
     channel=bot_templates.get_template("paid-channel-manager")["code"]
     for marker in ("get_chat_member", "run_once", "publish_at", "delete_after", "referrer", "setchannel", "subscriptions", "create_chat_invite_link", "expire_members", "post_init(restore)", "RetryAfter"):
         assert marker in channel
@@ -102,7 +108,7 @@ def test_premium_products_have_real_integrations_and_controls():
 
 
 def test_all_promoted_integrations_declare_required_secrets():
-    for slug,key in (("ai-business-bangla","AI_API_KEY"),("live-cricket-bangladesh","DATA_API_KEY"),("virus-total-scanner","MEDIA_API_KEY")):
+    for slug,key in (("ai-business-bangla","AI_API_KEY"),("voice-to-text-pro","AUDIO_API_KEY"),("live-cricket-bangladesh","DATA_API_KEY"),("virus-total-scanner","MEDIA_API_KEY")):
         assert key in {f["key"] for f in bot_templates.get_template(slug)["env_fields"]}
 
 

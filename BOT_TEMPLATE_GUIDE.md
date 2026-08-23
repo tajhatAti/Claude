@@ -1,6 +1,6 @@
 # Practical bot template guide
 
-CodeNest includes **101 ready-to-deploy templates, all written in Python**. The ranked catalog focuses on AI, Bangladesh commerce, live public APIs, channel growth, moderation, files/security, referrals, and support. Generic reminders, notes, habit/water trackers, URL checkers, and echo/command demos are not included. See `TEMPLATE_RESEARCH.md` for demand research, API sources, architecture decisions, and validation rules.
+CodeNest includes **101 ready-to-deploy templates, all written in Python**. The ranked catalog starts with file sharing, advanced group moderation, AI APIs, voice-to-text, text-to-voice, image/PDF conversion, RSS automation, paid channels, support, shops, referrals, OCR, and security tools. Generic reminders, notes, regional lookup filler, habit/water trackers, URL checkers, and echo/command demos are not included. Templates are optional: **Own code** accepts pasted Python directly, while **Upload** imports a `.py` file. See `TEMPLATE_RESEARCH.md` for demand research, API sources, architecture decisions, and validation rules.
 
 ## Admin identity without numeric IDs
 

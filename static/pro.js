@@ -3634,6 +3634,11 @@ let _rsTemplateCategory="All";
 let _rsTemplateEnvFields=[];
 let _rsTemplateAfterDeploy="";
 
+function _setRunSpaceSourceMode(mode) {
+  const map={own:"rsUseOwnCode",template:"rsBrowseTemplates",upload:"rsUploadCode"};
+  Object.entries(map).forEach(([key,id])=>document.getElementById(id)?.classList.toggle("is-active",key===mode));
+}
+
 function _newTemplateSecret() {
   try{const bytes=new Uint8Array(8);crypto.getRandomValues(bytes);return [...bytes].map(v=>(v%36).toString(36)).join("").toUpperCase();}
   catch(e){return Math.random().toString(36).slice(2,10).toUpperCase();}
@@ -3711,6 +3716,7 @@ async function _applyRunSpaceBotTemplate(templateId,templateName) {
     const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
     const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
     _renderTemplateConfig(item.env_fields||[],item.after_deploy||"");
+    _setRunSpaceSourceMode("template");
     const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${templateName||item.name} selected`;
     closeModal("rsTemplateModal");_rsBotAnalysis=null;_setBotWizardStage("code");
     toast("Template ready — edit anything, then Continue","success");
@@ -4634,6 +4640,10 @@ function _initWbWiring() {
   _loadRunSpaceBotTemplates();
   const browseTemplates=document.getElementById("rsBrowseTemplates");
   if(browseTemplates&&!browseTemplates.dataset.wired){browseTemplates.dataset.wired="1";browseTemplates.addEventListener("click",_openRunSpaceTemplates);}
+  const ownCode=document.getElementById("rsUseOwnCode");
+  if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||101} production bots`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
+  const uploadCode=document.getElementById("rsUploadCode");
+  if(uploadCode&&!uploadCode.dataset.wired){uploadCode.dataset.wired="1";uploadCode.addEventListener("click",()=>document.getElementById("rsFileInput")?.click());}
   const templateSearch=document.getElementById("rsTemplateSearch");
   if(templateSearch&&!templateSearch.dataset.wired){templateSearch.dataset.wired="1";templateSearch.addEventListener("input",_renderRunSpaceTemplates);}
   const tgAnalyze = document.getElementById("rsTgAnalyze");
@@ -4668,6 +4678,7 @@ function _initWbWiring() {
     if (emp) emp.style.display = "none";
     _clearWorkspaceChrome();
     _resetRunSpaceTelegramDraft();
+    _setRunSpaceSourceMode("own");
     const wizard=document.getElementById("rsTgSetup");if(wizard)wizard.hidden=false;
     _renderLogs("");
     const n = document.getElementById("jobName"); if (n) { n.value = ""; n.classList.remove("rs-inp-err"); }
@@ -8135,7 +8146,8 @@ async function _rsHandleUpload(file) {
 
   _jobCmSetValue(text);
   _renderTemplateConfig([]);
-  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="Custom file selected";
+  _setRunSpaceSourceMode("upload");
+  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="101 production bots";
   _rsBotAnalysis=null;
   _setBotWizardStage("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);
