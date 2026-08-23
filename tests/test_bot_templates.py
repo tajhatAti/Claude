@@ -5,10 +5,13 @@ from services import bot_templates,telegram_detector
 
 def test_template_catalog_is_practical_safe_and_unique():
     rows=bot_templates.list_templates()
-    assert len(rows)>=16
+    assert len(rows)>=20
     assert len({r["id"] for r in rows})==len(rows)
-    assert {"Basics","Menus","Groups","Utilities","Storage","Node.js","Growth","Business","Admin"}.issubset({r["category"] for r in rows})
-    assert sum(1 for r in rows if r.get("requires_setup"))>=3
+    assert {"Basics","Menus","Groups","Utilities","Storage","Node.js","Growth","Business","Admin","Channels"}.issubset({r["category"] for r in rows})
+    assert sum(1 for r in rows if r.get("requires_setup"))>=6
+    for template_id in ("contact-support","admin-broadcast","order-bot","channel-poster","channel-gate","referral-rewards"):
+        field=bot_templates.get_template(template_id)["env_fields"][0]
+        assert field["key"]=="ADMIN_CLAIM_CODE" and field["type"]=="generated"
     for row in rows:
         assert row["name"] and row["description"] and row["framework"]
         item=bot_templates.get_template(row["id"])
@@ -25,12 +28,21 @@ def test_real_use_templates_include_their_working_state_and_controls():
     referral=bot_templates.get_template("referral-bot")["code"]
     assert "referrals.db" in referral and "?start=" in referral and "INSERT OR IGNORE" in referral
     contact=bot_templates.get_template("contact-support")
-    assert contact["env_fields"][0]["key"]=="ADMIN_CHAT_ID"
-    assert "support.db" in contact["code"] and "forward_message" in contact["code"] and "reply_to_message" in contact["code"]
+    assert contact["env_fields"][0]["key"]=="ADMIN_CLAIM_CODE" and contact["env_fields"][0]["type"]=="generated"
+    assert "ADMIN_CHAT_ID" not in contact["code"]
+    assert "live_support.db" in contact["code"] and "copy_message" in contact["code"] and "reply_to_message" in contact["code"] and 'CommandHandler("claim"' in contact["code"]
     broadcast=bot_templates.get_template("admin-broadcast")["code"]
-    assert "/broadcast" in broadcast and "ADMIN_CHAT_ID" in broadcast and "Forbidden" in broadcast
+    assert "/broadcast" in broadcast and "ADMIN_CLAIM_CODE" in broadcast and "Forbidden" in broadcast
     store=bot_templates.get_template("file-store")["code"]
     assert "files.db" in store and "file_id" in store and "file_" in store
+    channel=bot_templates.get_template("channel-poster")["code"]
+    assert "/setchannel" in channel and "copy_message" in channel and "administrator" in channel
+    gate=bot_templates.get_template("channel-gate")["code"]
+    assert "get_chat_member" in gate and "check_join" in gate
+    group=bot_templates.get_template("group-helper")["code"]
+    assert "NEW_CHAT_MEMBERS" in group and 'CommandHandler("warn"' in group and 'CommandHandler("setrules"' in group
+    rewards=bot_templates.get_template("referral-rewards")["code"]
+    assert "rewards.db" in rewards and "points=points+10" in rewards and 'CommandHandler("top"' in rewards
 
 
 def test_every_template_parses_in_its_runtime():

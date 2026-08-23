@@ -3615,6 +3615,11 @@ let _rsTemplates=[];
 let _rsTemplateCategory="All";
 let _rsTemplateEnvFields=[];
 
+function _newTemplateSecret() {
+  try{const bytes=new Uint8Array(8);crypto.getRandomValues(bytes);return [...bytes].map(v=>(v%36).toString(36)).join("").toUpperCase();}
+  catch(e){return Math.random().toString(36).slice(2,10).toUpperCase();}
+}
+
 function _renderTemplateConfig(fields) {
   _rsTemplateEnvFields=Array.isArray(fields)?fields:[];
   const box=document.getElementById("rsTemplateConfig"),host=document.getElementById("rsTemplateConfigFields");
@@ -3623,8 +3628,12 @@ function _renderTemplateConfig(fields) {
   _rsTemplateEnvFields.forEach(field=>{
     const label=document.createElement("label");label.className="field";
     const title=document.createElement("span");title.textContent=field.label+(field.required?" · required":"");
-    const input=document.createElement("input");input.className="input-text";input.type=field.type||"text";input.placeholder=field.placeholder||"";input.dataset.envKey=field.key;input.required=!!field.required;
-    label.append(title,input);
+    const input=document.createElement("input");input.className="input-text";input.type=field.type==="generated"?"text":field.type||"text";input.placeholder=field.placeholder||"";input.dataset.envKey=field.key;input.required=!!field.required;
+    if(field.type==="generated"){input.value=_newTemplateSecret();input.readOnly=true;}
+    label.appendChild(title);
+    if(field.type==="generated"){
+      const row=document.createElement("div");row.className="rs-config-input-row";const copy=document.createElement("button");copy.type="button";copy.className="btn-ghost";copy.textContent="Copy";copy.onclick=async()=>{input.select();try{await navigator.clipboard.writeText(input.value);toast("Claim code copied","success");}catch(e){toast("Select and copy the claim code","info");}};row.append(input,copy);label.appendChild(row);
+    }else label.appendChild(input);
     if(field.help){const help=document.createElement("small");help.textContent=field.help;label.appendChild(help);}
     host.appendChild(label);
   });
@@ -3736,6 +3745,14 @@ async function _verifyRunSpaceTelegramBot() {
       review.textContent="";review.hidden=false;
       const text=document.createElement("div");text.className="rs-analysis-grid";
       [["Bot",`@${meta.telegram_bot_username}`],["Framework",_rsBotAnalysis.framework],["Updates",_rsBotAnalysis.update_mode],["Token",_rsTemplateEnvFields.length?`Verified · ${_rsTemplateEnvFields.length} setup value(s) ready`:"Verified · stored as secret"]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v;cell.append(sm,b);text.appendChild(cell);});
+      const setupValues=_collectTemplateEnv(false)||{};
+      if(setupValues.ADMIN_CLAIM_CODE){
+        const claim=document.createElement("div");claim.className="rs-claim-review";
+        const claimCopy=document.createElement("div");const claimTitle=document.createElement("b");claimTitle.textContent="After deploy: claim admin access";const claimHelp=document.createElement("span");claimHelp.textContent="Send this command to your new bot. It will learn your Telegram ID automatically.";claimCopy.append(claimTitle,claimHelp);
+        const command=document.createElement("code");command.textContent=`/claim ${setupValues.ADMIN_CLAIM_CODE}`;
+        const copyClaim=document.createElement("button");copyClaim.type="button";copyClaim.className="btn-ghost";copyClaim.textContent="Copy claim command";copyClaim.onclick=async()=>{try{await navigator.clipboard.writeText(command.textContent);toast("Claim command copied","success");}catch(e){toast("Select and copy the claim command","info");}};
+        claim.append(claimCopy,command,copyClaim);review.appendChild(claim);
+      }
       const actions=document.createElement("div");actions.className="rs-stage-actions";
       const back=document.createElement("button");back.type="button";back.className="btn-ghost";back.textContent="Back";back.addEventListener("click",()=>_setBotWizardStage("connect"));
       const open=document.createElement("a");open.className="btn-ghost";open.textContent="Open bot";open.href=meta.telegram_bot_url;open.target="_blank";open.rel="noopener noreferrer";
@@ -3756,7 +3773,7 @@ function _resetRunSpaceTelegramDraft(){
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
-  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||16} practical bots`;
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||20} practical bots`;
   _renderTemplateConfig([]);
   _setBotWizardStage("code");
 }

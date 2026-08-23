@@ -1724,6 +1724,10 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
 .rs-connect-stage > div:first-child,.rs-connect-stage .rs-tg-verify-state { grid-column:1/-1; }
 .rs-stage-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-top:10px; }
 .rs-wizard-review .rs-stage-actions { border-top:1px solid var(--line); padding-top:10px; }
+.rs-claim-review { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:10px; margin-top:10px; padding:10px; border:1px solid color-mix(in srgb,var(--ok) 35%,var(--line)); border-radius:var(--r-row); background:color-mix(in srgb,var(--ok) 8%,transparent); }
+.rs-claim-review > div { display:flex; flex-direction:column; }
+.rs-claim-review span { color:var(--fg-3); font-size:var(--fs-2); }
+.rs-claim-review code { padding:7px 9px; border-radius:var(--r-sm); background:var(--card); user-select:all; }
 body.rs-composing.rs-step-connect #wbSplit,
 body.rs-composing.rs-step-review #wbSplit { display:none; }
 body.rs-composing.rs-step-code #wbDivider,
@@ -1754,6 +1758,9 @@ body.rs-composing.rs-step-code .rs-logs { display:none; }
 #rsTemplateConfigFields { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; }
 #rsTemplateConfigFields .field { margin:0; }
 #rsTemplateConfigFields small { color:var(--fg-3); font-size:var(--fs-1); line-height:1.4; }
+.rs-config-input-row { display:flex; align-items:center; gap:7px; }
+.rs-config-input-row input { min-width:0; font-family:var(--mono); letter-spacing:.08em; }
+.rs-config-input-row button { flex:0 0 auto; }
 .rs-analysis-result,.rs-wizard-review { margin:8px 0; padding:10px; border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); font-size:var(--fs-2); }
 .rs-analysis-summary { display:flex; align-items:center; gap:10px; }
 .rs-analysis-summary > div { display:flex; flex-direction:column; min-width:0; }
@@ -3067,6 +3074,8 @@ body.term-open .wb-term-kbd { display: flex; }
   body.rs-composing #tab-jobs .rs-connect-stage > * { grid-column:1; }
   body.rs-composing #tab-jobs .rs-stage-actions { width:100%; }
   body.rs-composing #tab-jobs .rs-stage-actions > * { flex:1; min-height:44px; display:inline-flex; align-items:center; justify-content:center; }
+  body.rs-composing #tab-jobs .rs-claim-review { grid-template-columns:1fr; }
+  body.rs-composing #tab-jobs .rs-claim-review button { min-height:44px; }
 }
 #tab-jobs .rs-editor { flex: 1 1 auto; min-height: 0; }
 #tab-jobs .rs-cm-host { flex: 1 1 auto; min-height: 0; height: 100%; }

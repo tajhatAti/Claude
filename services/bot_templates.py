@@ -288,7 +288,7 @@ app.run_polling()
 ''', "Real use"),
 
     "contact-support": _item(
-        "Contact support bot", "Users message the bot; an admin receives and replies through Telegram.", "Business",
+        "Live support inbox", "Livegram-style anonymous inbox with admin replies, bans, and stats.", "Business",
         "python", "python-telegram-bot", '''
 # requirements: python-telegram-bot==21.4
 import os
@@ -296,36 +296,77 @@ import sqlite3
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
-DB = sqlite3.connect("support.db", check_same_thread=False)
+CLAIM_CODE = os.getenv("ADMIN_CLAIM_CODE", "")
+DB = sqlite3.connect("live_support.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+DB.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, banned INTEGER DEFAULT 0)")
 DB.execute("CREATE TABLE IF NOT EXISTS tickets (admin_message_id INTEGER PRIMARY KEY, user_id INTEGER)")
 DB.commit()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send your question here. Support will reply in this chat.")
+def setting(key):
+    row = DB.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
 
-async def route_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id == ADMIN_CHAT_ID and update.message.reply_to_message:
-        row = DB.execute("SELECT user_id FROM tickets WHERE admin_message_id=?", (update.message.reply_to_message.message_id,)).fetchone()
-        if row and update.message.text:
-            await context.bot.send_message(row[0], f"Support: {update.message.text}")
-            await update.message.reply_text("Reply sent.")
-        return
-    if update.effective_chat.type != "private" or not ADMIN_CHAT_ID:
-        return
-    forwarded = await context.bot.forward_message(ADMIN_CHAT_ID, update.effective_chat.id, update.message.message_id)
-    DB.execute("INSERT OR REPLACE INTO tickets VALUES(?, ?)", (forwarded.message_id, update.effective_user.id))
+def admin_id():
+    value = setting("admin_id")
+    return int(value) if value else 0
+
+async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if admin_id():
+        await update.message.reply_text("Admin is already connected.")
+    elif context.args and context.args[0] == CLAIM_CODE:
+        DB.execute("INSERT OR REPLACE INTO settings VALUES('admin_id', ?)", (str(update.effective_user.id),))
+        DB.commit()
+        await update.message.reply_text("You are now the support admin. Reply to forwarded messages to answer users.")
+    else:
+        await update.message.reply_text("Invalid claim code.")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    DB.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (update.effective_user.id,))
     DB.commit()
+    await update.message.reply_text("Send any message, photo, or file. Support will reply here.")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != admin_id(): return
+    users = DB.execute("SELECT COUNT(*) FROM users WHERE banned=0").fetchone()[0]
+    banned = DB.execute("SELECT COUNT(*) FROM users WHERE banned=1").fetchone()[0]
+    await update.message.reply_text(f"Users: {users}\\nBanned: {banned}")
+
+async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != admin_id() or not update.message.reply_to_message: return
+    row = DB.execute("SELECT user_id FROM tickets WHERE admin_message_id=?", (update.message.reply_to_message.message_id,)).fetchone()
+    if row:
+        DB.execute("UPDATE users SET banned=1 WHERE user_id=?", (row[0],)); DB.commit()
+        await update.message.reply_text(f"User {row[0]} banned.")
+
+async def route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    admin = admin_id()
+    if not admin: return
+    if update.effective_user.id == admin and update.message.reply_to_message:
+        row = DB.execute("SELECT user_id FROM tickets WHERE admin_message_id=?", (update.message.reply_to_message.message_id,)).fetchone()
+        if row:
+            await context.bot.copy_message(row[0], update.effective_chat.id, update.message.message_id)
+            await update.message.reply_text("Reply delivered.")
+        return
+    row = DB.execute("SELECT banned FROM users WHERE user_id=?", (update.effective_user.id,)).fetchone()
+    if row and row[0]: return
+    DB.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (update.effective_user.id,)); DB.commit()
+    header = await context.bot.send_message(admin, f"Message from {update.effective_user.full_name}\\nUser ID: {update.effective_user.id}")
+    copied = await context.bot.copy_message(admin, update.effective_chat.id, update.message.message_id, reply_to_message_id=header.message_id)
+    DB.execute("INSERT OR REPLACE INTO tickets VALUES(?, ?)", (copied.message_id, update.effective_user.id)); DB.commit()
     await update.message.reply_text("Your message reached support.")
 
 app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("claim", claim))
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, route_message))
+app.add_handler(CommandHandler("stats", stats))
+app.add_handler(CommandHandler("ban", ban))
+app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, route))
 app.run_polling()
-''', "Business", [{"key":"ADMIN_CHAT_ID","type":"number","label":"Admin Telegram ID","placeholder":"123456789","help":"Messages are forwarded here. Get your numeric ID from @userinfobot.","required":True}]),
+''', "Real use", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE to the bot. It securely learns your Telegram ID and disables further claims.","required":True}]),
 
     "admin-broadcast": _item(
-        "Admin broadcast bot", "Registers users and lets one admin send announcements with delivery stats.", "Admin",
+        "Admin broadcast bot", "Self-claiming subscriber bot with admin stats and broadcasts.", "Admin",
         "python", "python-telegram-bot", '''
 # requirements: python-telegram-bot==21.4
 import os
@@ -334,45 +375,46 @@ from telegram import Update
 from telegram.error import Forbidden
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+CLAIM_CODE = os.getenv("ADMIN_CLAIM_CODE", "")
 DB = sqlite3.connect("broadcast.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
 DB.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
 DB.commit()
 
+def admin_id():
+    row = DB.execute("SELECT value FROM settings WHERE key='admin_id'").fetchone()
+    return int(row[0]) if row else 0
+
+async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if admin_id(): await update.message.reply_text("Admin already connected.")
+    elif context.args and context.args[0] == CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id', ?)", (str(update.effective_user.id),)); DB.commit()
+        await update.message.reply_text("Admin connected. Use /stats and /broadcast message.")
+    else: await update.message.reply_text("Invalid claim code.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    DB.execute("INSERT OR IGNORE INTO users VALUES(?)", (update.effective_user.id,))
-    DB.commit()
+    DB.execute("INSERT OR IGNORE INTO users VALUES(?)", (update.effective_user.id,)); DB.commit()
     await update.message.reply_text("You are subscribed to announcements.")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        return
-    count = DB.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    await update.message.reply_text(f"Subscribers: {count}")
+    if update.effective_user.id != admin_id(): return
+    await update.message.reply_text(f"Subscribers: {DB.execute('SELECT COUNT(*) FROM users').fetchone()[0]}")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        return
+    if update.effective_user.id != admin_id(): return
     text = " ".join(context.args)
-    if not text:
-        await update.message.reply_text("Use: /broadcast Your announcement")
-        return
+    if not text: await update.message.reply_text("Use: /broadcast Your announcement"); return
     sent = 0
     for (user_id,) in DB.execute("SELECT user_id FROM users").fetchall():
-        try:
-            await context.bot.send_message(user_id, text)
-            sent += 1
-        except Forbidden:
-            DB.execute("DELETE FROM users WHERE user_id=?", (user_id,))
-    DB.commit()
-    await update.message.reply_text(f"Delivered to {sent} user(s).")
+        try: await context.bot.send_message(user_id, text); sent += 1
+        except Forbidden: DB.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+    DB.commit(); await update.message.reply_text(f"Delivered to {sent} user(s).")
 
 app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("stats", stats))
-app.add_handler(CommandHandler("broadcast", broadcast))
+app.add_handler(CommandHandler("claim", claim)); app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("stats", stats)); app.add_handler(CommandHandler("broadcast", broadcast))
 app.run_polling()
-''', "Admin", [{"key":"ADMIN_CHAT_ID","type":"number","label":"Admin Telegram ID","placeholder":"123456789","help":"Only this user can broadcast. Get the numeric ID from @userinfobot.","required":True}]),
+''', "Admin", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE. No numeric Telegram ID is needed.","required":True}]),
 
     "file-store": _item(
         "File sharing bot", "Stores Telegram file IDs and creates reusable deep links for downloads.", "Storage",
@@ -417,34 +459,178 @@ app.run_polling()
 ''', "Storage"),
 
     "order-bot": _item(
-        "Simple order bot", "Shows a product menu and sends confirmed orders to an admin.", "Business",
+        "Simple order bot", "Product buttons, order confirmation, and self-claimed admin notifications.", "Business",
         "python", "python-telegram-bot", '''
 # requirements: python-telegram-bot==21.4
 import os
+import sqlite3
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+CLAIM_CODE = os.getenv("ADMIN_CLAIM_CODE", "")
+DB = sqlite3.connect("orders.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"); DB.commit()
 PRODUCTS = {"basic": "Basic plan — $5", "pro": "Pro plan — $10"}
 
+def admin_id():
+    row=DB.execute("SELECT value FROM settings WHERE key='admin_id'").fetchone()
+    return int(row[0]) if row else 0
+
+async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if admin_id(): await update.message.reply_text("Admin already connected.")
+    elif context.args and context.args[0] == CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id', ?)", (str(update.effective_user.id),)); DB.commit()
+        await update.message.reply_text("Admin connected. New orders will arrive here.")
+    else: await update.message.reply_text("Invalid claim code.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    buttons = [[InlineKeyboardButton(label, callback_data=f"order:{key}")] for key, label in PRODUCTS.items()]
-    await update.message.reply_text("Choose a product:", reply_markup=InlineKeyboardMarkup(buttons))
+    buttons=[[InlineKeyboardButton(label,callback_data=f"order:{key}")] for key,label in PRODUCTS.items()]
+    await update.message.reply_text("Choose a product:",reply_markup=InlineKeyboardMarkup(buttons))
 
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    key = query.data.split(":", 1)[1]
-    user = query.from_user
+    query=update.callback_query; await query.answer(); key=query.data.split(":",1)[1]; user=query.from_user
     await query.edit_message_text(f"Order received: {PRODUCTS[key]}")
-    if ADMIN_CHAT_ID:
-        await context.bot.send_message(ADMIN_CHAT_ID, f"New order: {PRODUCTS[key]}\\nUser: @{user.username or user.id}\\nID: {user.id}")
+    if admin_id(): await context.bot.send_message(admin_id(),f"New order: {PRODUCTS[key]}\\nUser: @{user.username or user.id}\\nID: {user.id}")
 
-app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(order, pattern=r"^order:"))
-app.run_polling()
-''', "Business", [{"key":"ADMIN_CHAT_ID","type":"number","label":"Admin Telegram ID","placeholder":"123456789","help":"New orders are sent here. Get the numeric ID from @userinfobot.","required":True}]),
+app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("claim",claim)); app.add_handler(CommandHandler("start",start))
+app.add_handler(CallbackQueryHandler(order,pattern=r"^order:")); app.run_polling()
+''', "Business", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE. Orders will then be sent to you.","required":True}]),
+
+    "channel-poster": _item(
+        "Channel poster", "Claim ownership, connect a channel, and publish text or replied media.", "Channels",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+import sqlite3
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+CLAIM_CODE=os.getenv("ADMIN_CLAIM_CODE","")
+DB=sqlite3.connect("channel_poster.db",check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"); DB.commit()
+def get(key):
+    row=DB.execute("SELECT value FROM settings WHERE key=?",(key,)).fetchone(); return row[0] if row else ""
+def admin_id(): return int(get("admin_id") or 0)
+async def claim(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    if admin_id(): await update.message.reply_text("Admin already connected.")
+    elif context.args and context.args[0]==CLAIM_CODE:
+        DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(update.effective_user.id),));DB.commit();await update.message.reply_text("Admin connected. Add this bot as channel admin, then /setchannel @channel.")
+    else: await update.message.reply_text("Invalid claim code.")
+async def setchannel(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id!=admin_id(): return
+    if not context.args: await update.message.reply_text("Use: /setchannel @channelusername"); return
+    channel=context.args[0]
+    try:
+        me=await context.bot.get_me(); member=await context.bot.get_chat_member(channel,me.id)
+        if member.status not in ("administrator","creator"): raise ValueError()
+    except Exception: await update.message.reply_text("Add the bot as channel admin first, then retry."); return
+    DB.execute("INSERT OR REPLACE INTO settings VALUES('channel',?)",(channel,));DB.commit();await update.message.reply_text(f"Channel connected: {channel}")
+async def post(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id!=admin_id(): return
+    channel=get("channel")
+    if not channel: await update.message.reply_text("Connect a channel with /setchannel first."); return
+    if update.message.reply_to_message:
+        await context.bot.copy_message(channel,update.effective_chat.id,update.message.reply_to_message.message_id)
+    else:
+        text=" ".join(context.args)
+        if not text: await update.message.reply_text("Use /post text, or reply to media with /post."); return
+        await context.bot.send_message(channel,text)
+    await update.message.reply_text("Posted to channel.")
+app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("claim",claim));app.add_handler(CommandHandler("setchannel",setchannel));app.add_handler(CommandHandler("post",post));app.run_polling()
+''', "Channels", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE, then add the bot as a channel admin.","required":True}]),
+
+    "channel-gate": _item(
+        "Channel join gate", "Requires users to join your channel before using the bot.", "Channels",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os, sqlite3
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
+CLAIM_CODE=os.getenv("ADMIN_CLAIM_CODE","");DB=sqlite3.connect("channel_gate.db",check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT)");DB.commit()
+def get(k):
+    r=DB.execute("SELECT value FROM settings WHERE key=?",(k,)).fetchone();return r[0] if r else ""
+def admin_id():return int(get("admin_id") or 0)
+async def claim(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and c.args and c.args[0]==CLAIM_CODE: DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(u.effective_user.id),));DB.commit();await u.message.reply_text("Admin connected. Use /setchannel @channel.")
+async def setchannel(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if u.effective_user.id!=admin_id() or not c.args:return
+    DB.execute("INSERT OR REPLACE INTO settings VALUES('channel',?)",(c.args[0],));DB.commit();await u.message.reply_text("Channel saved. Make this bot an admin there for reliable checks.")
+async def membership(user_id,c):
+    try:return (await c.bot.get_chat_member(get("channel"),user_id)).status in ("member","administrator","creator")
+    except Exception:return False
+async def start(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    channel=get("channel")
+    if channel and await membership(u.effective_user.id,c):await u.message.reply_text("Access granted. Welcome!");return
+    name=channel.lstrip("@")
+    keys=[[InlineKeyboardButton("Join channel",url=f"https://t.me/{name}")],[InlineKeyboardButton("Check again",callback_data="check_join")]]
+    await u.message.reply_text("Join the channel to continue.",reply_markup=InlineKeyboardMarkup(keys))
+async def check(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    await u.callback_query.answer()
+    await u.callback_query.edit_message_text("Access granted. Welcome!" if await membership(u.effective_user.id,c) else "Not joined yet. Join and try again.")
+app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build();app.add_handler(CommandHandler("claim",claim));app.add_handler(CommandHandler("setchannel",setchannel));app.add_handler(CommandHandler("start",start));app.add_handler(CallbackQueryHandler(check,pattern="^check_join$"));app.run_polling()
+''', "Channels", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"Claim the bot, then connect your public channel with /setchannel.","required":True}]),
+
+    "group-helper": _item(
+        "Group helper", "Welcome messages, editable rules, warnings, and reply cleanup for group admins.", "Groups",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os,sqlite3
+from telegram import Update
+from telegram.ext import ApplicationBuilder,CommandHandler,ContextTypes,MessageHandler,filters
+DB=sqlite3.connect("groups.db",check_same_thread=False);DB.execute("CREATE TABLE IF NOT EXISTS settings(chat_id INTEGER,key TEXT,value TEXT,PRIMARY KEY(chat_id,key))");DB.execute("CREATE TABLE IF NOT EXISTS warns(chat_id INTEGER,user_id INTEGER,count INTEGER,PRIMARY KEY(chat_id,user_id))");DB.commit()
+async def is_admin(u,c):
+    m=await c.bot.get_chat_member(u.effective_chat.id,u.effective_user.id);return m.status in ("administrator","creator")
+def rules(chat):
+    r=DB.execute("SELECT value FROM settings WHERE chat_id=? AND key='rules'",(chat,)).fetchone();return r[0] if r else "Be respectful. No spam."
+async def welcome(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    for m in u.message.new_chat_members:await u.message.reply_text(f"Welcome {m.first_name}!\\n{rules(u.effective_chat.id)}")
+async def show_rules(u:Update,c:ContextTypes.DEFAULT_TYPE):await u.message.reply_text(rules(u.effective_chat.id))
+async def setrules(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(u,c):return
+    text=" ".join(c.args)
+    if not text:await u.message.reply_text("Use: /setrules your group rules");return
+    DB.execute("INSERT OR REPLACE INTO settings VALUES(?, 'rules', ?)",(u.effective_chat.id,text));DB.commit();await u.message.reply_text("Rules updated.")
+async def warn(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(u,c) or not u.message.reply_to_message:return
+    target=u.message.reply_to_message.from_user;row=DB.execute("SELECT count FROM warns WHERE chat_id=? AND user_id=?",(u.effective_chat.id,target.id)).fetchone();count=(row[0] if row else 0)+1
+    DB.execute("INSERT OR REPLACE INTO warns VALUES(?,?,?)",(u.effective_chat.id,target.id,count));DB.commit();await u.message.reply_text(f"{target.first_name} warning {count}/3")
+async def clean(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if await is_admin(u,c) and u.message.reply_to_message:await u.message.reply_to_message.delete();await u.message.delete()
+app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build();app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS,welcome));app.add_handler(CommandHandler("rules",show_rules));app.add_handler(CommandHandler("setrules",setrules));app.add_handler(CommandHandler("warn",warn));app.add_handler(CommandHandler("clean",clean));app.run_polling()
+''', "Groups"),
+
+    "referral-rewards": _item(
+        "Referral rewards", "Referral links, points, balance, leaderboard, and a self-claimed admin.", "Growth",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os,sqlite3
+from telegram import Update
+from telegram.ext import ApplicationBuilder,CommandHandler,ContextTypes
+CLAIM_CODE=os.getenv("ADMIN_CLAIM_CODE","");DB=sqlite3.connect("rewards.db",check_same_thread=False);DB.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)");DB.execute("CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY,referrer INTEGER,points INTEGER DEFAULT 0)");DB.commit()
+def admin_id():
+    r=DB.execute("SELECT value FROM settings WHERE key='admin_id'").fetchone();return int(r[0]) if r else 0
+async def claim(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if not admin_id() and c.args and c.args[0]==CLAIM_CODE:DB.execute("INSERT INTO settings VALUES('admin_id',?)",(str(u.effective_user.id),));DB.commit();await u.message.reply_text("Admin connected.")
+async def start(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    uid=u.effective_user.id;exists=DB.execute("SELECT 1 FROM users WHERE user_id=?",(uid,)).fetchone();ref=None
+    if not exists and c.args and c.args[0].isdigit() and int(c.args[0])!=uid and DB.execute("SELECT 1 FROM users WHERE user_id=?",(int(c.args[0]),)).fetchone():ref=int(c.args[0])
+    DB.execute("INSERT OR IGNORE INTO users(user_id,referrer) VALUES(?,?)",(uid,ref))
+    if not exists and ref:DB.execute("UPDATE users SET points=points+10 WHERE user_id=?",(ref,))
+    DB.commit();await u.message.reply_text("Welcome! Use /ref, /balance, and /top.")
+async def ref(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    me=await c.bot.get_me();await u.message.reply_text(f"https://t.me/{me.username}?start={u.effective_user.id}")
+async def balance(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    r=DB.execute("SELECT points FROM users WHERE user_id=?",(u.effective_user.id,)).fetchone();await u.message.reply_text(f"Points: {r[0] if r else 0}")
+async def top(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    rows=DB.execute("SELECT user_id,points FROM users ORDER BY points DESC LIMIT 10").fetchall();await u.message.reply_text("Leaderboard\\n"+"\\n".join(f"{i+1}. {x[0]} — {x[1]}" for i,x in enumerate(rows)))
+async def addpoints(u:Update,c:ContextTypes.DEFAULT_TYPE):
+    if u.effective_user.id!=admin_id() or len(c.args)!=2 or not all(x.lstrip('-').isdigit() for x in c.args):return
+    DB.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)",(int(c.args[0]),));DB.execute("UPDATE users SET points=points+? WHERE user_id=?",(int(c.args[1]),int(c.args[0])));DB.commit();await u.message.reply_text("Points updated.")
+app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build();app.add_handler(CommandHandler("claim",claim));app.add_handler(CommandHandler("start",start));app.add_handler(CommandHandler("ref",ref));app.add_handler(CommandHandler("balance",balance));app.add_handler(CommandHandler("top",top));app.add_handler(CommandHandler("addpoints",addpoints));app.run_polling()
+''', "Growth", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE to unlock admin point controls.","required":True}]),
 
     "telegraf-echo": _item(
         "Telegraf echo", "A minimal Node.js bot with /start and text replies.", "Node.js",

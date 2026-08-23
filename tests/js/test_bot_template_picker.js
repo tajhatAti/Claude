@@ -15,6 +15,11 @@ ok('template strings use textContent, not card innerHTML',/card\.append\(top,des
 ok('templates can request real setup values',/rsTemplateConfigFields/.test(HTML)&&/function _renderTemplateConfig/.test(JS));
 ok('required setup is validated before Continue',/_collectTemplateEnv\(true\)===null/.test(JS));
 ok('setup values join the encrypted deployment env',/_collectTemplateEnv\(false\)/.test(JS)&&/BOT_TOKEN:_rsVerifiedBotToken/.test(JS));
+ok('admin claim codes are generated automatically',/crypto\.getRandomValues/.test(JS)&&/field\.type==="generated"/.test(JS));
+ok('claim code has a one-tap copy action',/copy\.textContent="Copy"/.test(JS)&&/navigator\.clipboard\.writeText/.test(JS));
+ok('review explains exactly how admin identity is learned',/After deploy: claim admin access/.test(JS)&&/\/claim \$\{setupValues\.ADMIN_CLAIM_CODE\}/.test(JS));
+ok('claim command can be copied before deployment',/Copy claim command/.test(JS));
+ok('gallery advertises the full practical catalog',/20 practical bots/.test(HTML));
 console.log('[3] responsive visual');
 ok('desktop uses two-column cards',/\.rs-template-grid \{[^}]*grid-template-columns:1fr 1fr/.test(CSS));
 ok('mobile uses one-column cards',/\.rs-template-grid\{grid-template-columns:1fr\}/.test(CSS));
