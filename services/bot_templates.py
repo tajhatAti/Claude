@@ -827,18 +827,32 @@ async def addpoints(u:Update,c:ContextTypes.DEFAULT_TYPE):
 app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build();app.add_handler(CommandHandler("claim",claim));app.add_handler(CommandHandler("start",start));app.add_handler(CommandHandler("ref",ref));app.add_handler(CommandHandler("balance",balance));app.add_handler(CommandHandler("top",top));app.add_handler(CommandHandler("addpoints",addpoints));app.run_polling()
 ''', "Growth", [{"key":"ADMIN_CLAIM_CODE","type":"generated","label":"One-time admin claim code","help":"After deploy, send /claim CODE to unlock admin point controls.","required":True}], "Send /claim CODE to become admin. Users then use /ref, /balance, and /top."),
 
-    "telegraf-echo": _item(
-        "Telegraf echo", "A minimal Node.js bot with /start and text replies.", "Node.js",
-        "javascript", "Telegraf", '''
-// requirements: telegraf
-const { Telegraf } = require("telegraf");
-const bot = new Telegraf(process.env.BOT_TOKEN);
+    "python-echo": _item(
+        "Python echo", "A clean Python text echo bot with /start.", "Basics",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-bot.start((ctx) => ctx.reply("Your bot is online."));
-bot.on("text", (ctx) => ctx.reply(ctx.message.text));
-bot.launch();
-''', "Node.js"),
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Your Python bot is online.")
+
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(update.message.text[:4096])
+
+app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+app.run_polling()
+''', "Simple"),
 }
+
+# Eighty production-oriented Python starters generated from four reviewed
+# engines: workflow, ledger, catalog and group moderation. Every resulting
+# value is still a standalone one-file bot returned by the public API.
+from services.template_families import build_family_templates
+TEMPLATES.update(build_family_templates())
 
 
 def list_templates():

@@ -5,9 +5,11 @@ from services import bot_templates,telegram_detector
 
 def test_template_catalog_is_practical_safe_and_unique():
     rows=bot_templates.list_templates()
-    assert len(rows)>=21
+    assert len(rows)>=100
+    assert all(r["language"]=="python" for r in rows)
+    assert len({r["category"] for r in rows})>=20
     assert len({r["id"] for r in rows})==len(rows)
-    assert {"Basics","Menus","Groups","Utilities","Storage","Node.js","Growth","Business","Admin","Channels"}.issubset({r["category"] for r in rows})
+    assert {"Basics","Menus","Groups","Utilities","Storage","Growth","Business","Admin","Channels","Booking","CRM","Finance","Operations","Education"}.issubset({r["category"] for r in rows})
     assert sum(1 for r in rows if r.get("requires_setup"))>=6
     for template_id in ("contact-support","admin-broadcast","order-bot","channel-poster","channel-gate","referral-rewards"):
         template=bot_templates.get_template(template_id)
@@ -65,3 +67,20 @@ def test_every_template_parses_in_its_runtime():
                 assert result.returncode==0,result.stderr
             finally:
                 os.unlink(path)
+
+
+def test_advanced_template_families_have_real_state_and_controls():
+    assert len(bot_templates.list_templates()) == 101
+    workflow=bot_templates.get_template("appointment-booking")["code"]
+    for marker in ("ConversationHandler", "CREATE TABLE IF NOT EXISTS history", "export_csv", "set_status", "broadcast", "RetryAfter", "access_guard", "ban"):
+        assert marker in workflow
+    tracker=bot_templates.get_template("expense-tracker")["code"]
+    for marker in ("CREATE TABLE IF NOT EXISTS entries", "summary", "export", "broadcast"):
+        assert marker in tracker
+    catalog=bot_templates.get_template("faq-knowledge-base")["code"]
+    for marker in ("CREATE TABLE IF NOT EXISTS favorites", "search", "categories", "views=views+1"):
+        assert marker in catalog
+    group=bot_templates.get_template("anti-flood-pro")["code"]
+    for marker in ("get_chat_member", "restrict_chat_member", "ban_chat_member", "Recent moderation", "automatic"):
+        assert marker in group
+    assert bot_templates.get_template("anti-flood-pro")["env_fields"] == []

@@ -1,5 +1,7 @@
 # Practical bot template guide
 
+CodeNest includes **101 ready-to-deploy templates, all written in Python**. The catalog combines specialized bots with reviewed workflow, tracker, searchable-catalog, and group-moderation engines. See `TEMPLATE_RESEARCH.md` for source research, architecture decisions, feature coverage, and validation rules.
+
 ## Admin identity without numeric IDs
 
 Templates that need a private owner use a generated, encrypted `ADMIN_CLAIM_CODE`. After token verification CodeNest deploys immediately and builds the **Go to bot** URL with `start=claim_CODE`. The owner taps it and presses Start; Telegram supplies `effective_user.id`, the bot stores that ID in SQLite, and later claim attempts are refused. The user never discovers or types a numeric Telegram ID or claim command.

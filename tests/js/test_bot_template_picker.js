@@ -20,7 +20,7 @@ ok('claim code has a one-tap copy action',/copy\.textContent="Copy"/.test(JS)&&/
 ok('Go to bot deep link claims admin automatically',/start=claim_/.test(JS)&&/setupValues\.ADMIN_CLAIM_CODE/.test(JS));
 ok('token verification immediately deploys',/startJob\(\{launchAfterDeploy:true,launchUrl\}\)/.test(JS));
 ok('template-specific next steps appear during Connect',/item\.after_deploy/.test(JS)&&/rs-template-after/.test(CSS));
-ok('gallery advertises the full practical catalog',/21 practical bots/.test(HTML));
+ok('gallery advertises the full practical catalog',/101 Python bots/.test(HTML));
 console.log('[3] responsive visual');
 ok('desktop uses two-column cards',/\.rs-template-grid \{[^}]*grid-template-columns:1fr 1fr/.test(CSS));
 ok('mobile uses one-column cards',/\.rs-template-grid\{grid-template-columns:1fr\}/.test(CSS));

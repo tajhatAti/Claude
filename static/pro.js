@@ -3779,7 +3779,7 @@ function _resetRunSpaceTelegramDraft(){
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
-  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||21} practical bots`;
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||101} Python bots`;
   _renderTemplateConfig([]);
   _setBotWizardStage("code");
 }
