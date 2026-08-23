@@ -16,7 +16,7 @@ if(!/telegram_bot_username: info\.telegram_bot_username/.test(JS))throw Error('o
 if(!adom.window.document.getElementById('admTelegramSection')||!adom.window.document.querySelector('.adm-section-nav'))throw Error('admin Telegram section/navigation missing');
 if(!/telegram_verification_id=_rsTelegramVerificationId/.test(JS))throw Error('verified proof not sent with bot');
 if(/rs-awaiting-bot/.test(JS+CSS))throw Error('token-first editor lock still exists');
-if(!/Opened .*analyze the bot code next/.test(JS))throw Error('upload does not lead to analysis');
+if(!/Opened .*tap Continue when ready/.test(JS))throw Error('upload does not lead to Continue');
 if(!/Add Bot 🤖/.test(HTML))throw Error('old job creation label remains');
 if(!dom.window.document.getElementById('rsBotHealth')||!/telegram-health/.test(JS))throw Error('live Telegram delivery health is missing');
 if(!dom.window.document.getElementById('jdTabVersions')||!/revisions\/.*\$\{revisionId\}\/rollback/.test(JS))throw Error('version rollback UI is missing');

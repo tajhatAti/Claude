@@ -972,17 +972,18 @@
                 <span data-rs-step="review"><b>3</b> Review &amp; Deploy</span>
               </div>
               <div class="rs-wizard-stage" id="rsTgCodeStage">
-                <div><b>Paste or upload your bot code</b><small>We’ll detect the framework, token usage and polling/webhook mode.</small></div>
+                <div><b>Add your bot code</b><small>Choose a template, upload a file, or paste code below.</small></div>
                 <div class="rs-template-actions">
                   <select class="input-text" id="rsBotTemplate" aria-label="Starter bot template"><option value="">Starter template…</option></select>
                   <button class="btn-ghost" id="rsApplyTemplate" type="button">Use template</button>
-                  <button class="btn-primary" id="rsTgAnalyze" type="button">Analyze code</button>
+                  <button class="btn-primary" id="rsTgAnalyze" type="button">Continue</button>
                 </div>
               </div>
               <div class="rs-analysis-result" id="rsTgAnalysis" hidden></div>
-              <div class="rs-wizard-stage" id="rsTgConnectStage" hidden>
+              <div class="rs-wizard-stage rs-connect-stage" id="rsTgConnectStage" hidden>
+                <div><b>Connect your Telegram bot</b><small>Paste the token from @BotFather. It will be encrypted.</small></div>
                 <label class="field"><span>BotFather token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…" aria-describedby="rsTgPrivacy"></label>
-                <button class="btn-primary" id="rsTgVerify" type="button">Verify &amp; connect</button>
+                <div class="rs-stage-actions"><button class="btn-ghost" id="rsTgBackToCode" type="button">Back</button><button class="btn-primary" id="rsTgVerify" type="button">Verify &amp; continue</button></div>
                 <span class="rs-tg-verify-state" id="rsTgVerifyState"></span>
               </div>
               <div class="rs-wizard-review" id="rsTgReview" hidden></div>

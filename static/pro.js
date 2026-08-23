@@ -3144,9 +3144,7 @@ function initJobCodeMirror() {
         _jobDirty = true;
         if (_composingNew && _rsBotAnalysis) {
           _rsBotAnalysis=null;
-          const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
-          const review=document.getElementById("rsTgReview");if(review)review.hidden=true;
-          _rsWizardStep("code");
+          _setBotWizardStage("code");
         }
         if (_chgRaf) return;
         _chgRaf = requestAnimationFrame(() => {
@@ -3599,6 +3597,20 @@ function _rsWizardStep(step) {
   });
 }
 
+function _setBotWizardStage(stage) {
+  const source=stage==="code",connect=stage==="connect",review=stage==="review";
+  document.body.classList.toggle("rs-step-code",source);
+  document.body.classList.toggle("rs-step-connect",connect);
+  document.body.classList.toggle("rs-step-review",review);
+  const codeStage=document.getElementById("rsTgCodeStage");if(codeStage)codeStage.hidden=!source;
+  const connectStage=document.getElementById("rsTgConnectStage");if(connectStage)connectStage.hidden=!connect;
+  const reviewStage=document.getElementById("rsTgReview");if(reviewStage)reviewStage.hidden=!review;
+  const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=source||review||!_rsBotAnalysis;
+  const privacy=document.getElementById("rsTgPrivacy");if(privacy)privacy.hidden=source;
+  _rsWizardStep(stage);
+  const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
+}
+
 async function _loadRunSpaceBotTemplates() {
   const select=document.getElementById("rsBotTemplate");
   if(!select||select.dataset.loaded)return;
@@ -3618,8 +3630,8 @@ async function _applyRunSpaceBotTemplate() {
     _jobCmSetValue(item.code||"");
     const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
     const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
-    _rsBotAnalysis=null;_rsWizardStep("code");
-    toast("Template loaded — review it, then analyze","success");
+    _rsBotAnalysis=null;_setBotWizardStage("code");
+    toast("Template loaded — review it, then continue","success");
   }catch(e){toast(e.message,"error");}
 }
 
@@ -3635,22 +3647,21 @@ async function _analyzeRunSpaceBot() {
     const box=document.getElementById("rsTgAnalysis");
     if(box){
       box.textContent="";box.hidden=false;
-      const grid=document.createElement("div");grid.className="rs-analysis-grid";
-      [["Framework",data.framework],["Updates",data.update_mode],["Token source",data.token_source],["Runtime",data.language]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v||"unknown";cell.append(sm,b);grid.appendChild(cell);});
-      box.appendChild(grid);
-      const note=document.createElement("div");note.className="rs-analysis-note";
-      note.textContent=data.needs_token_fix
-        ? `A hardcoded/example token${data.token_line?` was found near line ${data.token_line}`:" was found"}. CodeNest will safely change it to read BOT_TOKEN from the environment.`
-        : data.token_source==="environment"
-          ? "Good: this code already reads the token from an environment variable."
-          : "No token reference was found. The verified token will still be provided as BOT_TOKEN.";
-      box.appendChild(note);
+      const summary=document.createElement("div");summary.className="rs-analysis-summary";
+      const mark=document.createElement("span");mark.className="rs-analysis-check";mark.textContent="✓";
+      const copy=document.createElement("div");const title=document.createElement("b");title.textContent="Code ready";
+      const meta=document.createElement("span");meta.textContent=[data.language,data.framework,data.update_mode].filter(v=>v&&v!=="unknown").join(" · ")||"Bot code detected";
+      copy.append(title,meta);summary.append(mark,copy);box.appendChild(summary);
+      if(data.needs_token_fix||data.token_source==="not_found"){
+        const note=document.createElement("div");note.className="rs-analysis-note";
+        note.textContent=data.needs_token_fix?"An example or old token will be secured automatically.":"Your verified token will be provided safely as BOT_TOKEN.";
+        box.appendChild(note);
+      }
     }
-    document.getElementById("rsTgConnectStage").hidden=false;
-    _rsWizardStep("connect");
-    const token=document.getElementById("rsTgToken");if(token)token.focus();
+    _setBotWizardStage("connect");
+    const token=document.getElementById("rsTgToken");if(token)setTimeout(()=>token.focus(),0);
   } catch(e){toast(e.message,"error");}
-  finally{if(btn){btn.disabled=false;btn.textContent="Re-analyze code";}}
+  finally{if(btn){btn.disabled=false;btn.textContent="Continue";}}
 }
 
 async function _verifyRunSpaceTelegramBot() {
@@ -3666,17 +3677,19 @@ async function _verifyRunSpaceTelegramBot() {
     const meta=await api("/api/telegram-bot/verify","POST",{token},true);
     _rsVerifiedBotToken=token;_rsVerifiedBotMeta=meta;
     _rsTelegramVerificationId=meta.telegram_verification_id||"";
-    _renderTelegramBot({...meta,status:"ready to deploy"});
     if(state){state.textContent=`Connected @${meta.telegram_bot_username}`;state.className="rs-tg-verify-state ok";}
     const review=document.getElementById("rsTgReview");
     if(review){
       review.textContent="";review.hidden=false;
       const text=document.createElement("div");text.className="rs-analysis-grid";
       [["Bot",`@${meta.telegram_bot_username}`],["Framework",_rsBotAnalysis.framework],["Updates",_rsBotAnalysis.update_mode],["Token","Verified · stored as secret"]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v;cell.append(sm,b);text.appendChild(cell);});
+      const actions=document.createElement("div");actions.className="rs-stage-actions";
+      const back=document.createElement("button");back.type="button";back.className="btn-ghost";back.textContent="Back";back.addEventListener("click",()=>_setBotWizardStage("connect"));
+      const open=document.createElement("a");open.className="btn-ghost";open.textContent="Open bot";open.href=meta.telegram_bot_url;open.target="_blank";open.rel="noopener noreferrer";
       const deploy=document.createElement("button");deploy.type="button";deploy.className="btn-primary";deploy.id="rsTgDeploy";deploy.textContent="Deploy Bot";deploy.addEventListener("click",startJob);
-      review.append(text,deploy);
+      actions.append(back,open,deploy);review.append(text,actions);
     }
-    _rsWizardStep("review");
+    _setBotWizardStage("review");
   }catch(e){
     _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
     if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
@@ -3688,10 +3701,9 @@ function _resetRunSpaceTelegramDraft(){
   const input=document.getElementById("rsTgToken");if(input)input.value="";
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
-  const connect=document.getElementById("rsTgConnectStage");if(connect)connect.hidden=true;
   const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
-  const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Analyze code";
-  _rsWizardStep("code");
+  const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
+  _setBotWizardStage("code");
 }
 
 const _botHealthCache = new Map();
@@ -4146,7 +4158,7 @@ function selectJob(id) {
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
-  document.body.classList.remove("rs-composing");
+  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review");
   // 👉 Paint sidebar selection + swap to workspace IMMEDIATELY (don't wait for
   // fetch/SSE to round-trip — that's what makes tab switches feel laggy).
   // Data fills in behind the paint with a subtle fade.
@@ -4186,7 +4198,7 @@ function selectJob(id) {
 function deselectJob() {
   _selectedJobId = null;
   _composingNew = false;
-  document.body.classList.remove("rs-composing");
+  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review");
   stopLogStream();
   document.querySelectorAll("#jobsList .job-item.active").forEach(el => el.classList.remove("active"));
   const btn = document.getElementById("btnStartJob");
@@ -4532,6 +4544,8 @@ function _initWbWiring() {
   if(applyTemplate&&!applyTemplate.dataset.wired){applyTemplate.dataset.wired="1";applyTemplate.addEventListener("click",_applyRunSpaceBotTemplate);}
   const tgAnalyze = document.getElementById("rsTgAnalyze");
   if(tgAnalyze && !tgAnalyze.dataset.wired){tgAnalyze.dataset.wired="1";tgAnalyze.addEventListener("click",_analyzeRunSpaceBot);}
+  const backToCode=document.getElementById("rsTgBackToCode");
+  if(backToCode&&!backToCode.dataset.wired){backToCode.dataset.wired="1";backToCode.addEventListener("click",()=>_setBotWizardStage("code"));}
   const tgVerify = document.getElementById("rsTgVerify");
   if(tgVerify && !tgVerify.dataset.wired){tgVerify.dataset.wired="1";tgVerify.addEventListener("click",_verifyRunSpaceTelegramBot);}
   const tgHealth = document.getElementById("rsBotHealth");
@@ -5696,8 +5710,7 @@ async function startJob() {
     return;
   }
   if (!editingId && (!_rsVerifiedBotToken || !_rsTelegramVerificationId)) {
-    document.getElementById("rsTgConnectStage").hidden=false;
-    _rsWizardStep("connect");
+    _setBotWizardStage("connect");
     const token=document.getElementById("rsTgToken");if(token)token.focus();
     toast("Connect the BotFather token before deploying", "error");
     return;
@@ -5759,7 +5772,7 @@ async function startJob() {
     _setHint("ok", "");
     _jobDirty = false;
     _composingNew = false;      // deployed — polling may take over again
-    document.body.classList.remove("rs-composing");
+    document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review");
     // 👉 Optimistic UI update: insert the new job into _lastJobs immediately
     // with status="starting" so sidebar + stats reflect the launch right away
     // instead of waiting 7s for the next poll round. SSE will correct to
@@ -8019,14 +8032,13 @@ async function _rsHandleUpload(file) {
 
   _jobCmSetValue(text);
   _rsBotAnalysis=null;
-  const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
-  _rsWizardStep("code");
+  _setBotWizardStage("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);
 
   if (!lang) {
     toast("Opened " + file.name + " — pick a runtime before running it.", "info");
   } else {
-    toast("Opened " + file.name + " — analyze the bot code next.", "success");
+    toast("Opened " + file.name + " — tap Continue when ready.", "success");
   }
 }
 
