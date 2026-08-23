@@ -2,7 +2,7 @@ const fs=require('fs');
 const HTML=fs.readFileSync('index.html','utf8'),CSS=fs.readFileSync('static/app.css','utf8'),JS=fs.readFileSync('static/pro.js','utf8');
 let pass=0,fail=0;const ok=(n,c,e)=>{if(c)pass++;else{fail++;console.log(`  FAIL ${n}${e?' -> '+e:''}`)}};
 console.log('[1] global navigation remains visible');
-for(const label of ['Home','Code','RunSpace','Menu'])ok(`${label} remains in mobile nav`,new RegExp(`class="bn-l">${label}<`).test(HTML));
+for(const label of ['Home','Code','Bots','Menu'])ok(`${label} remains in mobile nav`,new RegExp(`class="bn-l">${label}<`).test(HTML));
 ok('RunSpace no longer hides the mobile nav',!/body\.rs-active \.bottom-nav \{ display: none !important/.test(CSS));
 ok('mobile RunSpace explicitly shows the nav',/body\.rs-active:not\(\.rs-detail-open\) \.bottom-nav \{ display:flex !important/.test(CSS));
 ok('space is reserved so nav cannot cover editor',/body\.rs-active:not\(\.rs-detail-open\) \.dash-main \{[^}]*padding-bottom:calc\(var\(--bottom-nav-h\)/.test(CSS));

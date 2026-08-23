@@ -103,22 +103,19 @@ for (const width of [1280, 720]) {
      `width=${mainW} flex=${cs(w, main).flex}`);
 }
 
-/* ── 2. OPENING THE RAIL DOES NOT SHRINK THE EDITOR ────────────────────── */
-console.log('\n[2] opening the job list floats over, it does not push');
+/* ── 2. THE UNIFIED MENU NEVER SHRINKS THE EDITOR ─────────────────────── */
+console.log('\n[2] bot switching stays in the compact menu');
 for (const width of [1280, 720]) {
   const dom = build(width), w = dom.window, d = w.document;
   const side = d.getElementById('wbSide');
+  const menu = d.getElementById('rsMoreMenu');
   const main = d.querySelector('#tab-jobs .rs-main');
   const before = cs(w, main).width;
   d.body.classList.add('rs-side-open');
-  ok(`[${width}] the rail opens`, !closed(w, side), cs(w, side).transform);
-  ok(`[${width}] the editor width is unchanged while it is open`,
-     cs(w, main).width === before, `${before} -> ${cs(w, main).width}`);
-  ok(`[${width}] the rail is above the editor`,
-     Number(cs(w, side).zIndex || 0) >= 800, cs(w, side).zIndex);
-  d.body.classList.remove('rs-side-open');
-  d.body.classList.add('rs-side-collapsed');
-  ok(`[${width}] collapsed closes it too`, closed(w, side));
+  ok(`[${width}] legacy rail stays visually removed`, cs(w, side).display === 'none', cs(w, side).display);
+  menu.removeAttribute('hidden');
+  ok(`[${width}] compact menu is out of document flow`, ['absolute','fixed'].includes(cs(w, menu).position), cs(w, menu).position);
+  ok(`[${width}] editor width is unchanged while menu is open`, cs(w, main).width === before, `${before} -> ${cs(w, main).width}`);
 }
 
 /* ── 3. NO OVERLAPPING BUTTONS ─────────────────────────────────────────── */

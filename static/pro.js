@@ -3590,7 +3590,7 @@ let _rsTelegramVerificationId = "";
 let _rsBotAnalysis = null;
 
 function _rsWizardStep(step) {
-  const order=["code","connect","review","deploy"];
+  const order=["code","connect","review"];
   const at=Math.max(0,order.indexOf(step));
   document.querySelectorAll("#rsTgSetup [data-rs-step]").forEach(el=>{
     const i=order.indexOf(el.dataset.rsStep);
@@ -3694,20 +3694,47 @@ function _resetRunSpaceTelegramDraft(){
   _rsWizardStep("code");
 }
 
-async function _checkRunSpaceBotHealth() {
-  const btn=document.getElementById("rsBotHealth");
-  const state=document.getElementById("rsBotState");
-  if(!_selectedJobId)return;
-  try{
-    if(btn){btn.disabled=true;btn.textContent="Checking…";}
-    const h=await api(`/api/jobs/${_selectedJobId}/telegram-health`,"GET",null,true);
-    const labels={healthy:"Webhook healthy",running_unconfirmed:"Process running · waiting for Telegram activity signal",duplicate_poller:"Blocked: another server is polling this token",webhook_conflict:"Polling blocked by an active webhook",webhook_missing:"Webhook mode detected, but no webhook is configured",webhook_error:"Telegram reports a webhook error",invalid_token:"Token rejected by Telegram",telegram_ready:"Telegram ready",unknown:"Health unknown"};
-    if(state)state.textContent=labels[h.delivery_status]||h.delivery_status;
-    const box=document.getElementById("rsBotCallout");
-    if(box){box.classList.toggle("is-bad",["duplicate_poller","webhook_conflict","webhook_missing","webhook_error","invalid_token"].includes(h.delivery_status));box.classList.toggle("is-live",h.process_status==="running"&&!box.classList.contains("is-bad"));}
-  }catch(e){if(state)state.textContent=e.message;}
-  finally{if(btn){btn.disabled=false;btn.textContent="Check health";}}
+const _botHealthCache = new Map();
+let _botHealthTimer = null;
+
+function _botHealthLabel(h) {
+  const labels={healthy:"Webhook healthy",running_unconfirmed:"Process running · delivery not yet confirmed",duplicate_poller:"Another server is polling this token",webhook_conflict:"Polling blocked by an active webhook",webhook_missing:"Webhook is not configured",webhook_error:"Telegram reports a webhook error",invalid_token:"Token rejected by Telegram",telegram_ready:"Telegram verified",unknown:"Health unknown"};
+  return labels[(h&&h.delivery_status)||"unknown"]||h.delivery_status;
 }
+
+function _applyRunSpaceBotHealth(h) {
+  const label=_botHealthLabel(h);
+  const state=document.getElementById("rsBotState");if(state)state.textContent=label;
+  const menuState=document.getElementById("rsMenuBotState");if(menuState)menuState.textContent=label;
+  const bad=["duplicate_poller","webhook_conflict","webhook_missing","webhook_error","invalid_token"].includes(h.delivery_status);
+  const live=h.process_status==="running"&&!bad;
+  const box=document.getElementById("rsBotCallout");if(box){box.classList.toggle("is-bad",bad);box.classList.toggle("is-live",live);}
+  const dot=document.getElementById("rsMenuStatusDot");if(dot)dot.className="rs-menu-status-dot"+(bad?" problem":live?" running":h.process_status==="starting"?" starting":"");
+}
+
+async function _checkRunSpaceBotHealth(options) {
+  options=options||{};
+  const id=String(options.id||_selectedJobId||"");
+  const btn=document.getElementById("rsBotHealth");
+  if(!id)return;
+  const cached=_botHealthCache.get(id);
+  if(!options.force&&cached&&Date.now()-cached.at<45000){if(String(_selectedJobId)===id)_applyRunSpaceBotHealth(cached.data);return;}
+  try{
+    if(btn&&String(_selectedJobId)===id){btn.disabled=true;btn.textContent="Checking…";}
+    const h=await api(`/api/jobs/${id}/telegram-health`,"GET",null,true);
+    _botHealthCache.set(id,{at:Date.now(),data:h});
+    if(String(_selectedJobId)===id)_applyRunSpaceBotHealth(h);
+  }catch(e){
+    if(!options.silent&&String(_selectedJobId)===id){const state=document.getElementById("rsBotState");if(state)state.textContent=e.message;}
+  }finally{if(btn&&String(_selectedJobId)===id){btn.disabled=false;btn.textContent="Check health";}}
+}
+
+function _startBotHealthPolling(){
+  if(_botHealthTimer)clearInterval(_botHealthTimer);
+  setTimeout(()=>_checkRunSpaceBotHealth({silent:true}),300);
+  _botHealthTimer=setInterval(()=>{if(!document.hidden&&_selectedJobId)_checkRunSpaceBotHealth({silent:true});},60000);
+}
+function _stopBotHealthPolling(){if(_botHealthTimer){clearInterval(_botHealthTimer);_botHealthTimer=null;}}
 
 function _renderTelegramBot(job) {
   const box=document.getElementById("rsBotCallout");
@@ -3863,8 +3890,10 @@ function _renderMenuBotStatus(job, stKey, st) {
   const state=document.getElementById("rsMenuBotState");
   const problem=stKey==="crashed"||stKey==="install_failed";
   const starting=stKey==="starting"||stKey==="installing"||stKey==="restarting";
-  if(state)state.textContent=problem?"Needs attention — open Logs":stKey==="running"?"Running normally":starting?"Starting…":"Stopped";
+  if(state)state.textContent=problem?"Needs attention — open Logs":stKey==="running"?"Process running · checking Telegram…":starting?"Starting…":"Stopped";
   const dot=document.getElementById("rsMenuStatusDot");if(dot){dot.className="rs-menu-status-dot"+(problem?" problem":stKey==="running"?" running":starting?" starting":"");}
+  const cached=_botHealthCache.get(String(job.id));
+  if(cached&&Date.now()-cached.at<45000)_applyRunSpaceBotHealth(cached.data);
 }
 
 // Reflect current job status onto toolbar action buttons + sidebar dots + log dot.
@@ -3908,12 +3937,12 @@ function _reflectJobStatus(jobOrId) {
     el.style.display = on ? "" : "none";
   };
   if (btnRun) {
-    _show(btnRun, !detailsPrimary);
+    _show(btnRun, !!isSelected && !detailsPrimary);
     // Visual "dirty" marker when code has been edited since last Run
     btnRun.classList.toggle("dirty", !!_jobDirty && !!isSelected);
     const lbl = btnRun.querySelector(".rs-seg-label") || btnRun.querySelector(".rs-btn-label");
     if (lbl && !btnRun.classList.contains("loading")) {
-      lbl.textContent = _jobDirty ? "Save & run" : "Run";
+      lbl.textContent = _jobDirty ? "Save changes & run" : "Start bot";
     }
   }
   _show(btnDet,  !!isSelected);
@@ -3934,7 +3963,7 @@ function _reflectJobStatus(jobOrId) {
   // The action group itself disappears when nothing is open, instead of
   // leaving an empty bordered shell in the header.
   const seg = document.getElementById("rsJobActions");
-  if (seg) seg.hidden = !(isSelected || !detailsPrimary);
+  if (seg) seg.hidden = !isSelected;
   const closeBtn = document.getElementById("btnDeselect");
   _show(closeBtn, !!isSelected || !!_composingNew);
 
@@ -4144,6 +4173,7 @@ function selectJob(id) {
   // Kick off data + log stream but DON'T await them. Instant visual response.
   fetchJobDetail(id).finally(() => _progressDone());
   restartLogStream(id);
+  setTimeout(()=>_checkRunSpaceBotHealth({id,silent:true}),250);
   requestAnimationFrame(() => { try { _jobCmRefresh(); } catch(e){} });
   // The list already carries the name; update the address immediately instead
   // of adding an artificial 120ms delay after every click.
@@ -4505,7 +4535,7 @@ function _initWbWiring() {
   const tgVerify = document.getElementById("rsTgVerify");
   if(tgVerify && !tgVerify.dataset.wired){tgVerify.dataset.wired="1";tgVerify.addEventListener("click",_verifyRunSpaceTelegramBot);}
   const tgHealth = document.getElementById("rsBotHealth");
-  if(tgHealth && !tgHealth.dataset.wired){tgHealth.dataset.wired="1";tgHealth.addEventListener("click",_checkRunSpaceBotHealth);}
+  if(tgHealth && !tgHealth.dataset.wired){tgHealth.dataset.wired="1";tgHealth.addEventListener("click",()=>_checkRunSpaceBotHealth({force:true}));}
 
   const onNew = (ev) => {
     if (ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -4607,7 +4637,7 @@ function _initWbWiring() {
       _closeJobsRail();
       _rsJobsPopRender();
       const current=(window._lastJobs||[]).find(j=>String(j.id)===String(_selectedJobId));
-      if(current)_reflectJobStatus(current);else _renderMenuBotStatus(null,"stopped",{});
+      if(current){_reflectJobStatus(current);_checkRunSpaceBotHealth({id:current.id,silent:true});}else _renderMenuBotStatus(null,"stopped",{});
       moreMenu.hidden = false;
       moreBtn.setAttribute("aria-expanded", "true");
       document.body.classList.add("rs-menu-open");
@@ -5867,8 +5897,8 @@ async function deleteJobById(id, btn) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-function startJobPolling()  { loadJobs(); if (_jobsTimer) clearInterval(_jobsTimer); _jobsTimer = setInterval(loadJobs, 15000); }
-function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobsTimer = null; } }
+function startJobPolling()  { loadJobs(); if (_jobsTimer) clearInterval(_jobsTimer); _jobsTimer = setInterval(loadJobs, 15000); _startBotHealthPolling(); }
+function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobsTimer = null; } _stopBotHealthPolling(); }
 
 // Refresh CM when switching TO the jobs tab (CM needs a refresh any time it
 // transitions from display:none to visible otherwise it paints blank).

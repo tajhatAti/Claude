@@ -1711,7 +1711,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
    test_runspace_shell guards against them coming back.) */
 #tab-jobs .rs-meta { flex-wrap: nowrap; overflow-x: auto; }
 .rs-bot-wizard { contain:layout paint; border-bottom:1px solid var(--line); padding:10px 12px; background:var(--card); }
-.rs-wizard-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:10px; }
+.rs-wizard-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; }
 .rs-wizard-steps span { display:flex; align-items:center; gap:6px; min-width:0; padding:7px 8px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-3); font-size:var(--fs-2); white-space:nowrap; }
 .rs-wizard-steps span b { width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:var(--card-2); }
 .rs-wizard-steps span.is-active { border-color:#229ED9; color:var(--fg); background:color-mix(in srgb,#229ED9 9%,transparent); }
@@ -1741,7 +1741,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
 .rs-bot-callout.is-bad { border-left:3px solid var(--danger); }
 .rs-bot-health { margin-left:auto; min-height:36px; padding:0 10px; border:1px solid var(--line); border-radius:var(--pill); color:var(--fg-2); }
 .rs-bot-go { flex:0 0 auto; min-height:36px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--pill); background:#229ED9; color:white; font-weight:650; text-decoration:none; }
-@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:1fr 1fr}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-template-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.rs-template-actions select{grid-column:1/-1;width:100%}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-health{margin-left:42px;min-height:44px}.rs-bot-go{flex:1;justify-content:center;min-height:44px} }
+@media(max-width:560px){ .rs-wizard-steps{grid-template-columns:repeat(3,minmax(0,1fr))}.rs-wizard-steps span{white-space:normal;justify-content:center;text-align:center;padding:7px 4px;font-size:11px}.rs-wizard-stage{align-items:stretch;flex-direction:column}.rs-wizard-stage .btn-primary{width:100%;min-height:44px}.rs-template-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.rs-template-actions select{grid-column:1/-1;width:100%}.rs-analysis-grid{grid-template-columns:1fr 1fr}.rs-bot-callout{align-items:flex-start;flex-wrap:wrap}.rs-bot-copy{flex:1}.rs-bot-health{margin-left:42px;min-height:44px}.rs-bot-go{flex:1;justify-content:center;min-height:44px} }
 #tab-jobs .rs-tb, #tab-jobs .rs-seg { overflow-x: auto; }
 #btnStartJob.loading { pointer-events: none; opacity: .7; }
 #btnStartJob.dirty   { border-color: var(--warn); }
@@ -3606,7 +3606,8 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
    and duplicate header Run button. The panel is deliberately compact; blur is
    limited to this small surface, never the editor or scrolling page. */
 #tab-jobs #wbMenuBtn,
-#tab-jobs #btnRunQuick { display:none !important; }
+#tab-jobs #btnRunQuick,
+#tab-jobs #btnInspector { display:none !important; }
 #tab-jobs #rsMoreBtn { width:40px; height:40px; border:1px solid var(--line-2); background:var(--card-2); }
 #tab-jobs #rsMoreMenu {
   width:310px;
@@ -3631,7 +3632,11 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
 #tab-jobs .rs-menu-current-copy b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #tab-jobs .rs-menu-current-copy span { color:var(--fg-3); font-size:var(--t-xs); }
 #tab-jobs .rs-menu-section-label { padding:7px 9px 4px; color:var(--fg-3); font-family:var(--mono); font-size:var(--t-xs); letter-spacing:.11em; text-transform:uppercase; }
-#tab-jobs #rsUnifiedBotList { max-height:190px; overflow-y:auto; overscroll-behavior:contain; }
+#tab-jobs #rsUnifiedBotList { overflow:visible; }
+/* The old rail is retained only as a compatibility data mirror. It has no
+   visual entry point; the unified glass panel is the sole bot switcher. */
+#tab-jobs #wbSide,
+#tab-jobs .rs-menu-backdrop { display:none !important; }
 #tab-jobs .rs-jp-item { min-height:42px; padding-right:5px; }
 #tab-jobs .rs-jp-delete { width:32px; height:32px; flex:0 0 auto; display:grid; place-items:center; border:0; border-radius:var(--r-sm); color:var(--fg-3); }
 #tab-jobs .rs-jp-delete:hover { background:var(--danger-dim); color:var(--danger); }

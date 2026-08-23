@@ -501,7 +501,7 @@
       <div class="tab-group">Create</div>
       <button title="Overview" class="dash-tab active" data-tab="overview"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span class="tab-tx">Overview</span></button>
       <button title="Code Studio" class="dash-tab" data-tab="code"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8l-4.5 4L9 16M15 8l4.5 4L15 16"/></svg><span class="tab-tx">Code</span></button>
-      <button title="RunSpace — free 24/7 hosting" class="dash-tab" data-tab="jobs"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg><span class="tab-tx">RunSpace</span></button>
+      <button title="Bots — Telegram bot hosting" class="dash-tab" data-tab="jobs"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg><span class="tab-tx">Bots</span></button>
       <div class="tab-sep"></div>
       <div class="tab-group">Account</div>
       <button class="dash-tab dash-act tab-secondary" type="button" id="btnActivitySide" title="Activity"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg><span class="tab-tx">Activity</span></button>
@@ -733,7 +733,7 @@
         <!-- Identity: dot + name. Truncates; never wraps, never pushes. -->
         <div class="rs-id" id="rsIdentity">
           <span class="rs-status-dot" id="wbRunnerStat" title="Status"></span>
-          <button type="button" class="rs-crumb-root" id="rsCrumbRoot">RunSpace</button>
+          <button type="button" class="rs-crumb-root" id="rsCrumbRoot">Bots</button>
           <span class="rs-crumb-sep" id="rsCrumbSep" hidden>/</span>
           <span class="rs-crumb-cur" id="rsTitle" hidden></span>
           <span class="rs-chip" id="rsHeadState" hidden></span>
@@ -816,13 +816,13 @@
 
             <button class="rs-menu-item" id="btnFullDetails" role="menuitem" hidden>
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h7v7"/><path d="M13 3 7 9"/><path d="M11 9.5V13H3V5h3.5"/></svg>
-              <span class="rs-seg-label">Full details page</span>
+              <span class="rs-seg-label">Bot details</span>
             </button>
 
-            <button class="rs-menu-item" id="btnInspector" role="menuitem"
-                    aria-expanded="false" aria-controls="wbInspector" hidden>
-              <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.4" y="2.4" width="13.2" height="11.2" rx="2"/><path d="M10.2 2.4v11.2"/></svg>
-              <span class="rs-seg-label">Details</span>
+            <!-- Legacy inspector trigger retained for compatibility but hidden;
+                 Bot details is the single user-facing details action. -->
+            <button class="rs-menu-item" id="btnInspector" role="menuitem" aria-expanded="false" aria-controls="wbInspector" hidden aria-hidden="true">
+              <span class="rs-seg-label">Inspector</span>
             </button>
 
             <!-- Runtime lives in the menu rather than a second toolbar row:
@@ -871,7 +871,7 @@
             </button>
             <button class="rs-menu-item" id="btnDeselect" role="menuitem" hidden>
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 4 4 12"/><path d="m4 4 8 8"/></svg>
-              <span class="rs-seg-label">Close job</span>
+              <span class="rs-seg-label">Back to bots</span>
             </button>
           </div>
         </div>
@@ -967,10 +967,9 @@
             </div>
             <section class="rs-bot-wizard" id="rsTgSetup" aria-label="Add Telegram bot">
               <div class="rs-wizard-steps" aria-label="Setup progress">
-                <span class="is-active" data-rs-step="code"><b>1</b> Code</span>
-                <span data-rs-step="connect"><b>2</b> Connect bot</span>
-                <span data-rs-step="review"><b>3</b> Review</span>
-                <span data-rs-step="deploy"><b>4</b> Deploy</span>
+                <span class="is-active" data-rs-step="code"><b>1</b> Source</span>
+                <span data-rs-step="connect"><b>2</b> Connect</span>
+                <span data-rs-step="review"><b>3</b> Review &amp; Deploy</span>
               </div>
               <div class="rs-wizard-stage" id="rsTgCodeStage">
                 <div><b>Paste or upload your bot code</b><small>We’ll detect the framework, token usage and polling/webhook mode.</small></div>
@@ -1484,7 +1483,7 @@
   <nav class="bottom-nav" id="bottomNav">
     <button class="bn-item active" data-tab="overview"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/></svg></span><span class="bn-l">Home</span></button>
     <button class="bn-item" data-tab="code"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8l-4.5 4L9 16M15 8l4.5 4L15 16"/></svg></span><span class="bn-l">Code</span></button>
-    <button class="bn-item" data-tab="jobs"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span><span class="bn-l">RunSpace</span></button>
+    <button class="bn-item" data-tab="jobs"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span><span class="bn-l">Bots</span></button>
     <button class="bn-item" data-tab="more" id="bnMore"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span><span class="bn-l">Menu</span></button>
   </nav>
   <!-- (the old "more sheet" was removed — the left drawer is the ONE mobile menu;
