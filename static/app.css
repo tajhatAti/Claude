@@ -3734,3 +3734,84 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
 #tab-jobs .jd-top .jd-more-wrap,
 #tab-jobs .jd-top #jdStart { display: none; }
 #tab-jobs .jd-top .jd-back { display: inline-flex; }
+
+/* ═════════════════════ TELEGRAM-BOT PRODUCT SHELL ═══════════════════════
+   The authenticated product now has one primary destination (Bots) and one
+   primary action (Add Bot). The old general-purpose dashboard and Code
+   Studio remain addressable for backwards compatibility, but no longer
+   compete in the main navigation. */
+.product-legacy { display: none !important; }
+.bot-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 820px; margin-inline: auto; }
+
+.dash-add-bot,
+.rs-add-top {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--acc-fg);
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: -.01em;
+}
+.dash-add-bot span,
+.rs-add-top span { font-size: 20px; font-weight: 500; line-height: 1; }
+.dash-account-btn,
+.rs-account-top {
+  width: 40px;
+  height: 40px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--fg-2);
+}
+.dash-account-btn svg { width: 20px; height: 20px; }
+.rs-account-top svg { width: 18px; height: 18px; }
+.rs-product-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.rs-product-actions + .rs-more-wrap { margin-left: 0; }
+
+/* RunSpace is the product, not a tab inside a generic dashboard. Its own
+   single header becomes the top chrome, removing the previous double-header. */
+body.rs-active .dash-bar { display: none !important; }
+body.rs-active .dash-main { height: 100dvh; }
+
+.bot-bottom-nav .bn-item { position: relative; }
+.bot-bottom-nav .bn-add { color: var(--fg); }
+.bn-add-circle {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--acc-fg);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1;
+}
+.bot-bottom-nav .bn-add:active .bn-add-circle { transform: scale(.92); }
+
+@media (max-width: 760px) {
+  .bot-steps { grid-template-columns: 1fr; }
+  .rs-product-actions { display: none; }
+  .bot-bottom-nav {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 5px 7px;
+    border-radius: 18px;
+  }
+  .bot-bottom-nav .bn-item { height: 52px; }
+  .bot-bottom-nav .bn-item.active { background: var(--card-2); color: var(--fg); box-shadow: none; }
+  .bot-bottom-nav .bn-add { transform: translateY(-5px); }
+}

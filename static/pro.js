@@ -7,7 +7,7 @@ const API = "";
 let signupUsername = "";
 let authToken = localStorage.getItem("ahad_token") || null;
 let resendTimerInterval = null;
-let currentTab = "overview";
+let currentTab = "jobs";
 let editingSnippetId = null;
 let _livePreviewTimer = null;
 
@@ -136,7 +136,7 @@ function switchTab(tabId) {
   const t = document.getElementById(`tab-${tabId}`);
   t.classList.add("active");
   // Sync mobile bottom-nav highlight (map extra tabs back to "more").
-  const map = { profile: "more", admin: "more" };
+  const map = { admin: "profile" };
   document.querySelectorAll(".bn-item").forEach(b => {
     b.classList.toggle("active", b.dataset.tab === (map[tabId] || tabId));
   });
@@ -153,6 +153,16 @@ function switchTab(tabId) {
     const p = TAB_PATHS[tabId];
     if (p) { try { if (_clientPath() !== p) history.pushState({ tab: tabId }, "", p); } catch (e2) {} }
   }
+}
+
+/* The product has one primary action. Every visible Add Bot control uses
+   this helper so desktop, mobile and deep links enter the same wizard. */
+function openAddBot() {
+  if (currentTab !== "jobs") switchTab("jobs");
+  // switchTab starts the jobs load synchronously; the persistent rail button
+  // is already in the DOM and owns the one canonical new-bot implementation.
+  const button = document.getElementById("btnNew");
+  if (button) button.click();
 }
 
 /* ---------------- TOAST ---------------- */
@@ -2414,7 +2424,7 @@ async function loadStats() {
      • links can be bookmarked/shared; logged-out visits to protected paths
        bounce to /sign-in and RETURN after successful login. */
 const ROUTES = {
-  "/dashboard": "overview", "/code": "code",
+  "/bots": "jobs", "/dashboard": "jobs", "/code": "code",
   "/runspace": "jobs", "/jobs": "jobs",
   "/terminal": "term", "/term": "term",
   "/admin": "admin", "/profile": "profile",
@@ -2466,7 +2476,7 @@ function routeFromUrl() {
       return "blocked";
     }
     showScreen("screen-dashboard");
-    if (currentTab !== "overview") _switch("overview");
+    if (currentTab !== "jobs") _switch("jobs");
     if (typeof openActivityPanel === "function") openActivityPanel();
     return "tab";
   }
@@ -2511,16 +2521,17 @@ function routeFromUrl() {
   }
   if (AUTH_ROUTES[p]) {
     if (hasToken) {                                 // signed-in users skip auth screens
-      history.replaceState({}, "", "/dashboard");
+      history.replaceState({}, "", "/bots");
       showScreen("screen-dashboard");
-      if (currentTab !== "overview") _switch("overview");
+      if (currentTab !== "jobs") _switch("jobs");
       return "tab";
     }
     showScreen(AUTH_ROUTES[p]);
     return "auth";
   }
-  if (p === "/" && hasToken) {                      // SaaS convention: / → /dashboard
-    try { history.replaceState({}, "", "/dashboard"); } catch (e3) {}
+  if (p === "/" && hasToken) {
+    try { history.replaceState({}, "", "/bots"); } catch (e3) {}
+    if (currentTab !== "jobs") _switch("jobs");
     return "tab";
   }
   return null;
@@ -2542,8 +2553,8 @@ function _consumeReturnTo() {
     // section while the dashboard was still loading (e.g. quick-click on
     // RunSpace right after sign-in) — the URL is the user's truth.
     const cur = _clientPath();
-    if (!ROUTES[cur] && cur !== "/dashboard") {
-      try { history.replaceState({}, "", "/dashboard"); } catch (e4) {}
+    if (!ROUTES[cur] && cur !== "/bots" && cur !== "/dashboard") {
+      try { history.replaceState({}, "", "/bots"); } catch (e4) {}
     }
   }
 }
@@ -2718,9 +2729,16 @@ document.addEventListener("DOMContentLoaded", () => {
     tab.addEventListener("click", () => switchTab(tab.dataset.tab));
   });
 
-  // Mobile bottom-nav items
-  document.querySelectorAll(".bn-item").forEach(b => {
+  // Mobile bottom-nav destinations. Add Bot is an action, not a fake tab.
+  document.querySelectorAll(".bn-item[data-tab]").forEach(b => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
+  const bnAddBot = document.getElementById("bnAddBot");
+  if (bnAddBot) bnAddBot.addEventListener("click", openAddBot);
+  const rsAccountMenu = document.getElementById("rsAccountMenu");
+  if (rsAccountMenu) rsAccountMenu.addEventListener("click", () => {
+    if (typeof closeRsMoreMenu === "function") closeRsMoreMenu();
+    switchTab("profile");
   });
 
   // Password strength
@@ -6145,10 +6163,10 @@ function applyAdminVisibility(profile) {
   // it), bounce anyone sitting on it, and scrub the /admin URL + any saved
   // deep-link so the address bar never advertises it either.
   if (sect && !_adminSectHtml) _adminSectHtml = sect.outerHTML;
-  if (currentTab === "admin") switchTab("overview");
+  if (currentTab === "admin") switchTab("jobs");
   if (sect) sect.remove();
   try {
-    if (_clientPath() === "/admin") history.replaceState({}, "", "/dashboard");
+    if (_clientPath() === "/admin") history.replaceState({}, "", "/bots");
     if (sessionStorage.getItem("ahad_return_to") === "/admin") sessionStorage.removeItem("ahad_return_to");
   } catch (e) {}
 }
