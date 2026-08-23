@@ -1,6 +1,6 @@
 # Practical bot template guide
 
-CodeNest includes **101 ready-to-deploy templates, all written in Python**. The catalog combines specialized bots with reviewed workflow, tracker, searchable-catalog, and group-moderation engines. See `TEMPLATE_RESEARCH.md` for source research, architecture decisions, feature coverage, and validation rules.
+CodeNest includes **101 ready-to-deploy templates, all written in Python**. The ranked catalog focuses on AI, Bangladesh commerce, live public APIs, channel growth, moderation, files/security, referrals, and support. Generic reminders, notes, habit/water trackers, URL checkers, and echo/command demos are not included. See `TEMPLATE_RESEARCH.md` for demand research, API sources, architecture decisions, and validation rules.
 
 ## Admin identity without numeric IDs
 

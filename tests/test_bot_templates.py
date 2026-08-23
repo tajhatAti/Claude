@@ -1,4 +1,4 @@
-import os,sys,subprocess,tempfile
+import ast,os,sqlite3,sys,subprocess,tempfile
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services import bot_templates,telegram_detector
 
@@ -9,7 +9,7 @@ def test_template_catalog_is_practical_safe_and_unique():
     assert all(r["language"]=="python" for r in rows)
     assert len({r["category"] for r in rows})>=20
     assert len({r["id"] for r in rows})==len(rows)
-    assert {"Basics","Menus","Groups","Utilities","Storage","Growth","Business","Admin","Channels","Booking","CRM","Finance","Operations","Education"}.issubset({r["category"] for r in rows})
+    assert {"Groups","Growth","Business","Admin","Channels","Finance","Education","AI","Commerce","Files","Islamic","Developer","Security","Sports","Bangladesh"}.issubset({r["category"] for r in rows})
     assert sum(1 for r in rows if r.get("requires_setup"))>=6
     for template_id in ("contact-support","admin-broadcast","order-bot","channel-poster","channel-gate","referral-rewards"):
         template=bot_templates.get_template(template_id)
@@ -69,18 +69,57 @@ def test_every_template_parses_in_its_runtime():
                 os.unlink(path)
 
 
-def test_advanced_template_families_have_real_state_and_controls():
-    assert len(bot_templates.list_templates()) == 101
-    workflow=bot_templates.get_template("appointment-booking")["code"]
-    for marker in ("ConversationHandler", "CREATE TABLE IF NOT EXISTS history", "export_csv", "set_status", "broadcast", "RetryAfter", "access_guard", "ban"):
-        assert marker in workflow
-    tracker=bot_templates.get_template("expense-tracker")["code"]
-    for marker in ("CREATE TABLE IF NOT EXISTS entries", "summary", "export", "broadcast"):
-        assert marker in tracker
-    catalog=bot_templates.get_template("faq-knowledge-base")["code"]
-    for marker in ("CREATE TABLE IF NOT EXISTS favorites", "search", "categories", "views=views+1"):
-        assert marker in catalog
-    group=bot_templates.get_template("anti-flood-pro")["code"]
-    for marker in ("get_chat_member", "restrict_chat_member", "ban_chat_member", "Recent moderation", "automatic"):
-        assert marker in group
-    assert bot_templates.get_template("anti-flood-pro")["env_fields"] == []
+def test_ranked_products_replace_quantity_first_fillers():
+    rows=bot_templates.list_templates()
+    assert len(rows) == 101
+    assert [r["id"] for r in rows[:6]] == [
+        "ai-business-bangla", "bd-online-shop", "paid-channel-manager",
+        "contact-support", "master-referral", "group-helper",
+    ]
+    retired={"appointment-booking","expense-tracker","habit-tracker","water-log","notes-bot","reminder-bot","command-bot","url-checker"}
+    assert not retired & {r["id"] for r in rows}
+    assert all(bot_templates.get_template(slug) is None for slug in retired)
+
+
+def test_premium_products_have_real_integrations_and_controls():
+    ai=bot_templates.get_template("ai-business-bangla")["code"]
+    for marker in ("/chat/completions", "AI_API_KEY", "CREATE TABLE IF NOT EXISTS memory", "daily_limit", "RetryAfter", "broadcast"):
+        assert marker in ai
+    shop=bot_templates.get_template("bd-online-shop")["code"]
+    for marker in ("CREATE TABLE IF NOT EXISTS products", "CREATE TABLE IF NOT EXISTS cart", "CREATE TABLE IF NOT EXISTS orders", "stock=stock-", "PAYMENT_URL", "Payment review"):
+        assert marker in shop
+    cricket=bot_templates.get_template("live-cricket-bangladesh")["code"]
+    assert "api.cricapi.com" in cricket and "DATA_API_KEY" in cricket and "CREATE TABLE IF NOT EXISTS cache" in cricket
+    quran=bot_templates.get_template("bangla-quran-search")["code"]
+    assert "api.alquran.cloud" in quran and "bn.bengali" in quran
+    bd_law=bot_templates.get_template("bangladesh-laws-search")["code"]
+    assert "bd-laws-api.bdit.community" in bd_law
+    channel=bot_templates.get_template("paid-channel-manager")["code"]
+    for marker in ("get_chat_member", "run_once", "publish_at", "delete_after", "referrer", "setchannel", "subscriptions", "create_chat_invite_link", "expire_members", "post_init(restore)", "RetryAfter"):
+        assert marker in channel
+    media=bot_templates.get_template("virus-total-scanner")["code"]
+    assert "virustotal.com/api/v3/files" in media and "20*1024*1024" in media and "not retained" in media
+
+
+def test_all_promoted_integrations_declare_required_secrets():
+    for slug,key in (("ai-business-bangla","AI_API_KEY"),("live-cricket-bangladesh","DATA_API_KEY"),("virus-total-scanner","MEDIA_API_KEY")):
+        assert key in {f["key"] for f in bot_templates.get_template(slug)["env_fields"]}
+
+
+def test_every_embedded_sql_schema_executes_in_sqlite():
+    """Compile checks do not catch malformed SQL; execute every static schema."""
+    checked=0
+    for row in bot_templates.list_templates():
+        tree=ast.parse(bot_templates.get_template(row["id"])["code"])
+        db=sqlite3.connect(":memory:")
+        for node in ast.walk(tree):
+            if not isinstance(node,ast.Call) or not isinstance(node.func,ast.Attribute) or not node.args:
+                continue
+            if node.func.attr not in ("execute","executescript") or not isinstance(node.args[0],ast.Constant) or not isinstance(node.args[0].value,str):
+                continue
+            sql=node.args[0].value.strip()
+            if not sql.upper().startswith(("CREATE ","PRAGMA ")):
+                continue
+            (db.executescript(sql) if node.func.attr=="executescript" else db.execute(sql));checked+=1
+        db.close()
+    assert checked>=100

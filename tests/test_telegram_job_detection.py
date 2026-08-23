@@ -75,7 +75,7 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     templates=client.get("/api/telegram-bot/templates",headers=headers)
     assert templates.status_code==200 and len(templates.json()["templates"])>=21
     assert all(t.get("description") and t.get("category") for t in templates.json()["templates"])
-    starter=client.get("/api/telegram-bot/templates/aiogram-echo",headers=headers).json()
+    starter=client.get("/api/telegram-bot/templates/ai-business-bangla",headers=headers).json()
     assert "BOT_TOKEN" in starter["code"] and TOKEN not in starter["code"]
     analyzed=client.post("/api/telegram-bot/analyze",headers=headers,json={"language":"python","code":"from telegram.ext import ApplicationBuilder\nTOKEN='example'\nApplicationBuilder().token(TOKEN).run_polling()"})
     assert analyzed.status_code==200 and analyzed.json()["framework"]=="python-telegram-bot"

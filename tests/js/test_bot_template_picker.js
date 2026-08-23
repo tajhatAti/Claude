@@ -2,7 +2,7 @@ const fs=require('fs');const HTML=fs.readFileSync('index.html','utf8'),CSS=fs.re
 let p=0,f=0;const ok=(n,c)=>c?p++:(f++,console.log('  FAIL '+n));
 console.log('[1] custom picker replaces native select');
 ok('native template select is gone',!HTML.includes('id="rsBotTemplate"'));
-ok('clear browse trigger exists',HTML.includes('id="rsBrowseTemplates"')&&HTML.includes('Choose a starter'));
+ok('clear browse trigger exists',HTML.includes('id="rsBrowseTemplates"')&&HTML.includes('Choose a bot'));
 ok('picker is a real modal',HTML.includes('id="rsTemplateModal"')&&HTML.includes('id="rsTemplateGrid"'));
 ok('search is available',HTML.includes('id="rsTemplateSearch"'));
 ok('category rail is available',HTML.includes('id="rsTemplateCategories"'));
@@ -20,7 +20,7 @@ ok('claim code has a one-tap copy action',/copy\.textContent="Copy"/.test(JS)&&/
 ok('Go to bot deep link claims admin automatically',/start=claim_/.test(JS)&&/setupValues\.ADMIN_CLAIM_CODE/.test(JS));
 ok('token verification immediately deploys',/startJob\(\{launchAfterDeploy:true,launchUrl\}\)/.test(JS));
 ok('template-specific next steps appear during Connect',/item\.after_deploy/.test(JS)&&/rs-template-after/.test(CSS));
-ok('gallery advertises the full practical catalog',/101 Python bots/.test(HTML));
+ok('gallery advertises the full practical catalog',/101 production bots/.test(HTML));
 console.log('[3] responsive visual');
 ok('desktop uses two-column cards',/\.rs-template-grid \{[^}]*grid-template-columns:1fr 1fr/.test(CSS));
 ok('mobile uses one-column cards',/\.rs-template-grid\{grid-template-columns:1fr\}/.test(CSS));

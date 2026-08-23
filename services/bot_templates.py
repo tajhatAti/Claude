@@ -848,19 +848,41 @@ app.run_polling()
 ''', "Simple"),
 }
 
-# Eighty production-oriented Python starters generated from four reviewed
-# engines: workflow, ledger, catalog and group moderation. Every resulting
-# value is still a standalone one-file bot returned by the public API.
-from services.template_families import build_family_templates
-TEMPLATES.update(build_family_templates())
+# Retire demo/toy starters from the public catalog. They are deliberately not
+# kept as hidden filler: the product promises useful deployable bots.
+for _retired in ("command-bot","aiogram-echo","telebot-menu","inline-buttons","welcome-bot","file-info","poll-bot","reminder-bot","notes-bot","url-checker","python-echo"):
+    TEMPLATES.pop(_retired, None)
+
+# Ninety-one ranked products based on current Telegram usage and Bangladesh
+# API research. Together with the ten specialized originals this is 101.
+from services.premium_templates import build_premium_templates
+TEMPLATES.update(build_premium_templates())
 
 
 def list_templates():
+    # The first screen is a deliberately mixed Telegram/Bangladesh product
+    # ranking, not 17 cosmetic variants from one family.
+    featured = [
+        "ai-business-bangla", "bd-online-shop", "paid-channel-manager",
+        "contact-support", "master-referral", "group-helper",
+        "ai-support-desk", "digital-product-store", "force-join-referral",
+        "live-cricket-bangladesh", "bangladesh-job-alerts",
+        "bangla-quran-search", "bangla-hadith-search",
+        "channel-post-scheduler", "virus-total-scanner",
+        "image-to-pdf-pro", "bangla-ocr-scanner", "github-repo-monitor",
+        "bangladesh-news-desk", "remittance-converter",
+    ]
+    position = {template_id: index for index, template_id in enumerate(featured)}
+    ranked = sorted(TEMPLATES.items(), key=lambda pair: (
+        1 if pair[0] in position else 0,
+        -position.get(pair[0], 0),
+        pair[1].get("priority", 0),
+    ), reverse=True)
     return [{"id": key, "name": value["name"],
              "description": value["description"], "category": value["category"],
              "language": value["language"], "framework": value["framework"],
              "badge": value.get("badge", ""),
-             "requires_setup": bool(value.get("env_fields"))} for key, value in TEMPLATES.items()]
+             "requires_setup": bool(value.get("env_fields"))} for key, value in ranked]
 
 
 def get_template(template_id):
