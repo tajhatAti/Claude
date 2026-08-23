@@ -73,7 +73,7 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     token=client.post("/login",json={"username":"owner@gmail.com","email":"owner@gmail.com","password":"Passw0rd!x"}).json()["token"]
     headers={"Authorization":"Bearer "+token}
     templates=client.get("/api/telegram-bot/templates",headers=headers)
-    assert templates.status_code==200 and len(templates.json()["templates"])>=20
+    assert templates.status_code==200 and len(templates.json()["templates"])>=21
     assert all(t.get("description") and t.get("category") for t in templates.json()["templates"])
     starter=client.get("/api/telegram-bot/templates/aiogram-echo",headers=headers).json()
     assert "BOT_TOKEN" in starter["code"] and TOKEN not in starter["code"]

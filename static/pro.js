@@ -3607,6 +3607,7 @@ function _setBotWizardStage(stage) {
   const reviewStage=document.getElementById("rsTgReview");if(reviewStage)reviewStage.hidden=!review;
   const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=source||review||!_rsBotAnalysis;
   const privacy=document.getElementById("rsTgPrivacy");if(privacy)privacy.hidden=source;
+  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=!source||(!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy);
   _rsWizardStep(stage);
   const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
 }
@@ -3614,17 +3615,19 @@ function _setBotWizardStage(stage) {
 let _rsTemplates=[];
 let _rsTemplateCategory="All";
 let _rsTemplateEnvFields=[];
+let _rsTemplateAfterDeploy="";
 
 function _newTemplateSecret() {
   try{const bytes=new Uint8Array(8);crypto.getRandomValues(bytes);return [...bytes].map(v=>(v%36).toString(36)).join("").toUpperCase();}
   catch(e){return Math.random().toString(36).slice(2,10).toUpperCase();}
 }
 
-function _renderTemplateConfig(fields) {
+function _renderTemplateConfig(fields,afterDeploy) {
   _rsTemplateEnvFields=Array.isArray(fields)?fields:[];
+  _rsTemplateAfterDeploy=afterDeploy||"";
   const box=document.getElementById("rsTemplateConfig"),host=document.getElementById("rsTemplateConfigFields");
   if(!box||!host)return;
-  host.textContent="";box.hidden=!_rsTemplateEnvFields.length;
+  host.textContent="";box.hidden=!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy;
   _rsTemplateEnvFields.forEach(field=>{
     const label=document.createElement("label");label.className="field";
     const title=document.createElement("span");title.textContent=field.label+(field.required?" · required":"");
@@ -3637,6 +3640,7 @@ function _renderTemplateConfig(fields) {
     if(field.help){const help=document.createElement("small");help.textContent=field.help;label.appendChild(help);}
     host.appendChild(label);
   });
+  if(_rsTemplateAfterDeploy){const note=document.createElement("div");note.className="rs-template-after";const b=document.createElement("b");b.textContent="After deploy";const span=document.createElement("span");span.textContent=_rsTemplateAfterDeploy;note.append(b,span);host.appendChild(note);}
 }
 
 function _collectTemplateEnv(showError) {
@@ -3689,7 +3693,7 @@ async function _applyRunSpaceBotTemplate(templateId,templateName) {
     _jobCmSetValue(item.code||"");
     const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
     const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
-    _renderTemplateConfig(item.env_fields||[]);
+    _renderTemplateConfig(item.env_fields||[],item.after_deploy||"");
     const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${templateName||item.name} selected`;
     closeModal("rsTemplateModal");_rsBotAnalysis=null;_setBotWizardStage("code");
     toast("Template ready — edit anything, then Continue","success");
@@ -3753,6 +3757,7 @@ async function _verifyRunSpaceTelegramBot() {
         const copyClaim=document.createElement("button");copyClaim.type="button";copyClaim.className="btn-ghost";copyClaim.textContent="Copy claim command";copyClaim.onclick=async()=>{try{await navigator.clipboard.writeText(command.textContent);toast("Claim command copied","success");}catch(e){toast("Select and copy the claim command","info");}};
         claim.append(claimCopy,command,copyClaim);review.appendChild(claim);
       }
+      if(_rsTemplateAfterDeploy){const next=document.createElement("div");next.className="rs-after-review";const b=document.createElement("b");b.textContent="Next step";const span=document.createElement("span");span.textContent=_rsTemplateAfterDeploy;next.append(b,span);review.appendChild(next);}
       const actions=document.createElement("div");actions.className="rs-stage-actions";
       const back=document.createElement("button");back.type="button";back.className="btn-ghost";back.textContent="Back";back.addEventListener("click",()=>_setBotWizardStage("connect"));
       const open=document.createElement("a");open.className="btn-ghost";open.textContent="Open bot";open.href=meta.telegram_bot_url;open.target="_blank";open.rel="noopener noreferrer";
@@ -3773,7 +3778,7 @@ function _resetRunSpaceTelegramDraft(){
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
-  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||20} practical bots`;
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||21} practical bots`;
   _renderTemplateConfig([]);
   _setBotWizardStage("code");
 }

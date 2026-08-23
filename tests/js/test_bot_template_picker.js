@@ -19,7 +19,8 @@ ok('admin claim codes are generated automatically',/crypto\.getRandomValues/.tes
 ok('claim code has a one-tap copy action',/copy\.textContent="Copy"/.test(JS)&&/navigator\.clipboard\.writeText/.test(JS));
 ok('review explains exactly how admin identity is learned',/After deploy: claim admin access/.test(JS)&&/\/claim \$\{setupValues\.ADMIN_CLAIM_CODE\}/.test(JS));
 ok('claim command can be copied before deployment',/Copy claim command/.test(JS));
-ok('gallery advertises the full practical catalog',/20 practical bots/.test(HTML));
+ok('template-specific next steps reach review',/item\.after_deploy/.test(JS)&&/Next step/.test(JS));
+ok('gallery advertises the full practical catalog',/21 practical bots/.test(HTML));
 console.log('[3] responsive visual');
 ok('desktop uses two-column cards',/\.rs-template-grid \{[^}]*grid-template-columns:1fr 1fr/.test(CSS));
 ok('mobile uses one-column cards',/\.rs-template-grid\{grid-template-columns:1fr\}/.test(CSS));

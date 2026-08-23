@@ -5,7 +5,7 @@ from services import bot_templates,telegram_detector
 
 def test_template_catalog_is_practical_safe_and_unique():
     rows=bot_templates.list_templates()
-    assert len(rows)>=20
+    assert len(rows)>=21
     assert len({r["id"] for r in rows})==len(rows)
     assert {"Basics","Menus","Groups","Utilities","Storage","Node.js","Growth","Business","Admin","Channels"}.issubset({r["category"] for r in rows})
     assert sum(1 for r in rows if r.get("requires_setup"))>=6
@@ -25,6 +25,11 @@ def test_template_catalog_is_practical_safe_and_unique():
 
 
 def test_real_use_templates_include_their_working_state_and_controls():
+    master=bot_templates.get_template("master-referral")["code"]
+    assert "master_referral.db" in master and "if not admin_id()" in master and "You are the master admin" in master
+    assert "first /start user becomes master admin" in bot_templates.get_template("master-referral")["after_deploy"]
+    assert "get_chat_member" in master and "check_join" in master and "balance=balance+" in master
+    assert 'CommandHandler("approve"' in master and 'CommandHandler("broadcast"' in master and 'CommandHandler("panel"' in master
     referral=bot_templates.get_template("referral-bot")["code"]
     assert "referrals.db" in referral and "?start=" in referral and "INSERT OR IGNORE" in referral
     contact=bot_templates.get_template("contact-support")

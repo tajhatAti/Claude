@@ -1758,6 +1758,10 @@ body.rs-composing.rs-step-code .rs-logs { display:none; }
 #rsTemplateConfigFields { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; }
 #rsTemplateConfigFields .field { margin:0; }
 #rsTemplateConfigFields small { color:var(--fg-3); font-size:var(--fs-1); line-height:1.4; }
+.rs-template-after,.rs-after-review { display:flex; flex-direction:column; gap:3px; padding:9px; border-radius:var(--r-sm); background:var(--card); }
+.rs-template-after { grid-column:1/-1; }
+.rs-template-after span,.rs-after-review span { color:var(--fg-3); font-size:var(--fs-2); line-height:1.45; }
+.rs-after-review { margin-top:9px; }
 .rs-config-input-row { display:flex; align-items:center; gap:7px; }
 .rs-config-input-row input { min-width:0; font-family:var(--mono); letter-spacing:.08em; }
 .rs-config-input-row button { flex:0 0 auto; }

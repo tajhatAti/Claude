@@ -12,7 +12,7 @@ Supported analysis signals include aiogram, python-telegram-bot, pyTelegramBotAP
 
 ## Practical starter gallery
 
-The Add Bot flow includes 20 searchable, categorized starters rather than demo snippets: Livegram-style two-way support, standard and reward referral systems, self-claimed admin broadcasts, channel posting, channel join gates, group welcome/rules/warnings, order notifications, deep-link file sharing, inline menus, polls, reminders, SQLite notes, URL checks, and Python/Node foundations.
+The Add Bot flow includes 21 searchable, categorized starters rather than demo snippets: a master channel-referral/reward system, Livegram-style two-way support, simpler referral modes, self-claimed admin broadcasts, channel posting, channel join gates, group welcome/rules/warnings, order notifications, deep-link file sharing, inline menus, polls, reminders, SQLite notes, URL checks, and Python/Node foundations.
 
 Admin-capable templates do not ask users to discover a numeric Telegram ID. The wizard generates a one-time `ADMIN_CLAIM_CODE`; after deployment the owner sends `/claim CODE` to the new bot. The bot stores that sender's real Telegram user ID in its own SQLite database and refuses future claims. Claim codes and all other setup values are encrypted job environment secrets.
 
@@ -162,6 +162,7 @@ DATA_DIR=$(mktemp -d) DB_PATH=$(mktemp -d)/test.db \
 ## Additional documentation
 
 - `TELEGRAM_JOB_DETECTION.md`
+- `BOT_TEMPLATE_GUIDE.md`
 - `JOB_URLS_AND_BOT_ANALYTICS.md`
 - `runner/README.md`
 - `runner/SYSTEM_TOOLS.md`
