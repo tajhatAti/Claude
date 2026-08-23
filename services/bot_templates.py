@@ -1,10 +1,10 @@
 """Practical starter bots. Every template reads the token from BOT_TOKEN."""
 
 
-def _item(name, description, category, language, framework, code, badge=""):
+def _item(name, description, category, language, framework, code, badge="", env_fields=None):
     return {"name": name, "description": description, "category": category,
             "language": language, "framework": framework, "badge": badge,
-            "code": code.strip() + "\n"}
+            "env_fields": list(env_fields or []), "code": code.strip() + "\n"}
 
 
 TEMPLATES = {
@@ -246,6 +246,206 @@ app.add_handler(CommandHandler("check", check))
 app.run_polling()
 '''),
 
+    "referral-bot": _item(
+        "Referral bot", "Real deep-link referrals with SQLite counts and personal invite links.", "Growth",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+import sqlite3
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+DB = sqlite3.connect("referrals.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, referrer_id INTEGER, joined_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+DB.commit()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    existing = DB.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,)).fetchone()
+    referrer = None
+    if not existing and context.args and context.args[0].isdigit():
+        candidate = int(context.args[0])
+        if candidate != user_id and DB.execute("SELECT 1 FROM users WHERE user_id=?", (candidate,)).fetchone():
+            referrer = candidate
+    DB.execute("INSERT OR IGNORE INTO users(user_id, referrer_id) VALUES(?, ?)", (user_id, referrer))
+    DB.commit()
+    await update.message.reply_text("Welcome! Use /ref to get your referral link and /stats to see referrals.")
+
+async def referral_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    me = await context.bot.get_me()
+    link = f"https://t.me/{me.username}?start={update.effective_user.id}"
+    await update.message.reply_text(f"Your referral link:\\n{link}")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    count = DB.execute("SELECT COUNT(*) FROM users WHERE referrer_id=?", (update.effective_user.id,)).fetchone()[0]
+    await update.message.reply_text(f"You invited {count} user(s).")
+
+app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("ref", referral_link))
+app.add_handler(CommandHandler("stats", stats))
+app.run_polling()
+''', "Real use"),
+
+    "contact-support": _item(
+        "Contact support bot", "Users message the bot; an admin receives and replies through Telegram.", "Business",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+import sqlite3
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+DB = sqlite3.connect("support.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS tickets (admin_message_id INTEGER PRIMARY KEY, user_id INTEGER)")
+DB.commit()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send your question here. Support will reply in this chat.")
+
+async def route_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id == ADMIN_CHAT_ID and update.message.reply_to_message:
+        row = DB.execute("SELECT user_id FROM tickets WHERE admin_message_id=?", (update.message.reply_to_message.message_id,)).fetchone()
+        if row and update.message.text:
+            await context.bot.send_message(row[0], f"Support: {update.message.text}")
+            await update.message.reply_text("Reply sent.")
+        return
+    if update.effective_chat.type != "private" or not ADMIN_CHAT_ID:
+        return
+    forwarded = await context.bot.forward_message(ADMIN_CHAT_ID, update.effective_chat.id, update.message.message_id)
+    DB.execute("INSERT OR REPLACE INTO tickets VALUES(?, ?)", (forwarded.message_id, update.effective_user.id))
+    DB.commit()
+    await update.message.reply_text("Your message reached support.")
+
+app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, route_message))
+app.run_polling()
+''', "Business", [{"key":"ADMIN_CHAT_ID","type":"number","label":"Admin Telegram ID","placeholder":"123456789","help":"Messages are forwarded here. Get your numeric ID from @userinfobot.","required":True}]),
+
+    "admin-broadcast": _item(
+        "Admin broadcast bot", "Registers users and lets one admin send announcements with delivery stats.", "Admin",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+import sqlite3
+from telegram import Update
+from telegram.error import Forbidden
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+DB = sqlite3.connect("broadcast.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
+DB.commit()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    DB.execute("INSERT OR IGNORE INTO users VALUES(?)", (update.effective_user.id,))
+    DB.commit()
+    await update.message.reply_text("You are subscribed to announcements.")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        return
+    count = DB.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    await update.message.reply_text(f"Subscribers: {count}")
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        return
+    text = " ".join(context.args)
+    if not text:
+        await update.message.reply_text("Use: /broadcast Your announcement")
+        return
+    sent = 0
+    for (user_id,) in DB.execute("SELECT user_id FROM users").fetchall():
+        try:
+            await context.bot.send_message(user_id, text)
+            sent += 1
+        except Forbidden:
+            DB.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+    DB.commit()
+    await update.message.reply_text(f"Delivered to {sent} user(s).")
+
+app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("stats", stats))
+app.add_handler(CommandHandler("broadcast", broadcast))
+app.run_polling()
+''', "Admin", [{"key":"ADMIN_CHAT_ID","type":"number","label":"Admin Telegram ID","placeholder":"123456789","help":"Only this user can broadcast. Get the numeric ID from @userinfobot.","required":True}]),
+
+    "file-store": _item(
+        "File sharing bot", "Stores Telegram file IDs and creates reusable deep links for downloads.", "Storage",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+import secrets
+import sqlite3
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+
+DB = sqlite3.connect("files.db", check_same_thread=False)
+DB.execute("CREATE TABLE IF NOT EXISTS files (code TEXT PRIMARY KEY, file_id TEXT, kind TEXT, name TEXT)")
+DB.commit()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args and context.args[0].startswith("file_"):
+        row = DB.execute("SELECT file_id, kind, name FROM files WHERE code=?", (context.args[0][5:],)).fetchone()
+        if row:
+            if row[1] == "document":
+                await context.bot.send_document(update.effective_chat.id, row[0], caption=row[2])
+            else:
+                await context.bot.send_photo(update.effective_chat.id, row[0], caption=row[2])
+            return
+    await update.message.reply_text("Send me a photo or document. I will create a share link.")
+
+async def save_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.document:
+        item, kind, name = update.message.document, "document", update.message.document.file_name or "Document"
+    else:
+        item, kind, name = update.message.photo[-1], "photo", "Photo"
+    code = secrets.token_urlsafe(6)
+    DB.execute("INSERT INTO files VALUES(?, ?, ?, ?)", (code, item.file_id, kind, name))
+    DB.commit()
+    me = await context.bot.get_me()
+    await update.message.reply_text(f"Share link:\\nhttps://t.me/{me.username}?start=file_{code}")
+
+app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, save_file))
+app.run_polling()
+''', "Storage"),
+
+    "order-bot": _item(
+        "Simple order bot", "Shows a product menu and sends confirmed orders to an admin.", "Business",
+        "python", "python-telegram-bot", '''
+# requirements: python-telegram-bot==21.4
+import os
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
+
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+PRODUCTS = {"basic": "Basic plan — $5", "pro": "Pro plan — $10"}
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    buttons = [[InlineKeyboardButton(label, callback_data=f"order:{key}")] for key, label in PRODUCTS.items()]
+    await update.message.reply_text("Choose a product:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    key = query.data.split(":", 1)[1]
+    user = query.from_user
+    await query.edit_message_text(f"Order received: {PRODUCTS[key]}")
+    if ADMIN_CHAT_ID:
+        await context.bot.send_message(ADMIN_CHAT_ID, f"New order: {PRODUCTS[key]}\\nUser: @{user.username or user.id}\\nID: {user.id}")
+
+app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(order, pattern=r"^order:"))
+app.run_polling()
+''', "Business", [{"key":"ADMIN_CHAT_ID","type":"number","label":"Admin Telegram ID","placeholder":"123456789","help":"New orders are sent here. Get the numeric ID from @userinfobot.","required":True}]),
+
     "telegraf-echo": _item(
         "Telegraf echo", "A minimal Node.js bot with /start and text replies.", "Node.js",
         "javascript", "Telegraf", '''
@@ -264,7 +464,8 @@ def list_templates():
     return [{"id": key, "name": value["name"],
              "description": value["description"], "category": value["category"],
              "language": value["language"], "framework": value["framework"],
-             "badge": value.get("badge", "")} for key, value in TEMPLATES.items()]
+             "badge": value.get("badge", ""),
+             "requires_setup": bool(value.get("env_fields"))} for key, value in TEMPLATES.items()]
 
 
 def get_template(template_id):

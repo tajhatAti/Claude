@@ -3613,6 +3613,29 @@ function _setBotWizardStage(stage) {
 
 let _rsTemplates=[];
 let _rsTemplateCategory="All";
+let _rsTemplateEnvFields=[];
+
+function _renderTemplateConfig(fields) {
+  _rsTemplateEnvFields=Array.isArray(fields)?fields:[];
+  const box=document.getElementById("rsTemplateConfig"),host=document.getElementById("rsTemplateConfigFields");
+  if(!box||!host)return;
+  host.textContent="";box.hidden=!_rsTemplateEnvFields.length;
+  _rsTemplateEnvFields.forEach(field=>{
+    const label=document.createElement("label");label.className="field";
+    const title=document.createElement("span");title.textContent=field.label+(field.required?" · required":"");
+    const input=document.createElement("input");input.className="input-text";input.type=field.type||"text";input.placeholder=field.placeholder||"";input.dataset.envKey=field.key;input.required=!!field.required;
+    label.append(title,input);
+    if(field.help){const help=document.createElement("small");help.textContent=field.help;label.appendChild(help);}
+    host.appendChild(label);
+  });
+}
+
+function _collectTemplateEnv(showError) {
+  const values={};let missing=null;
+  _rsTemplateEnvFields.forEach(field=>{const input=document.querySelector(`#rsTemplateConfigFields [data-env-key="${field.key}"]`);const value=(input?.value||"").trim();if(value)values[field.key]=value;else if(field.required&&!missing)missing=input;});
+  if(missing&&showError){toast("Complete the required template setup first","error");missing.focus();}
+  return missing?null:values;
+}
 
 function _renderRunSpaceTemplates() {
   const grid=document.getElementById("rsTemplateGrid"),cats=document.getElementById("rsTemplateCategories");
@@ -3628,7 +3651,7 @@ function _renderRunSpaceTemplates() {
     const top=document.createElement("span");top.className="rs-template-card-top";
     const icon=document.createElement("span");icon.className="rs-template-card-icon";icon.textContent=t.language==="javascript"?"JS":"PY";
     const title=document.createElement("b");title.textContent=t.name;top.append(icon,title);
-    if(t.badge){const badge=document.createElement("em");badge.textContent=t.badge;top.appendChild(badge);}
+    if(t.badge||t.requires_setup){const badge=document.createElement("em");badge.textContent=t.badge||(t.requires_setup?"Setup":"");top.appendChild(badge);}
     const desc=document.createElement("span");desc.className="rs-template-card-desc";desc.textContent=t.description;
     const meta=document.createElement("small");meta.textContent=`${t.framework} · ${t.category}`;
     card.append(top,desc,meta);card.onclick=()=>_applyRunSpaceBotTemplate(t.id,t.name);grid.appendChild(card);
@@ -3657,6 +3680,7 @@ async function _applyRunSpaceBotTemplate(templateId,templateName) {
     _jobCmSetValue(item.code||"");
     const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
     const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
+    _renderTemplateConfig(item.env_fields||[]);
     const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${templateName||item.name} selected`;
     closeModal("rsTemplateModal");_rsBotAnalysis=null;_setBotWizardStage("code");
     toast("Template ready — edit anything, then Continue","success");
@@ -3668,6 +3692,7 @@ async function _analyzeRunSpaceBot() {
   const language=(document.getElementById("jobLang")||{}).value||"python";
   const btn=document.getElementById("rsTgAnalyze");
   if(!code.trim()){toast("Paste or upload the bot code first","error");_jobCmFocus();return;}
+  if(_collectTemplateEnv(true)===null)return;
   try {
     if(btn){btn.disabled=true;btn.textContent="Analyzing…";}
     const data=await api("/api/telegram-bot/analyze","POST",{code,language},true);
@@ -3710,7 +3735,7 @@ async function _verifyRunSpaceTelegramBot() {
     if(review){
       review.textContent="";review.hidden=false;
       const text=document.createElement("div");text.className="rs-analysis-grid";
-      [["Bot",`@${meta.telegram_bot_username}`],["Framework",_rsBotAnalysis.framework],["Updates",_rsBotAnalysis.update_mode],["Token","Verified · stored as secret"]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v;cell.append(sm,b);text.appendChild(cell);});
+      [["Bot",`@${meta.telegram_bot_username}`],["Framework",_rsBotAnalysis.framework],["Updates",_rsBotAnalysis.update_mode],["Token",_rsTemplateEnvFields.length?`Verified · ${_rsTemplateEnvFields.length} setup value(s) ready`:"Verified · stored as secret"]].forEach(([k,v])=>{const cell=document.createElement("span");const sm=document.createElement("small");sm.textContent=k;const b=document.createElement("b");b.textContent=v;cell.append(sm,b);text.appendChild(cell);});
       const actions=document.createElement("div");actions.className="rs-stage-actions";
       const back=document.createElement("button");back.type="button";back.className="btn-ghost";back.textContent="Back";back.addEventListener("click",()=>_setBotWizardStage("connect"));
       const open=document.createElement("a");open.className="btn-ghost";open.textContent="Open bot";open.href=meta.telegram_bot_url;open.target="_blank";open.rel="noopener noreferrer";
@@ -3731,7 +3756,8 @@ function _resetRunSpaceTelegramDraft(){
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
-  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||11} simple, useful bots`;
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||16} practical bots`;
+  _renderTemplateConfig([]);
   _setBotWizardStage("code");
 }
 
@@ -5785,7 +5811,7 @@ async function startJob() {
     const payload = { name: finalName, language, code };
     if (_rsVerifiedBotToken) {
       const current=(window._lastJobs||[]).find(j=>String(j.id)===String(editingId||""));
-      payload.env={...((current&&current.env)||{}),BOT_TOKEN:_rsVerifiedBotToken};
+      payload.env={...((current&&current.env)||{}),...(_collectTemplateEnv(false)||{}),BOT_TOKEN:_rsVerifiedBotToken};
       payload.telegram_verification_id=_rsTelegramVerificationId;
     }
     if (repoUrl) payload.repo_url = repoUrl;
@@ -8062,6 +8088,8 @@ async function _rsHandleUpload(file) {
   }
 
   _jobCmSetValue(text);
+  _renderTemplateConfig([]);
+  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="Custom file selected";
   _rsBotAnalysis=null;
   _setBotWizardStage("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);

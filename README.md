@@ -11,6 +11,10 @@ CodeNest is a FastAPI + vanilla-JavaScript platform for analyzing, connecting, d
 
 Supported analysis signals include aiogram, python-telegram-bot, pyTelegramBotAPI/telebot, Telethon, Pyrogram, Telegraf, grammY, and node-telegram-bot-api.
 
+## Practical starter gallery
+
+The Add Bot flow includes searchable, categorized starters rather than demo snippets: referral tracking, two-way contact/support, admin broadcasts, order notifications, deep-link file sharing, group welcome/rules, inline menus, polls, reminders, SQLite notes, URL checks, and Python/Node foundations. Templates that need an admin account expose required setup fields in the wizard and send those values as encrypted job environment secrets.
+
 ## Main capabilities
 
 - Email and Telegram authentication

@@ -1749,6 +1749,11 @@ body.rs-composing.rs-step-code .rs-logs { display:none; }
 .rs-template-card-icon { width:30px; height:30px; display:grid; place-items:center; border-radius:9px; background:var(--card); color:var(--fg-2); font-family:var(--mono); font-size:10px; }
 .rs-template-card-desc { flex:1; color:var(--fg-2); font-size:var(--fs-2); line-height:1.45; }
 .rs-template-card small { color:var(--fg-3); }
+.rs-template-config { margin:9px 0; padding:10px; border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); }
+.rs-template-config > b { display:block; margin-bottom:8px; }
+#rsTemplateConfigFields { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; }
+#rsTemplateConfigFields .field { margin:0; }
+#rsTemplateConfigFields small { color:var(--fg-3); font-size:var(--fs-1); line-height:1.4; }
 .rs-analysis-result,.rs-wizard-review { margin:8px 0; padding:10px; border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); font-size:var(--fs-2); }
 .rs-analysis-summary { display:flex; align-items:center; gap:10px; }
 .rs-analysis-summary > div { display:flex; flex-direction:column; min-width:0; }
