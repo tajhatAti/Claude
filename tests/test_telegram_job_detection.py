@@ -61,13 +61,21 @@ def test_run_records_safe_bot_metadata_and_admin_can_open_it(monkeypatch):
     from routes import runspace
     from services import runner_client
     c=database.get_db_connection(); now=now_utc_str()
-    c.execute("INSERT INTO users(username,email,password,is_verified,is_admin,created_at,updated_at) VALUES(?,?,?,1,1,?,?)",("owner","owner@gmail.com",hash_password("Passw0rd!x"),now,now));c.commit();c.close()
+    existing=c.execute("SELECT id FROM users WHERE email='owner@gmail.com'").fetchone()
+    if existing:
+        uid=existing["id"]
+        c.execute("DELETE FROM jobs WHERE user_id=?",(uid,))
+        c.execute("DELETE FROM sessions WHERE user_id=?",(uid,))
+    else:
+        c.execute("INSERT INTO users(username,email,password,is_verified,is_admin,created_at,updated_at) VALUES(?,?,?,1,1,?,?)",("owner","owner@gmail.com",hash_password("Passw0rd!x"),now,now))
+    c.commit();c.close()
     client=TestClient(app)
     token=client.post("/login",json={"username":"owner@gmail.com","email":"owner@gmail.com","password":"Passw0rd!x"}).json()["token"]
     headers={"Authorization":"Bearer "+token}
     templates=client.get("/api/telegram-bot/templates",headers=headers)
-    assert templates.status_code==200 and len(templates.json()["templates"])>=4
-    starter=client.get("/api/telegram-bot/templates/aiogram",headers=headers).json()
+    assert templates.status_code==200 and len(templates.json()["templates"])>=10
+    assert all(t.get("description") and t.get("category") for t in templates.json()["templates"])
+    starter=client.get("/api/telegram-bot/templates/aiogram-echo",headers=headers).json()
     assert "BOT_TOKEN" in starter["code"] and TOKEN not in starter["code"]
     analyzed=client.post("/api/telegram-bot/analyze",headers=headers,json={"language":"python","code":"from telegram.ext import ApplicationBuilder\nTOKEN='example'\nApplicationBuilder().token(TOKEN).run_polling()"})
     assert analyzed.status_code==200 and analyzed.json()["framework"]=="python-telegram-bot"

@@ -169,7 +169,7 @@ def analyze_code(code, language="python"):
             break
     if re.search(r"setWebhook|set_webhook|webhook", source, re.I):
         mode = "webhook"
-    elif re.search(r"run_polling|start_polling|infinity_polling|polling\s*\(|getUpdates", source, re.I):
+    elif re.search(r"run_polling|start_polling|infinity_polling|polling\s*\(|\.launch\s*\(|getUpdates", source, re.I):
         mode = "polling"
     else:
         mode = "unknown"

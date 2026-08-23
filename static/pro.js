@@ -3611,27 +3611,55 @@ function _setBotWizardStage(stage) {
   const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
 }
 
-async function _loadRunSpaceBotTemplates() {
-  const select=document.getElementById("rsBotTemplate");
-  if(!select||select.dataset.loaded)return;
-  try{
-    const data=await api("/api/telegram-bot/templates","GET",null,true);
-    (data.templates||[]).forEach(item=>{const opt=document.createElement("option");opt.value=item.id;opt.textContent=`${item.name} · ${item.framework}`;select.appendChild(opt);});
-    select.dataset.loaded="1";
-  }catch(e){}
+let _rsTemplates=[];
+let _rsTemplateCategory="All";
+
+function _renderRunSpaceTemplates() {
+  const grid=document.getElementById("rsTemplateGrid"),cats=document.getElementById("rsTemplateCategories");
+  if(!grid||!cats)return;
+  const search=(document.getElementById("rsTemplateSearch")?.value||"").trim().toLowerCase();
+  const categories=["All",...new Set(_rsTemplates.map(t=>t.category).filter(Boolean))];
+  cats.textContent="";
+  categories.forEach(category=>{const b=document.createElement("button");b.type="button";b.className="rs-template-chip"+(category===_rsTemplateCategory?" is-active":"");b.textContent=category;b.onclick=()=>{_rsTemplateCategory=category;_renderRunSpaceTemplates();};cats.appendChild(b);});
+  grid.textContent="";
+  const shown=_rsTemplates.filter(t=>(_rsTemplateCategory==="All"||t.category===_rsTemplateCategory)&&(!search||`${t.name} ${t.description} ${t.framework}`.toLowerCase().includes(search)));
+  shown.forEach(t=>{
+    const card=document.createElement("button");card.type="button";card.className="rs-template-card";
+    const top=document.createElement("span");top.className="rs-template-card-top";
+    const icon=document.createElement("span");icon.className="rs-template-card-icon";icon.textContent=t.language==="javascript"?"JS":"PY";
+    const title=document.createElement("b");title.textContent=t.name;top.append(icon,title);
+    if(t.badge){const badge=document.createElement("em");badge.textContent=t.badge;top.appendChild(badge);}
+    const desc=document.createElement("span");desc.className="rs-template-card-desc";desc.textContent=t.description;
+    const meta=document.createElement("small");meta.textContent=`${t.framework} · ${t.category}`;
+    card.append(top,desc,meta);card.onclick=()=>_applyRunSpaceBotTemplate(t.id,t.name);grid.appendChild(card);
+  });
+  if(!shown.length){const empty=document.createElement("div");empty.className="adm-empty";empty.textContent="No matching templates.";grid.appendChild(empty);}
 }
 
-async function _applyRunSpaceBotTemplate() {
-  const select=document.getElementById("rsBotTemplate");
-  if(!select||!select.value){toast("Choose a starter template","error");return;}
+async function _loadRunSpaceBotTemplates() {
+  if(_rsTemplates.length)return;
+  try{const data=await api("/api/telegram-bot/templates","GET",null,true);_rsTemplates=data.templates||[];_renderRunSpaceTemplates();}
+  catch(e){toast("Could not load templates","error");}
+}
+
+async function _openRunSpaceTemplates() {
+  await _loadRunSpaceBotTemplates();
+  _rsTemplateCategory="All";
+  const search=document.getElementById("rsTemplateSearch");if(search)search.value="";
+  _renderRunSpaceTemplates();openModal("rsTemplateModal");setTimeout(()=>search?.focus(),60);
+}
+
+async function _applyRunSpaceBotTemplate(templateId,templateName) {
+  if(!templateId)return;
   if((_jobCmGetValue()||"").trim()&&!confirm("Replace the current code with this template?"))return;
   try{
-    const item=await api(`/api/telegram-bot/templates/${encodeURIComponent(select.value)}`,"GET",null,true);
+    const item=await api(`/api/telegram-bot/templates/${encodeURIComponent(templateId)}`,"GET",null,true);
     _jobCmSetValue(item.code||"");
     const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
     const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
-    _rsBotAnalysis=null;_setBotWizardStage("code");
-    toast("Template loaded — review it, then continue","success");
+    const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${templateName||item.name} selected`;
+    closeModal("rsTemplateModal");_rsBotAnalysis=null;_setBotWizardStage("code");
+    toast("Template ready — edit anything, then Continue","success");
   }catch(e){toast(e.message,"error");}
 }
 
@@ -3703,6 +3731,7 @@ function _resetRunSpaceTelegramDraft(){
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const review=document.getElementById("rsTgReview");if(review){review.hidden=true;review.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||11} simple, useful bots`;
   _setBotWizardStage("code");
 }
 
@@ -4540,8 +4569,10 @@ function _initWbWiring() {
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
   _loadRunSpaceBotTemplates();
-  const applyTemplate=document.getElementById("rsApplyTemplate");
-  if(applyTemplate&&!applyTemplate.dataset.wired){applyTemplate.dataset.wired="1";applyTemplate.addEventListener("click",_applyRunSpaceBotTemplate);}
+  const browseTemplates=document.getElementById("rsBrowseTemplates");
+  if(browseTemplates&&!browseTemplates.dataset.wired){browseTemplates.dataset.wired="1";browseTemplates.addEventListener("click",_openRunSpaceTemplates);}
+  const templateSearch=document.getElementById("rsTemplateSearch");
+  if(templateSearch&&!templateSearch.dataset.wired){templateSearch.dataset.wired="1";templateSearch.addEventListener("input",_renderRunSpaceTemplates);}
   const tgAnalyze = document.getElementById("rsTgAnalyze");
   if(tgAnalyze && !tgAnalyze.dataset.wired){tgAnalyze.dataset.wired="1";tgAnalyze.addEventListener("click",_analyzeRunSpaceBot);}
   const backToCode=document.getElementById("rsTgBackToCode");

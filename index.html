@@ -974,8 +974,11 @@
               <div class="rs-wizard-stage" id="rsTgCodeStage">
                 <div><b>Add your bot code</b><small>Choose a template, upload a file, or paste code below.</small></div>
                 <div class="rs-template-actions">
-                  <select class="input-text" id="rsBotTemplate" aria-label="Starter bot template"><option value="">Starter template…</option></select>
-                  <button class="btn-ghost" id="rsApplyTemplate" type="button">Use template</button>
+                  <button class="rs-template-trigger" id="rsBrowseTemplates" type="button">
+                    <span class="rs-template-emoji" aria-hidden="true">🤖</span>
+                    <span><b>Choose a starter</b><small id="rsSelectedTemplate">11 simple, useful bots</small></span>
+                    <span aria-hidden="true">›</span>
+                  </button>
                   <button class="btn-primary" id="rsTgAnalyze" type="button">Continue</button>
                 </div>
               </div>
@@ -1489,6 +1492,19 @@
   </nav>
   <!-- (the old "more sheet" was removed — the left drawer is the ONE mobile menu;
        two overlapping menus was the "mixed content" navigation bug) -->
+</div>
+
+<!-- ============ ADD BOT: TEMPLATE PICKER ============ -->
+<div class="ah-modal hidden rs-template-modal" id="rsTemplateModal">
+  <div class="ah-modal-card rs-template-modal-card">
+    <div class="ah-modal-head">
+      <div><h3>Choose a starter bot</h3><p>Simple templates that run with only your BotFather token.</p></div>
+      <button class="ah-x" data-close aria-label="Close templates">✕</button>
+    </div>
+    <input class="input-text" id="rsTemplateSearch" type="search" placeholder="Search templates…" autocomplete="off">
+    <div class="rs-template-categories" id="rsTemplateCategories"></div>
+    <div class="rs-template-grid" id="rsTemplateGrid"></div>
+  </div>
 </div>
 
 <!-- ============ COMMAND PALETTE / SEARCH ============ -->

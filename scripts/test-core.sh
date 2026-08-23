@@ -13,6 +13,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 "$PYTHON_BIN" -m pytest -q \
   tests/test_telegram_job_detection.py \
+  tests/test_bot_templates.py \
   tests/test_runner_registry.py \
   tests/test_admin_abuse_controls.py \
   tests/test_bot_analytics.py \
