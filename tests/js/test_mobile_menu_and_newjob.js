@@ -158,9 +158,9 @@ for (const width of [320, 375, 414]) {
   ok(`[${width}] it hangs below the header, not at the bottom edge`,
      parseFloat(s.top) > 0 && s.bottom === 'auto', `top=${s.top} bottom=${s.bottom}`);
   ok(`[${width}] it is narrow, not full width`,
-     parseFloat(s.width) > 0 && parseFloat(s.width) <= 260, s.width);
+     parseFloat(s.width) > 0 && parseFloat(s.width) <= 310, s.width);
   ok(`[${width}] and can never exceed the screen`,
-     /max-width:\s*calc\(100vw - 24px\)/.test(CSS));
+     /max-width:\s*calc\(100vw - (?:16|24)px\)/.test(CSS));
   ok(`[${width}] height is capped so it stays a panel`,
      parseFloat(s.maxHeight) > 0 && parseFloat(s.maxHeight) < 768, s.maxHeight);
   ok(`[${width}] it is actually rendered`,

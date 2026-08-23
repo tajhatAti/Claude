@@ -3848,6 +3848,21 @@ function _updateStats() {
   el.textContent = txt;
 }
 
+function _renderMenuBotStatus(job, stKey, st) {
+  const box=document.getElementById("rsMenuCurrent");
+  const del=document.getElementById("btnDeleteInMenu");
+  const has=!!job&&!_composingNew;
+  if(box)box.hidden=!has;
+  if(del)del.hidden=!has;
+  if(!has)return;
+  const name=document.getElementById("rsMenuBotName");if(name)name.textContent=job.name||"Selected bot";
+  const state=document.getElementById("rsMenuBotState");
+  const problem=stKey==="crashed"||stKey==="install_failed";
+  const starting=stKey==="starting"||stKey==="installing"||stKey==="restarting";
+  if(state)state.textContent=problem?"Needs attention — open Logs":stKey==="running"?"Running normally":starting?"Starting…":"Stopped";
+  const dot=document.getElementById("rsMenuStatusDot");if(dot){dot.className="rs-menu-status-dot"+(problem?" problem":stKey==="running"?" running":starting?" starting":"");}
+}
+
 // Reflect current job status onto toolbar action buttons + sidebar dots + log dot.
 // Accepts a job object OR a job id (looked up from window._lastJobs).
 function _reflectJobStatus(jobOrId) {
@@ -3859,6 +3874,7 @@ function _reflectJobStatus(jobOrId) {
   const stKey = (job && job.status) ? (job.status || "").toLowerCase() : "stopped";
   const st = _fmtStatus(job && job.status);
   _renderTelegramBot(job);
+  _renderMenuBotStatus(job,stKey,st);
   // §3: brief cross-fade whenever the status text changes, never a hard flip.
   if (_reflectJobStatus._last !== st.label) {
     _reflectJobStatus._last = st.label;
@@ -4346,6 +4362,7 @@ function _renderJobList(jobs) {
       dot.classList.toggle("crashed", sk === "crashed" || sk === "install_failed");
     }
   });
+  const menu=document.getElementById("rsMoreMenu");if(menu&&!menu.hidden)_rsJobsPopRender();
 }
 
 function renderJobs(jobs) {
@@ -4399,6 +4416,7 @@ function renderJobs(jobs) {
     }
     list.appendChild(item);
   });
+  const openMenu=document.getElementById("rsMoreMenu");if(openMenu&&!openMenu.hidden)_rsJobsPopRender();
   // Deep-link: pick the requested job regardless of running state.
   if (window.__rs_deep_invalid) {
     window.__rs_deep_invalid = false;
@@ -4471,6 +4489,7 @@ function _initWbWiring() {
   const menuBtn  = document.getElementById("wbMenuBtn");
   const backdrop = document.getElementById("wbBackdrop");
   const deselectBtn = document.getElementById("btnDeselect");
+  const deleteMenuBtn = document.getElementById("btnDeleteInMenu");
   const btnStart = document.getElementById("btnStartJob");
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
@@ -4581,6 +4600,10 @@ function _initWbWiring() {
       document.body.classList.remove("rs-menu-open");
     };
     const openMore = () => {
+      _closeJobsRail();
+      _rsJobsPopRender();
+      const current=(window._lastJobs||[]).find(j=>String(j.id)===String(_selectedJobId));
+      if(current)_reflectJobStatus(current);else _renderMenuBotStatus(null,"stopped",{});
       moreMenu.hidden = false;
       moreBtn.setAttribute("aria-expanded", "true");
       document.body.classList.add("rs-menu-open");
@@ -4654,6 +4677,16 @@ function _initWbWiring() {
       if (document.body.classList.contains("rs-detail-open")) closeJobDetails();
     }
   });
+  if (deleteMenuBtn) {
+    deleteMenuBtn.addEventListener("click", async (e) => {
+      e.preventDefault();e.stopPropagation();
+      const id=_selectedJobId;
+      const job=(window._lastJobs||[]).find(j=>String(j.id)===String(id));
+      if(!id||!confirm(`Delete ${job&&job.name?job.name:"this bot"}? Its workspace and database will be removed.`))return;
+      const menu=document.getElementById("rsMoreMenu");if(menu)menu.hidden=true;document.body.classList.remove("rs-menu-open");
+      await deleteJobById(id,deleteMenuBtn);
+    });
+  }
   if (deselectBtn) {
     deselectBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); deselectJob(); });
     deselectBtn.type = "button";
@@ -4791,16 +4824,13 @@ function _initWbWiring() {
     _syncInsp();
   });
 
-  // Breadcrumb root returns to the job list (and, on a phone, opens it).
+  // The breadcrumb opens the same compact three-dot surface; it never sends
+  // the user into the old full-height bot-list drawer.
   const crumbRoot = document.getElementById("rsCrumbRoot");
   if (crumbRoot) {
     crumbRoot.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (window.matchMedia("(max-width: 760px)").matches) {
-        _openJobsRail();
-      } else {
-        document.body.classList.remove("rs-side-collapsed");
-      }
+      e.preventDefault();e.stopPropagation();
+      document.getElementById("rsMoreBtn")?.click();
     });
   }
 
@@ -5664,7 +5694,7 @@ async function startJob() {
   setLoading(btn, true);
   if (btn) {
     btn.classList.add("is-firing","loading");
-    const lbl = btn.querySelector(".rs-btn-label");
+    const lbl = btn.querySelector(".rs-btn-label") || btn.querySelector(".rs-seg-label");
     btn._origLabel = lbl ? lbl.textContent : null;
     if (lbl) lbl.textContent = editingId ? "Saving\u2026" : "Starting\u2026";
   }
@@ -5688,8 +5718,8 @@ async function startJob() {
       info = await api("/api/jobs", "POST", payload, true);
     }
     /* The write returned, so the code is safe; what remains is the process
-       coming up. Saying "Starting…" here is the difference between "did my
-       click do anything?" and "it saved, now it is booting". */
+       coming up. Keep that state visible on the actual menu button. */
+    if(btn){const runLabel=btn.querySelector(".rs-seg-label");if(runLabel)runLabel.textContent="Starting…";}
     if (typeof rsRunState === "function") rsRunState("starting");
     toast("Deployed \u2713", "success");
     _setHint("ok", "");
@@ -5775,7 +5805,7 @@ async function startJob() {
     setLoading(btn, false);
     if (btn) {
       btn.classList.remove("is-firing","loading");
-      const lbl = btn.querySelector(".rs-btn-label");
+      const lbl = btn.querySelector(".rs-btn-label") || btn.querySelector(".rs-seg-label");
       if (lbl && btn._origLabel) lbl.textContent = btn._origLabel;
       setTimeout(() => btn.classList.remove("is-firing"), 700);
     }
@@ -5824,7 +5854,9 @@ async function deleteJobById(id, btn) {
   try {
     await api("/api/jobs/" + id, "DELETE", null, true);
     if (String(_selectedJobId) === String(id)) deselectJob();
-    toast("Deleted", "info");
+    window._lastJobs=(window._lastJobs||[]).filter(j=>String(j.id)!==String(id));
+    _rsJobsPopRender();
+    toast("Bot deleted", "info");
     const row = btn && btn.closest && btn.closest(".job-item");
     if (row) { row.classList.add("row-leave"); await new Promise(r => setTimeout(r, 180)); }
     loadJobs();
@@ -8118,81 +8150,56 @@ else setTimeout(_initRsHeaderActions, 70);
    there is no second fetch and no second source of truth.
    ══════════════════════════════════════════════════════════════════════════ */
 function _rsJobsPopRender() {
-  const list = document.getElementById("rsJobsPopList");
+  const list = document.getElementById("rsUnifiedBotList");
   if (!list) return;
   const jobs = window._lastJobs || [];
   if (!jobs.length) {
-    list.innerHTML = '<div class="rs-jp-empty">No jobs yet — create one below.</div>';
+    list.innerHTML = '<div class="rs-jp-empty">No bots yet.</div>';
     return;
   }
   const esc = (t) => String(t == null ? "" : t)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   list.innerHTML = jobs.map(j => {
-    const st = String(j.status || "").toLowerCase();
-    const cls = st === "running" ? "running" : (st === "crashed" ? "crashed" : "");
+    const st = String(j.status || "offline").toLowerCase();
+    const cls = st === "running" ? "running" : ((st === "crashed" || st === "install_failed") ? "crashed" : "");
     const active = String(j.id) === String(_selectedJobId) ? " is-active" : "";
-    return '<button type="button" class="rs-jp-item' + active + '" data-jid="' + esc(j.id) + '">' +
+    const label = st === "running" ? "Running" : ((st === "crashed" || st === "install_failed") ? "Problem" : (st === "starting" || st === "installing") ? "Starting" : "Stopped");
+    return '<div class="rs-jp-item' + active + '" role="button" tabindex="0" data-jid="' + esc(j.id) + '">' +
              '<span class="rs-jp-dot ' + cls + '"></span>' +
              '<span class="rs-jp-name">' + esc(j.name || "untitled") + "</span>" +
-             '<span class="rs-jp-meta">' + esc(j.language || "") + "</span>" +
-           "</button>";
+             '<span class="rs-jp-meta">' + label + "</span>" +
+             '<button type="button" class="rs-jp-delete" data-delete-jid="' + esc(j.id) + '" title="Delete bot" aria-label="Delete ' + esc(j.name || "bot") + '">×</button>' +
+           "</div>";
   }).join("");
 }
 
-function rsJobsPopOpen() {
-  const pop = document.getElementById("rsJobsPop");
-  if (!pop) return;
-  const menu = document.getElementById("rsMoreMenu");
-  if (menu) menu.hidden = true;          // only one panel at a time
-  _rsJobsPopRender();
-  pop.hidden = false;
-  document.body.classList.add("rs-menu-open");
-}
-function rsJobsPopClose() {
-  const pop = document.getElementById("rsJobsPop");
-  if (!pop) return;
-  pop.hidden = true;
-  const menu = document.getElementById("rsMoreMenu");
-  if (!menu || menu.hidden) document.body.classList.remove("rs-menu-open");
-}
-
 function _initRsJobsPop() {
-  const pop = document.getElementById("rsJobsPop");
-  if (!pop || pop.dataset.wired === "1") return;
-  pop.dataset.wired = "1";
-
-  /* This used to re-wire #btnJobsInMenu — a SECOND way to reach the job list,
-     on top of the header hamburger. That row no longer exists; the hamburger
-     is the single entry point. */
-
-  pop.addEventListener("click", (e) => {
-    const row = e.target.closest(".rs-jp-item");
-    if (row) {
-      e.preventDefault(); e.stopPropagation();
-      rsJobsPopClose();
-      if (typeof selectJob === "function") selectJob(row.getAttribute("data-jid"));
+  const menu=document.getElementById("rsMoreMenu");
+  if(!menu||menu.dataset.botListWired==="1")return;
+  menu.dataset.botListWired="1";
+  menu.addEventListener("click",async(e)=>{
+    const del=e.target.closest("[data-delete-jid]");
+    if(del){
+      e.preventDefault();e.stopPropagation();
+      const id=del.getAttribute("data-delete-jid");
+      const job=(window._lastJobs||[]).find(j=>String(j.id)===String(id));
+      if(!confirm(`Delete ${job&&job.name?job.name:"this bot"}? Its workspace and database will be removed.`))return;
+      await deleteJobById(id,del);
+      _rsJobsPopRender();
       return;
     }
-    if (e.target.closest("#rsJobsPopNew")) {
-      e.preventDefault(); e.stopPropagation();
-      rsJobsPopClose();
-      const real = document.getElementById("btnNew");
-      if (real) real.click();
+    const row=e.target.closest(".rs-jp-item");
+    if(row){
+      e.preventDefault();e.stopPropagation();
+      menu.hidden=true;document.body.classList.remove("rs-menu-open");
+      document.getElementById("rsMoreBtn")?.setAttribute("aria-expanded","false");
+      selectJob(row.getAttribute("data-jid"));
     }
   });
-
-  document.addEventListener("click", (e) => {
-    if (pop.hidden) return;
-    if (pop.contains(e.target)) return;
-    if (e.target.closest("#wbMenuBtn, #rsMoreBtn")) return;
-    rsJobsPopClose();
+  menu.addEventListener("keydown",e=>{
+    const row=e.target.closest(".rs-jp-item");
+    if(row&&(e.key==="Enter"||e.key===" ")){e.preventDefault();row.click();}
   });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !pop.hidden) { e.stopPropagation(); rsJobsPopClose(); }
-  });
-
-  const scrim = document.getElementById("rsMenuScrim");
-  if (scrim) scrim.addEventListener("click", rsJobsPopClose);
 }
 
 /* Tapping the inspector sheet itself dismisses it, as asked. */

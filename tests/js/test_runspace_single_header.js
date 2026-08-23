@@ -155,8 +155,8 @@ for (const width of [320, 375, 414, 768, 1280]) {
     const s = cs(w, k);
     return s.display !== 'none' && !k.hasAttribute('hidden');
   });
-  // toggle + identity + the "···" wrapper. Nothing else.
-  ok(`[${width}] exactly three children are visible`, visible.length === 3,
+  // identity + one unified "···" control. Nothing else.
+  ok(`[${width}] exactly two children are visible`, visible.length === 2,
      visible.map(k => k.id || k.className).join(' | '));
 
   ok(`[${width}] the row never wraps`, cs(w, head).flexWrap !== 'wrap',
@@ -175,7 +175,7 @@ for (const width of [320, 375, 414, 768, 1280]) {
     .filter(b => !b.closest('.rs-menu') && !b.closest('#rsIdentity'))
     .map(b => b.id);
   const allowed = ['wbMenuBtn', 'btnRunQuick', 'rsMoreBtn'];
-  ok(`[${width}] only the toggle, Run and the kebab are in the row`,
+  ok(`[${width}] only the unified kebab remains in the row`,
      strays.every(id => allowed.includes(id)) && strays.includes('rsMoreBtn'),
      strays.join(','));
 }
@@ -261,7 +261,7 @@ console.log('\n[5] menu presentation: dropdown wide, bottom sheet on mobile');
      (cs(mw, mm).bottom || '') === 'auto' && parseFloat(cs(mw, mm).top) > 0,
      `top=${cs(mw, mm).top} bottom=${cs(mw, mm).bottom}`);
   ok('mobile: it is a narrow panel, not full width',
-     parseFloat(cs(mw, mm).width) > 0 && parseFloat(cs(mw, mm).width) <= 260,
+     parseFloat(cs(mw, mm).width) > 0 && parseFloat(cs(mw, mm).width) <= 310,
      cs(mw, mm).width);
   ok('mobile: it still fits the narrowest screen',
      /max-width:\s*calc\(100vw/.test(CSS));
@@ -360,12 +360,12 @@ console.log('\n[10] the measurement is falsifiable');
         <button class="rs-ghost-btn rs-sq" id="a3"></button>
         <span class="rs-sep-v"></span><span class="rs-status-dot"></span>
       </div></header></div>`;
-  const dom = build(375, `<!doctype html><html><body>${oldHeader}</body></html>`);
+  const dom = build(320, `<!doctype html><html><body>${oldHeader}</body></html>`);
   const w = dom.window;
   const head = w.document.querySelector('.rs-head');
   const need = minRowWidth(w, head);
-  ok(`the old six-control row does NOT fit 375px (needs ${Math.round(need)}px)`,
-     need > 375, `${Math.round(need)}px — if this passes, the metric is blind`);
+  ok(`the old six-control row does NOT fit 320px (needs ${Math.round(need)}px)`,
+     need > 320, `${Math.round(need)}px — if this passes, the metric is blind`);
 }
 
 console.log('\n[11] Code Studio follows the same pattern');

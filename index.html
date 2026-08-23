@@ -758,26 +758,20 @@
                sheet, above everything else. -->
           <div class="rs-menu-scrim" id="rsMenuScrim" aria-hidden="true"></div>
 
-          <!-- JOB LIST — a standalone panel, deliberately NOT the old
-               .rs-side rail. That rail is styled by eight competing blocks
-               (fixed/absolute/column/drawer, three different collapse
-               rules), which is why it behaved differently every time. This
-               shares the "···" menu's look and nothing else. -->
-          <div class="rs-menu rs-jobs-pop" id="rsJobsPop" role="menu" hidden>
-            <div class="rs-menu-head">Your bots</div>
-            <div class="rs-jobs-pop-list" id="rsJobsPopList"></div>
-            <div class="rs-menu-sep" role="separator"></div>
-            <button class="rs-menu-item" id="rsJobsPopNew" role="menuitem">
-              <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M7.25 2.75a.75.75 0 0 1 1.5 0v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5Z"/></svg>
-              <span class="rs-seg-label">Add Bot 🤖</span>
-            </button>
-          </div>
-
-          <!-- Dropdown on wide screens, bottom sheet under 760px. Same
-               markup, same handlers: only the presentation differs. -->
+          <!-- One compact control surface: bot switcher + current-bot actions.
+               The old hamburger opened a separate drawer that looked like a
+               different page and made destructive actions hard to reach. -->
+          <!-- Dropdown on wide screens, compact glass panel on phones. -->
           <div class="rs-menu" id="rsMoreMenu" role="menu" hidden>
             <div class="rs-menu-grab" aria-hidden="true"></div>
-            <div class="rs-menu-head">Actions</div>
+            <div class="rs-menu-current" id="rsMenuCurrent" hidden>
+              <span class="rs-menu-status-dot" id="rsMenuStatusDot"></span>
+              <div class="rs-menu-current-copy"><b id="rsMenuBotName">Selected bot</b><span id="rsMenuBotState">Checking status…</span></div>
+            </div>
+            <div class="rs-menu-section-label">Your bots</div>
+            <div class="rs-jobs-pop-list" id="rsUnifiedBotList"></div>
+            <div class="rs-menu-sep" role="separator"></div>
+            <div class="rs-menu-head">Bot actions</div>
 
             <!-- Always present. #btnNew lives inside the job rail, which is
                  an off-canvas overlay at every width, so on a fresh load it
@@ -805,7 +799,7 @@
             <div class="rs-seg" id="rsJobActions" hidden>
               <button class="rs-menu-item rs-seg-btn" id="btnStartJob" role="menuitem" title="Run &amp; deploy (Ctrl+Enter)">
                 <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="currentColor" aria-hidden="true"><path d="M4.5 3.3v9.4c0 .3.3.5.6.3l7.4-4.7a.4.4 0 0 0 0-.6L5.1 3a.4.4 0 0 0-.6.3Z"/></svg>
-                <span class="rs-seg-label">Run</span>
+                <span class="rs-seg-label">Save &amp; Run</span>
                 <span class="rs-spin" aria-hidden="true"></span>
               </button>
               <button class="rs-menu-item rs-seg-btn" id="btnRestartJob" role="menuitem" title="Restart" hidden>
@@ -871,7 +865,11 @@
 
             <div class="rs-menu-sep" role="separator"></div>
 
-            <button class="rs-menu-item rs-menu-danger" id="btnDeselect" role="menuitem" hidden>
+            <button class="rs-menu-item rs-menu-danger" id="btnDeleteInMenu" role="menuitem" hidden>
+              <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 4h10M6 4V2.8h4V4m-5.5 0 .7 9h5.6l.7-9M6.7 6.5v4M9.3 6.5v4"/></svg>
+              <span class="rs-seg-label">Delete bot</span>
+            </button>
+            <button class="rs-menu-item" id="btnDeselect" role="menuitem" hidden>
               <svg viewBox="0 0 16 16" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 4 4 12"/><path d="m4 4 8 8"/></svg>
               <span class="rs-seg-label">Close job</span>
             </button>
