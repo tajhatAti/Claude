@@ -5,6 +5,7 @@ import secrets as _secrets
 from urllib.parse import urlparse
 import ipaddress
 import socket
+import time
 import requests
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -198,16 +199,47 @@ def admin_add_runner(payload: AdminRunnerIn,
         raise HTTPException(status_code=400, detail="Runner URL must resolve to a public service.")
     if len(secret) < 24:
         raise HTTPException(status_code=400, detail="Runner secret must be at least 24 characters.")
-    try:
-        health = requests.get(url + "/health", timeout=8)
-        auth_check = requests.get(url + "/internal/jobs",
-                                  headers={"Authorization": "Bearer " + secret}, timeout=10)
-    except requests.RequestException:
-        raise HTTPException(status_code=400, detail="Runner is unreachable. Wait for Render deploy to finish, then retry.")
+    # A free Render runner can answer 502/503 while the first request wakes it.
+    # One-shot validation misdiagnosed that temporary response as “not a
+    # runner”. Retry only transient statuses; a real 404/401 returns at once.
+    health = None
+    for attempt in range(4):
+        try:
+            health = requests.get(url + "/health", timeout=12)
+            if health.status_code == 200:
+                break
+            if health.status_code not in (408, 425, 429, 500, 502, 503, 504):
+                break
+        except requests.RequestException:
+            pass
+        if attempt < 3:
+            time.sleep(2)
+    if health is None:
+        raise HTTPException(status_code=400, detail="Runner is unreachable after four attempts. Confirm the Render service is Live, then open its /health URL.")
     if health.status_code != 200:
-        raise HTTPException(status_code=400, detail="The URL does not expose a healthy CodeNest runner.")
+        if health.status_code == 404:
+            detail = "The /health endpoint returned 404. Deploy the repository with Root Directory set to runner, not the main website."
+        elif health.status_code in (502, 503, 504):
+            detail = "Render is still starting the runner. Open /health until it returns status 200, then try again."
+        else:
+            detail = f"Runner /health returned HTTP {health.status_code}; expected 200."
+        raise HTTPException(status_code=400, detail=detail)
+    try:
+        auth_check = requests.get(url + "/internal/jobs",
+                                  headers={"Authorization": "Bearer " + secret}, timeout=12)
+    except requests.RequestException:
+        raise HTTPException(status_code=400, detail="Runner health works, but its authenticated endpoint did not respond.")
+    if auth_check.status_code in (401, 403):
+        raise HTTPException(status_code=400, detail="Runner is healthy, but the secret does not match RUNNER_SERVICE_SECRET on that Render service.")
+    if auth_check.status_code == 503:
+        try:
+            remote_detail = str((auth_check.json() or {}).get("detail") or "")
+        except Exception:
+            remote_detail = ""
+        if "secret not configured" in remote_detail.lower():
+            raise HTTPException(status_code=400, detail="Runner is healthy, but RUNNER_SERVICE_SECRET is missing in the runner's Render Environment. Add it there and redeploy.")
     if auth_check.status_code != 200:
-        raise HTTPException(status_code=400, detail="Runner answered, but RUNNER_SERVICE_SECRET does not match.")
+        raise HTTPException(status_code=400, detail=f"Runner authentication test returned HTTP {auth_check.status_code}; expected 200.")
     had_remote_pool = bool(runner_client.runner_pool())
     conn = get_db_connection()
     try:

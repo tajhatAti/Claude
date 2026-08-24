@@ -16,7 +16,7 @@
         <div class="adm-runner-list" id="admRunners"></div>
         <div class="adm-runner-setup" id="admRunnerSetup" hidden>
           <h4>Add a Render runner</h4>
-          <ol><li>Render → New Web Service → this GitHub repository.</li><li>Set Root Directory to <code>runner</code> and Runtime to <b>Docker</b>.</li><li>Generate the secret below and add it as <code>RUNNER_SERVICE_SECRET</code>.</li><li>Deploy, then paste the service URL and the same secret here.</li></ol>
+          <ol><li>Render → New Web Service → connect this GitHub repository.</li><li>Set <b>Root Directory</b> to <code>runner</code>, Runtime to <b>Docker</b>, and deploy from <code>runner/Dockerfile</code>.</li><li>Generate a new secret below. Add that exact value to the new service as <code>RUNNER_SERVICE_SECRET</code>. Each admin-managed runner may use its own secret.</li><li>Add <code>PUBLIC_BASE_URL</code> with the new runner's own <code>https://…onrender.com</code> URL, then deploy.</li><li>Open <code>RUNNER_URL/health</code>. Continue only when it returns JSON with <code>"status":"ok"</code>.</li><li>Paste the base service URL (no <code>/health</code>) and the same secret here, then select <b>Test &amp; add runner</b>.</li></ol>
           <div class="adm-runner-fields">
             <label class="field"><span>Label</span><input class="input-text" id="admRunnerLabel" placeholder="Runner Singapore 2"></label>
             <label class="field"><span>Service URL</span><input class="input-text" id="admRunnerUrl" type="url" placeholder="https://my-runner.onrender.com"></label>

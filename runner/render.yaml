@@ -27,7 +27,9 @@ services:
     envVars:
       - key: RUNNER_SERVICE_SECRET
         # ⚠️ Set this in Render Dashboard to a strong random string.
-        # MUST match the same secret set on the main website service.
+        # Admin-managed runners may each use a unique secret: paste the same
+        # value into Admin → Runners when adding this service. Legacy
+        # env-configured runners must match the main service secret.
         # Generate one: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
         sync: false
       - key: PUBLIC_BASE_URL

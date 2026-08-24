@@ -64,3 +64,22 @@ def test_admin_can_verify_add_drain_and_keep_secret_private(monkeypatch):
     assert sent["headers"]["Authorization"]=="Bearer "+SECRET
     deleted=client.delete(f"/admin/runners/{node_id}",headers=headers())
     assert deleted.status_code==200
+
+
+def test_add_runner_retries_render_wakeup_and_reports_missing_secret(monkeypatch):
+    url="https://runner-waking.example"
+    monkeypatch.setattr("routes.admin.socket.getaddrinfo",lambda *a,**k:[(2,1,6,"",("8.8.4.4",443))])
+    monkeypatch.setattr("routes.admin.time.sleep",lambda _seconds:None)
+    calls={"health":0}
+    def get(target,headers=None,timeout=None):
+        if target==url+"/health":
+            calls["health"]+=1
+            return Resp(502,{}) if calls["health"]<3 else Resp(200,{"status":"ok"})
+        if target==url+"/internal/jobs":
+            return Resp(503,{"detail":"Runner secret not configured."})
+        return Resp(404,{})
+    monkeypatch.setattr("routes.admin.requests.get",get)
+    response=client.post("/admin/runners",headers=headers(),json={"label":"Waking","url":url,"secret":SECRET})
+    assert calls["health"]==3
+    assert response.status_code==400
+    assert "RUNNER_SERVICE_SECRET is missing" in response.json()["detail"]
