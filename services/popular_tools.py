@@ -234,11 +234,34 @@ async def captcha(u,c):
  row=DB.execute("SELECT answer,expires FROM captcha WHERE chat=? AND user=?",(q.message.chat.id,uid)).fetchone()
  if not row or row[1]<int(time.time()) or int(raw_answer)!=row[0]:await q.answer("Incorrect or expired.",show_alert=True);return
  await c.bot.restrict_chat_member(q.message.chat.id,uid,ChatPermissions.all_permissions());DB.execute("DELETE FROM captcha WHERE chat=? AND user=?",(q.message.chat.id,uid));DB.commit();await q.edit_message_text("Verified.")
+async def setlimit(u,c):
+ if await adm(u,c) and c.args and c.args[0].isdigit():DB.execute("INSERT OR REPLACE INTO config VALUES(?,?,?)",(u.effective_chat.id,"flood",str(max(3,min(12,int(c.args[0]))))));DB.commit();await u.message.reply_text("Flood limit updated.")
+async def setrules(u,c):
+ if await adm(u,c) and c.args:DB.execute("INSERT OR REPLACE INTO config VALUES(?,?,?)",(u.effective_chat.id,"rules"," ".join(c.args)[:3500]));DB.commit();await u.message.reply_text("Rules saved.")
+async def rules(u,c):await u.message.reply_text(cfg(u.effective_chat.id,"rules","No rules configured."))
+async def warn(u,c):
+ if not await adm(u,c) or not u.message.reply_to_message:return
+ target=u.message.reply_to_message.from_user;chat=u.effective_chat.id;DB.execute("INSERT OR IGNORE INTO warns VALUES(?,?,0)",(chat,target.id));DB.execute("UPDATE warns SET count=count+1 WHERE chat=? AND user=?",(chat,target.id));count=DB.execute("SELECT count FROM warns WHERE chat=? AND user=?",(chat,target.id)).fetchone()[0];DB.execute("INSERT INTO audit(chat,user,action,created) VALUES(?,?,?,?)",(chat,target.id,"manual warning",int(time.time())));DB.commit();await u.message.reply_text(f"Warning {count}/3 for {target.first_name}")
+async def mute(u,c):
+ if not await adm(u,c) or not u.message.reply_to_message:return
+ target=u.message.reply_to_message.from_user;minutes=max(1,min(10080,int(c.args[0]) if c.args and c.args[0].isdigit() else 60));await c.bot.restrict_chat_member(u.effective_chat.id,target.id,ChatPermissions(can_send_messages=False),until_date=int(time.time())+minutes*60);DB.execute("INSERT INTO audit(chat,user,action,created) VALUES(?,?,?,?)",(u.effective_chat.id,target.id,f"mute {minutes}m",int(time.time())));DB.commit();await u.message.reply_text("Member muted.")
+async def ban(u,c):
+ if not await adm(u,c) or not u.message.reply_to_message:return
+ target=u.message.reply_to_message.from_user;await c.bot.ban_chat_member(u.effective_chat.id,target.id);DB.execute("INSERT INTO audit(chat,user,action,created) VALUES(?,?,?,?)",(u.effective_chat.id,target.id,"ban",int(time.time())));DB.commit();await u.message.reply_text("Member banned.")
+async def unban(u,c):
+ if await adm(u,c) and c.args and c.args[0].isdigit():await c.bot.unban_chat_member(u.effective_chat.id,int(c.args[0]));await u.message.reply_text("Member unbanned.")
+async def lock(u,c):
+ if await adm(u,c):await c.bot.set_chat_permissions(u.effective_chat.id,ChatPermissions(can_send_messages=False));await u.message.reply_text("Chat locked.")
+async def unlock(u,c):
+ if await adm(u,c):await c.bot.set_chat_permissions(u.effective_chat.id,ChatPermissions.all_permissions());await u.message.reply_text("Chat unlocked.")
+async def stats(u,c):
+ if not await adm(u,c):return
+ warns=DB.execute("SELECT COALESCE(SUM(count),0) FROM warns WHERE chat=?",(u.effective_chat.id,)).fetchone()[0];actions=DB.execute("SELECT COUNT(*) FROM audit WHERE chat=?",(u.effective_chat.id,)).fetchone()[0];await u.message.reply_text(f"Warnings: {warns} · Moderation actions: {actions}")
 async def inspect(u,c):
  if not u.message or u.effective_chat.type=="private" or cfg(u.effective_chat.id,"enabled")!="1":return
  m=await c.bot.get_chat_member(u.effective_chat.id,u.effective_user.id)
  if m.status in ("administrator","creator"):return
- text=(u.message.text or u.message.caption or "").lower();words=[x for x in cfg(u.effective_chat.id,"words").split(',') if x];q=FLOOD[(u.effective_chat.id,u.effective_user.id)];q.append(time.time());bad=any(x in text for x in words) or (('http://' in text or 'https://' in text or 't.me/' in text) and cfg(u.effective_chat.id,"links","0")=='1') or (len(q)>=6 and q[-1]-q[-6]<8)
+ text=(u.message.text or u.message.caption or "").lower();words=[x for x in cfg(u.effective_chat.id,"words").split(',') if x];q=FLOOD[(u.effective_chat.id,u.effective_user.id)];q.append(time.time());bad=any(x in text for x in words) or (('http://' in text or 'https://' in text or 't.me/' in text) and cfg(u.effective_chat.id,"links","0")=='1') or (len(q)>=int(cfg(u.effective_chat.id,"flood","6")) and q[-1]-q[-int(cfg(u.effective_chat.id,"flood","6"))]<8)
  if not bad:return
  try:await u.message.delete()
  except Exception:return
@@ -257,7 +280,7 @@ async def audit(u,c):
  if not await adm(u,c):return
  rows=DB.execute("SELECT user,action,created FROM audit WHERE chat=? ORDER BY id DESC LIMIT 20",(u.effective_chat.id,)).fetchall();await u.message.reply_text("\\n".join(f"{x} · {a} · {time.strftime('%Y-%m-%d %H:%M',time.gmtime(t))}" for x,a,t in rows) or "No actions.")
 app=ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-for x,h in [("setup",setup),("setwords",setwords),("links",links),("report",report),("audit",audit)]:app.add_handler(CommandHandler(x,h))
+for x,h in [("setup",setup),("setwords",setwords),("setlimit",setlimit),("setrules",setrules),("rules",rules),("warn",warn),("mute",mute),("ban",ban),("unban",unban),("lock",lock),("unlock",unlock),("stats",stats),("links",links),("report",report),("audit",audit)]:app.add_handler(CommandHandler(x,h))
 app.add_handler(CallbackQueryHandler(captcha,pattern="^cap:"));app.add_handler(ChatMemberHandler(newcomer,ChatMemberHandler.CHAT_MEMBER));app.add_handler(MessageHandler((filters.TEXT|filters.PHOTO|filters.VIDEO|filters.Document.ALL)&~filters.COMMAND,inspect));app.run_polling(allowed_updates=Update.ALL_TYPES)
 '''
 

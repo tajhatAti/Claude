@@ -848,47 +848,20 @@ app.run_polling()
 ''', "Simple"),
 }
 
-# Retire demo/toy starters from the public catalog. They are deliberately not
-# kept as hidden filler: the product promises useful deployable bots.
-for _retired in ("command-bot","aiogram-echo","telebot-menu","inline-buttons","welcome-bot","file-info","poll-bot","reminder-bot","notes-bot","url-checker","python-echo"):
-    TEMPLATES.pop(_retired, None)
-
-# Ninety-one ranked products based on current Telegram usage and Bangladesh
-# API research. Together with the ten specialized originals this is 101.
-from services.premium_templates import build_premium_templates
-TEMPLATES.update(build_premium_templates())
-
-# Remove low-value/regional lookup entries and replace them one-for-one with
-# products that repeatedly rank as real Telegram utilities.
-for _retired in ("bangladesh-job-alerts","bangla-quran-search","bangla-hadith-search","anime-discovery","english-dictionary-pro","country-intelligence"):
-    TEMPLATES.pop(_retired, None)
-from services.popular_tools import build_popular_tools
-TEMPLATES.update(build_popular_tools())
+# Public catalog: five complete products. The legacy definitions above remain
+# only as source-history while this migration settles; they are not listed or
+# retrievable through the template API.
+from services.flagship_templates import build_flagship_templates
+TEMPLATES = build_flagship_templates()
 
 
 def list_templates():
-    # The first screen is a deliberately mixed Telegram/Bangladesh product
-    # ranking, not 17 cosmetic variants from one family.
-    featured = [
-        "file-share-pro", "rose-style-moderator", "ai-business-bangla",
-        "voice-to-text-pro", "text-to-voice-pro", "universal-converter-pro",
-        "image-to-pdf-pro", "rss-channel-publisher", "paid-channel-manager",
-        "contact-support", "bd-online-shop", "master-referral",
-        "ai-support-desk", "force-join-referral", "channel-post-scheduler",
-        "bangla-ocr-scanner", "virus-total-scanner", "github-repo-monitor",
-        "crypto-market-bd", "remittance-converter",
-    ]
-    position = {template_id: index for index, template_id in enumerate(featured)}
-    ranked = sorted(TEMPLATES.items(), key=lambda pair: (
-        1 if pair[0] in position else 0,
-        -position.get(pair[0], 0),
-        pair[1].get("priority", 0),
-    ), reverse=True)
     return [{"id": key, "name": value["name"],
              "description": value["description"], "category": value["category"],
              "language": value["language"], "framework": value["framework"],
              "badge": value.get("badge", ""),
-             "requires_setup": bool(value.get("env_fields"))} for key, value in ranked]
+             "requires_setup": bool(value.get("env_fields"))}
+            for key, value in TEMPLATES.items()]
 
 
 def get_template(template_id):

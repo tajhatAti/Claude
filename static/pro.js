@@ -3767,7 +3767,7 @@ function _resetRunSpaceTelegramDraft(){
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze){analyze.textContent="Deploy bot";analyze.hidden=true;analyze.classList.remove("is-loading");}
-  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||101} production bots`;
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||5} complete bot products`;
   _renderTemplateConfig([]);
   _setRunSpaceSourceMode(null);
   _setBotWizardStage("connect");
@@ -4623,7 +4623,7 @@ function _initWbWiring() {
   const browseTemplates=document.getElementById("rsBrowseTemplates");
   if(browseTemplates&&!browseTemplates.dataset.wired){browseTemplates.dataset.wired="1";browseTemplates.addEventListener("click",_openRunSpaceTemplates);}
   const ownCode=document.getElementById("rsUseOwnCode");
-  if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||101} production bots`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
+  if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||5} complete bot products`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
   const uploadCode=document.getElementById("rsUploadCode");
   if(uploadCode&&!uploadCode.dataset.wired){uploadCode.dataset.wired="1";uploadCode.addEventListener("click",()=>document.getElementById("rsFileInput")?.click());}
   const changeSource=document.getElementById("rsChangeSource");
@@ -8130,7 +8130,7 @@ async function _rsHandleUpload(file) {
   _jobCmSetValue(text);
   _renderTemplateConfig([]);
   _setRunSpaceSourceMode("upload");
-  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="101 production bots";
+  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="5 complete bot products";
   _rsBotAnalysis=null;
   _setBotWizardStage("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);

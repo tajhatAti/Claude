@@ -23,7 +23,7 @@ ok('Go to bot deep link claims admin automatically',/start=claim_/.test(JS)&&/se
 ok('token verification detects name then opens source',/telegram_bot_username[\s\S]*_setBotWizardStage\("code"\)/.test(JS));
 ok('source deploy is one click with spinner',/btn\.textContent="Deploying…"/.test(JS)&&/startJob\(\{launchAfterDeploy:true,launchUrl\}\)/.test(JS));
 ok('template-specific setup appears only after source choice',/item\.after_deploy/.test(JS)&&/rs-template-after/.test(CSS));
-ok('gallery advertises the full practical catalog',/101 production bots/.test(HTML));
+ok('gallery advertises complete products, not a padded count',/5 complete bot products/.test(HTML));
 console.log('[3] responsive visual');
 ok('desktop uses two-column cards',/\.rs-template-grid \{[^}]*grid-template-columns:1fr 1fr/.test(CSS));
 ok('mobile uses one-column cards',/\.rs-template-grid\{grid-template-columns:1fr\}/.test(CSS));

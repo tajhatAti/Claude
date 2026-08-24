@@ -1,33 +1,19 @@
-# Practical bot template guide
+# Complete bot product guide
 
-CodeNest includes **101 ready-to-deploy templates, all written in Python**. The ranked catalog starts with file sharing, advanced group moderation, AI APIs, voice-to-text, text-to-voice, image/PDF conversion, RSS automation, paid channels, support, shops, referrals, OCR, and security tools. Generic reminders, notes, regional lookup filler, habit/water trackers, URL checkers, and echo/command demos are not included. Templates are optional: **Own code** accepts pasted Python directly, while **Upload** imports a `.py` file. See `TEMPLATE_RESEARCH.md` for demand research, API sources, architecture decisions, and validation rules.
+CodeNest intentionally exposes **five complete Python bot products**, not a padded gallery of tiny feature variations:
 
-## Admin identity without numeric IDs
+1. **Complete group manager** — captcha, anti-flood, links, blocked words, rules, warnings, mute, ban/unban, lock/unlock, reports, stats, and audit history.
+2. **Complete file & AI toolbox** — Telegram file sharing/deep links, expiry/download limits, image/PDF conversion, compression, PDF text, OCR, VirusTotal, hashes, QR, voice transcription, and text-to-speech.
+3. **Complete AI business assistant** — OpenAI-compatible provider, Bangla/Banglish policy prompt, memory, quota, analytics, ban controls, and broadcast.
+4. **Complete Telegram store** — catalog, stock, cart, checkout, payment review, order history, buyer notifications, support, and sales analytics.
+5. **Complete channel growth & membership** — force-join, verified referrals, paid plans, payment approval, private invites, expiry removal, scheduled/auto-delete posts, broadcast, and analytics.
 
-Templates that need a private owner use a generated, encrypted `ADMIN_CLAIM_CODE`. After token verification CodeNest deploys immediately and builds the **Go to bot** URL with `start=claim_CODE`. The owner taps it and presses Start; Telegram supplies `effective_user.id`, the bot stores that ID in SQLite, and later claim attempts are refused. The user never discovers or types a numeric Telegram ID or claim command.
+Templates are optional. **Own code** accepts pasted Python directly and **Upload file** accepts a `.py` file.
 
-The **Master referral rewards** template intentionally follows a different requested rule: the first Telegram user to send `/start` becomes master admin. Open it immediately after deployment.
+## Admin identity
 
-## Master referral flow
+Products that need a private owner receive an encrypted generated `ADMIN_CLAIM_CODE`. The post-deploy **Go to bot** link claims the first owner without asking for a numeric Telegram ID.
 
-1. First `/start` user becomes master admin.
-2. Admin adds the bot as administrator in a public channel.
-3. Admin sends `/setchannel @channel`.
-4. Users start the bot and must join that channel.
-5. A referred user is pending until `getChatMember` confirms membership.
-6. Only then is the referral activated and the inviter rewarded.
-7. Users can view balance, referral link, leaderboard, and request withdrawal.
-8. Admin controls reward, minimum withdrawal, currency, broadcasts, bans, balances, and withdrawal approval from bot commands.
+## Telegram limitations
 
-Telegram only guarantees membership lookup for other users when the bot is an administrator in the target channel. A Bot API bot cannot silently add arbitrary users; it can present join links, verify voluntary membership, create/approve invite flows when permitted, and reward verified users.
-
-## Other configured templates
-
-- **Live support inbox:** claim admin, receive copied user messages, reply to users, ban, and view stats.
-- **Channel poster:** claim admin, add bot as channel admin, set channel, publish text or replied media.
-- **Channel join gate:** claim admin, set channel, show Join/Check buttons, verify membership.
-- **Group helper:** Telegram group administrators control rules, warnings, cleanup, and welcome messages.
-- **Referral rewards:** claim admin, award points, show leaderboard, and adjust points.
-- **Admin broadcast / Order bot:** claim admin before using protected controls.
-
-All state is stored in per-bot SQLite files and included in CodeNest workspace snapshots.
+Membership checks require the bot to be an administrator. Bots cannot silently add arbitrary users. Payment-reference flows require owner/provider verification unless an actual merchant checkout URL is configured.
