@@ -135,8 +135,8 @@ for j in made:
 
 # ------------------------------------------------ 5: Details page route serves
 print("\n--- Details page route (§5) ---")
-for path in ("/runspace", "/runspace/ahad/mybot", "/runspace/ahad/mybot/page",
-             "/runspace/ahad/my-cool-bot/page"):
+for path in ("/bots", "/bots/ahad/mybot", "/bots/ahad/mybot/page",
+             "/bots/ahad/my-cool-bot/page"):
     rr = client.get(path, headers={"Accept": "text/html"})
     check(f"SPA shell served for {path}",
           rr.status_code == 200 and "html" in rr.headers.get("content-type", ""),

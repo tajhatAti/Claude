@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from services import secrets_store, runner_client
@@ -276,7 +276,7 @@ for _p, _fn in _NEGOTIATED.items():
 
 # Section URLs with NO API collision can serve the shell directly.
 CLIENT_ONLY_PATHS = [
-    "dashboard", "code", "jobs", "runspace", "activity",
+    "dashboard", "code", "bots", "activity",
     "sign-in", "sign-up", "login", "forgot",
 ]
 for _p in CLIENT_ONLY_PATHS:
@@ -306,22 +306,36 @@ def read_admin(request: Request):
         headers={"Cache-Control": "no-store"},
     )
 
-# Short, canonical per-job URL. The old username-prefixed form below remains
-# readable for links already shared in the wild.
+# Bots is the one canonical product URL, including per-bot deep links.
+@app.get("/bots/{slug}", include_in_schema=False)
+def read_bot_job(slug: str):
+    if not INDEX_FILE.exists():
+        raise HTTPException(status_code=404, detail="index.html not found.")
+    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
+@app.get("/bots/{username}/{slug:path}", include_in_schema=False)
+def read_bot_deep(username: str, slug: str):
+    if not INDEX_FILE.exists():
+        raise HTTPException(status_code=404, detail="index.html not found.")
+    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
+# Old links remain safe, but immediately leave the retired RunSpace URL.
+@app.get("/runspace", include_in_schema=False)
+@app.get("/jobs", include_in_schema=False)
+def redirect_old_bots_root():
+    return RedirectResponse("/bots", status_code=308)
+
+
 @app.get("/runspace/{slug}", include_in_schema=False)
-def read_runspace_job(slug: str):
-    if not INDEX_FILE.exists():
-        raise HTTPException(status_code=404, detail="index.html not found.")
-    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+def redirect_runspace_job(slug: str):
+    return RedirectResponse("/bots/" + slug, status_code=308)
 
 
-# /runspace/{username}/{job-slug} → SPA shell; frontend routes to jobs tab and
-# selects the matching job (deep-linking per job).
 @app.get("/runspace/{username}/{slug:path}", include_in_schema=False)
-def read_runspace_deep(username: str, slug: str):
-    if not INDEX_FILE.exists():
-        raise HTTPException(status_code=404, detail="index.html not found.")
-    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+def redirect_runspace_deep(username: str, slug: str):
+    return RedirectResponse("/bots/" + username + "/" + slug, status_code=308)
 
 # Back-compat heal: a frontend bug once produced published-page links like
 # /code/s/<token> (the tab path was glued onto the origin). Redirect any
@@ -459,7 +473,7 @@ def _miniapp_url():
         # App cannot open at all — it silently degrades to a browser link.
         return {"ok": False, "reason": "not_https", "url": SITE_BASE,
                 "fix": "Telegram requires https:// for a Mini App button."}
-    return {"ok": True, "url": f"{SITE_BASE}/dashboard"}
+    return {"ok": True, "url": f"{SITE_BASE}/bots"}
 
 
 @app.get("/health")

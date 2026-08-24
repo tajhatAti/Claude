@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#171309">
-<title>CodeNest — RunSpace · Free Bot Hosting</title>
+<title>CodeNest — Telegram Bot Hosting</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -538,7 +538,7 @@
         </button>
         <button class="feat-card acc" onclick="switchTab('jobs')">
           <span class="fc-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
-          <span class="fc-body"><b>RunSpace <i>free hosting · 24/7</i></b><small>Deploy a Telegram bot, scraper or API — public URL, auto restarts, libraries install themselves.</small></span>
+          <span class="fc-body"><b>Bots <i>free hosting · 24/7</i></b><small>Deploy a Telegram bot, scraper or API — public URL, auto restarts, libraries install themselves.</small></span>
           <span class="fc-go">→</span>
         </button>
       </div>
@@ -941,7 +941,7 @@
             <div class="rs-empty-ic">
               <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#30363d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
             </div>
-            <div class="rs-empty-title">Loading RunSpace…</div>
+            <div class="rs-empty-title">Loading your bots…</div>
             <div class="rs-empty-sub">Fetching your saved bots &amp; services.</div>
             <button class="rs-empty-btn" id="btnNewEmpty" style="display:none">
               <svg viewBox="0 0 24 24" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -963,36 +963,36 @@
             <!-- The one thin row the brief permits: a single full-width
                  field that cannot wrap at any width. Runtime and GitHub
                  import moved into the "···" menu. -->
-            <div class="rs-meta">
-              <input class="rs-inp" id="jobName" type="text" placeholder="Bot name" maxlength="60" spellcheck="false" autocomplete="off" aria-label="Bot name">
+            <div class="rs-meta" hidden aria-hidden="true">
+              <input class="rs-inp" id="jobName" type="text" maxlength="60" autocomplete="off" aria-label="Bot name">
             </div>
             <section class="rs-bot-wizard" id="rsTgSetup" aria-label="Add Telegram bot">
               <div class="rs-wizard-steps" aria-label="Setup progress">
-                <span class="is-active" data-rs-step="code"><b>1</b> Source</span>
-                <span data-rs-step="connect"><b>2</b> Connect &amp; Deploy</span>
+                <span class="is-active" data-rs-step="connect"><b>1</b> Connect bot</span>
+                <span data-rs-step="code"><b>2</b> Choose source</span>
               </div>
-              <div class="rs-wizard-stage" id="rsTgCodeStage">
-                <div><b>Choose your source</b><small>A template is optional. Paste your own Python code directly in the editor.</small></div>
+              <div class="rs-wizard-stage rs-connect-stage" id="rsTgConnectStage">
+                <div><b>Paste your BotFather token</b><small>The bot name is detected automatically.</small></div>
+                <label class="field"><span>Bot token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…"></label>
+                <div class="rs-stage-actions"><button class="btn-primary" id="rsTgVerify" type="button">Verify bot</button></div>
+                <span class="rs-tg-verify-state" id="rsTgVerifyState"></span>
+              </div>
+              <div class="rs-wizard-stage" id="rsTgCodeStage" hidden>
+                <div><b>How do you want to build it?</b><small>Choose one. You can deploy in one tap.</small></div>
                 <div class="rs-template-actions">
                   <div class="rs-source-options" aria-label="Bot source">
-                    <button class="rs-source-option is-active" id="rsUseOwnCode" type="button"><b>Own code</b><small>Paste below</small></button>
-                    <button class="rs-source-option" id="rsBrowseTemplates" type="button"><b>Templates</b><small id="rsSelectedTemplate">101 production bots</small></button>
-                    <button class="rs-source-option" id="rsUploadCode" type="button"><b>Upload</b><small>.py file</small></button>
+                    <button class="rs-source-option" id="rsUseOwnCode" type="button"><b>Own code</b><small>Full-screen editor</small></button>
+                    <button class="rs-source-option" id="rsBrowseTemplates" type="button"><b>Template</b><small id="rsSelectedTemplate">101 production bots</small></button>
+                    <button class="rs-source-option" id="rsUploadCode" type="button"><b>Upload file 🗃️</b><small>.py file</small></button>
                   </div>
-                  <button class="btn-primary" id="rsTgAnalyze" type="button">Continue</button>
+                  <div class="rs-deploy-actions"><button class="btn-ghost" id="rsChangeSource" type="button" hidden>Change source</button><button class="btn-primary" id="rsTgAnalyze" type="button" hidden>Deploy bot</button></div>
                 </div>
               </div>
               <div class="rs-template-config" id="rsTemplateConfig" hidden>
-                <b>Template setup</b>
+                <b>Required setup</b>
                 <div id="rsTemplateConfigFields"></div>
               </div>
               <div class="rs-analysis-result" id="rsTgAnalysis" hidden></div>
-              <div class="rs-wizard-stage rs-connect-stage" id="rsTgConnectStage" hidden>
-                <div><b>Connect your Telegram bot</b></div>
-                <label class="field"><span>BotFather token</span><input class="input-text" id="rsTgToken" type="password" autocomplete="off" placeholder="123456789:AA…"></label>
-                <div class="rs-stage-actions"><button class="btn-ghost" id="rsTgBackToCode" type="button">Back</button><button class="btn-primary" id="rsTgVerify" type="button">Verify &amp; deploy</button></div>
-                <span class="rs-tg-verify-state" id="rsTgVerifyState"></span>
-              </div>
             </section>
             <aside class="rs-bot-callout" id="rsBotCallout" hidden aria-live="polite">
               <span class="rs-bot-logo" aria-hidden="true">✈</span>
@@ -1249,7 +1249,7 @@
                     <span class="jd-tool" title="sqlite3 — inspect a database">sqlite3</span>
                     <span class="jd-tool" title="jq — JSON in shell pipelines">jq</span>
                   </div>
-                  <p class="jd-sub">Python and Node libraries install automatically from your imports. System packages cannot be installed per job — RunSpace is shared, so one job changing the container would affect everyone. Need another tool? Ask on the Telegram channel and it can be added to the image.</p>
+                  <p class="jd-sub">Python and Node libraries install automatically from your imports. System packages cannot be installed per bot because the hosting environment is shared. Need another tool? Ask on the Telegram channel and it can be added safely.</p>
 
                   <div class="jd-pane-head"><span class="jd-pane-title">Danger zone</span></div>
                   <p class="jd-sub">Deleting a job stops it and removes its workspace, including any database it wrote.</p>
@@ -1466,7 +1466,7 @@
         <div class="adm-spark" id="admSpark"></div>
       </div>
       <div class="adm-panel">
-        <div class="adm-panel-head"><h3>RunSpace apps</h3><span class="adm-hint">metadata only — code stays private</span></div>
+        <div class="adm-panel-head"><h3>Hosted bots</h3><span class="adm-hint">metadata only — code stays private</span></div>
         <div class="adm-table-wrap"><table class="adm-table" id="admJobs"></table></div>
       </div>
       <div class="adm-panel">

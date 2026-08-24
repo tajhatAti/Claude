@@ -4,7 +4,7 @@ const JS=fs.readFileSync('static/pro.js','utf8');
 let pass=0,fail=0;const ok=(n,c,e)=>{if(c)pass++;else{fail++;console.log(`  FAIL ${n}${e?' -> '+e:''}`)}};
 console.log('[1] composing state lifecycle');
 ok('Add Bot enables the mobile composing layout',/document\.body\.classList\.add\("rs-composing"\)/.test(JS));
-ok('opening a saved bot restores fixed IDE layout',/document\.body\.classList\.remove\("rs-composing","rs-step-code","rs-step-connect","rs-step-review"\)/.test(JS));
+ok('opening a saved bot restores fixed IDE layout',/document\.body\.classList\.remove\("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor"\)/.test(JS));
 ok('successful deploy restores fixed IDE layout',/_composingNew = false;[^]{0,180}classList\.remove\("rs-composing","rs-step-code"/.test(JS));
 console.log('[2] mobile flow fits instead of scrolling');
 ok('Add Bot main pane does not become a long document',/body\.rs-composing #tab-jobs \.rs-main \{[^}]*overflow:hidden !important/.test(CSS));
@@ -12,7 +12,7 @@ ok('workspace is a bounded flex column',/body\.rs-composing #tab-jobs \.rs-ws \{
 ok('source editor uses only remaining space',/body\.rs-composing\.rs-step-code #tab-jobs \.rs-split \{[^}]*flex:1 1 auto;[^}]*height:auto;[^}]*min-height:180px/.test(CSS));
 ok('pre-deploy output is hidden',/body\.rs-composing\.rs-step-code #tab-jobs \.rs-logs \{ display:none/.test(CSS));
 ok('Connect removes editor entirely',/body\.rs-composing\.rs-step-connect #wbSplit[^]{0,100}display:none/.test(CSS));
-ok('wizard has only two stages',/const order=\["code","connect"\]/.test(JS));
+ok('wizard has only two stages',/const order=\["connect","code"\]/.test(JS));
 ok('divider cannot hijack mobile setup',/if \(_composingNew && window\.innerWidth <= 760\) return/.test(JS));
 console.log('[3] launch page is intentionally single action');
 ok('successful auto deploy enters launch page',/_showBotLaunchPage\(stub,options\.launchUrl/.test(JS));

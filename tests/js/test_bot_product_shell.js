@@ -25,6 +25,9 @@ ok('/bots is the canonical jobs route', /"\/bots":\s*"jobs"/.test(js));
 ok('legacy dashboard opens Bots', /"\/dashboard":\s*"jobs"/.test(js));
 ok('signed-in root is replaced with /bots', /replaceState\(\{\},\s*"",\s*"\/bots"\)/.test(js));
 ok('Bots is the initial app state', /let currentTab = "jobs";/.test(js));
+ok('new bot URLs use /bots, never /runspace', /return "\/bots\/" \+ _slugify/.test(js) && !/return "\/runspace\/" \+ _slugify/.test(js));
+ok('bot name is hidden and detected from token', /id="jobName"[^>]*type="text"/.test(html) && /class="rs-meta" hidden/.test(html) && /telegram_bot_username[\s\S]*name\.value/.test(js));
+ok('token is the first Add Bot step', /data-rs-step="connect"><b>1<\/b> Connect bot/.test(html));
 
 // One action implementation is shared by all surfaces.
 ok('one openAddBot helper exists', (js.match(/function openAddBot\s*\(/g) || []).length === 1);

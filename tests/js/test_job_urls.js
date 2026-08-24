@@ -11,11 +11,12 @@ function eq(path, expected) {
   const got = JSON.parse(JSON.stringify(parse(path)));
   if (JSON.stringify(got) !== JSON.stringify(expected)) throw new Error(`${path}: ${JSON.stringify(got)}`);
 }
-eq('/runspace/my-bot', {slug:'my-bot',section:'editor',legacy:false});
-eq('/runspace/my-bot/logs', {slug:'my-bot',section:'logs',legacy:false});
-eq('/runspace/my-bot/database/', {slug:'my-bot',section:'database',legacy:false});
-eq('/runspace/owner/my-bot', {slug:'my-bot',section:'editor',legacy:true});
-eq('/runspace/owner/my-bot/page', {slug:'my-bot',section:'details',legacy:true});
-eq('/runspace/logs', {slug:'logs',section:'editor',legacy:false});
-if (!parse('/runspace/my-bot/typo/extra')?.invalid) throw new Error('mistyped section accepted');
-console.log('7 job URL checks passed');
+eq('/bots/my-bot', {slug:'my-bot',section:'editor',legacy:false});
+eq('/bots/my-bot/logs', {slug:'my-bot',section:'logs',legacy:false});
+eq('/bots/my-bot/database/', {slug:'my-bot',section:'database',legacy:false});
+eq('/bots/owner/my-bot', {slug:'my-bot',section:'editor',legacy:true});
+eq('/bots/owner/my-bot/page', {slug:'my-bot',section:'details',legacy:true});
+eq('/bots/logs', {slug:'logs',section:'editor',legacy:false});
+eq('/runspace/old-bot', {slug:'old-bot',section:'editor',legacy:false});
+if (!parse('/bots/my-bot/typo/extra')?.invalid) throw new Error('mistyped section accepted');
+console.log('8 bot URL checks passed');

@@ -115,7 +115,7 @@ def verify_telegram_bot(payload: TelegramTokenVerify,
     token = (payload.token or "").strip()
     if not telegram_detector.TOKEN_RE.fullmatch(token):
         raise HTTPException(status_code=400, detail="That does not look like a Telegram bot token.")
-    meta = telegram_detector.inspect_bot(token)
+    meta = telegram_detector.inspect_bot(token, timeout=2)
     if meta.get("check_status") == "invalid_token":
         raise HTTPException(status_code=400, detail="Telegram rejected this token. Copy a fresh token from @BotFather.")
     if meta.get("check_status") != "verified" or not meta.get("username"):
@@ -525,93 +525,42 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
 
 @router.get("/api/jobs")
 def list_jobs(authorization: Optional[str] = Header(None)):
+    """Return saved bot metadata without waiting for runner networks.
+
+    Runner probing used to happen synchronously here. With multiple sleeping
+    runners that turned one database list into 20 seconds per node — the
+    reported two-minute “My bots” spinner. Live Telegram/process health already
+    refreshes asynchronously for the selected bot, so the list endpoint must
+    remain a single local database query.
+    """
     user, _ = get_current_user_and_session(authorization)
     conn = get_db_connection()
     try:
-        rows = conn.execute("SELECT * FROM jobs WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE user_id = ? ORDER BY id DESC", (user["id"],)
+        ).fetchall()
     finally:
         conn.close()
 
-    # Live status from the runner — best effort (it may be asleep/restarted).
-    live, runner_state = {}, "ok"
-    runner_ok = False          # did the runner actually answer?
-    try:
-        resp = runner_client._runner_http("GET", "/internal/jobs")
-        if resp.status_code == 200:
-            live = {j["id"]: j for j in resp.json().get("jobs", [])}
-            runner_ok = True
-        else:
-            runner_state = "Waking up your RunSpace... this can take up to a minute on the free tier"
-    except HTTPException as e:
-        runner_state = e.detail
-
     jobs = []
-    for r in rows:
-        r = dict(r)
-        rid = r.get("runner_job_id")
-        if rid and rid in live:
-            info = live[rid]
-            r.update({"status": info["status"], "uptime_s": info.get("uptime_s", 0),
-                      "restarts": info.get("restarts", 0), "port": info.get("port"),
-                      "cpu_pct": info.get("cpu_pct"), "mem_mb": info.get("mem_mb")})
-            r.update(runner_client._job_web_fields(info, _worker_of(r)))     # web / web_url / access
-        elif runner_ok:
-            # The runner answered and did not list this job -> genuinely down.
-            r.update({"status": "offline", "uptime_s": 0, "restarts": 0})
-        else:
-            # Runner unreachable: we do NOT know the state. Saying "offline"
-            # here is what made running jobs appear stopped after a tab switch.
-            r.update({"status": "unknown", "status_stale": True})
-        r["env"] = _public_env(_row_env(r))  # values that look secret are write-only
-        _attach_telegram_public(r)
-        r.pop("code", None)  # never ship stored code back in list payloads
-        jobs.append(r)
-    return {"jobs": jobs, "runner": runner_state, "max_per_user": MAX_JOBS_PER_USER}
+    for stored in rows:
+        row = dict(stored)
+        row["status"] = row.get("status") or "unknown"
+        row["status_stale"] = True
+        row["env"] = _public_env(_row_env(row))
+        _attach_telegram_public(row)
+        row.pop("code", None)
+        jobs.append(row)
+    return {"jobs": jobs, "runner": "background", "max_per_user": MAX_JOBS_PER_USER}
 
 
 @router.get("/api/jobs/{job_id}")
 def get_job(job_id: int, authorization: Optional[str] = Header(None)):
-    """Return a single job WITH its saved code (for the Edit button)."""
+    """Return saved code immediately; live health refreshes in background."""
     user, _ = get_current_user_and_session(authorization)
-    row = _get_own_job(job_id, user)
-    row = dict(row)
-    # Attach live status. CRITICAL: never report a RUNNING job as "offline"
-    # just because the runner was momentarily unreachable (free-tier cold
-    # start returns 503). That lie is what made a tab show "not running" after
-    # switching away and back. "unknown" tells the client to keep what it has
-    # and retry, instead of painting a wrong state.
-    rid = row.get("runner_job_id")
-    row["status_stale"] = False
-    if rid:
-        try:
-            resp = runner_client._runner_http("GET", f"/internal/jobs/{rid}", worker=_worker_of(row))
-            if resp.status_code == 200:
-                info = resp.json()
-                row["status"] = info.get("status")
-                row["uptime_s"] = info.get("uptime_s", 0)
-                row["restarts"] = info.get("restarts", 0)
-                row["port"] = info.get("port")
-                row["cpu_pct"] = info.get("cpu_pct")
-                row["mem_mb"] = info.get("mem_mb")
-                # Populate web URL fields
-                info2 = dict(info)
-                info2.update(runner_client._job_web_fields(info, _worker_of(row)))
-                row["web"] = info2.get("web")
-                row["web_url"] = info2.get("web_url")
-                row["web_private_url"] = info2.get("web_private_url")
-                row["web_public"] = info2.get("web_public", True)
-            elif resp.status_code == 404:
-                # Runner is up and says this job does not exist -> truly gone.
-                row["status"] = "offline"
-            else:
-                row["status"] = "unknown"
-                row["status_stale"] = True
-        except HTTPException:
-            # Runner unreachable / waking up — we simply do not know yet.
-            row["status"] = "unknown"
-            row["status_stale"] = True
-    else:
-        row["status"] = "offline"
+    row = dict(_get_own_job(job_id, user))
+    row["status"] = row.get("status") or "unknown"
+    row["status_stale"] = True
     row["env"] = _public_env(_row_env(row))
     _attach_telegram_public(row)
     return row

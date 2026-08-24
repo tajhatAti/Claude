@@ -18,7 +18,8 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
   tests/test_admin_abuse_controls.py \
   tests/test_bot_analytics.py \
   tests/test_bot_dispatch_analytics.py \
-  tests/test_job_url_routes.py
+  tests/test_job_url_routes.py \
+  tests/test_bot_list_fast.py
 
 npm run check:js
 npm run test:js

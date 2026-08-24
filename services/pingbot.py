@@ -208,7 +208,7 @@ def handle_link(chat_id, text, display_name=""):
         # A button back, because the user arrived here FROM the dashboard and
         # the dashboard is where the connection now shows up. Telling them to
         # "go back" without a link is how a two-tap flow becomes a hunt again.
-        rows = [[{"text": "📦 Open dashboard", "url": f"{SITE_BASE}/dashboard"}]] \
+        rows = [[{"text": "📦 Open dashboard", "url": f"{SITE_BASE}/bots"}]] \
             if SITE_BASE else []
         _send(chat_id,
               f"✅ Connected to *{res['username']}*.\n\n" +
@@ -266,8 +266,8 @@ def _open_button(label="🚀 Open CodeNest"):
     if not SITE_BASE:
         return None
     if _miniapp_ok():
-        return {"text": label, "web_app": {"url": f"{SITE_BASE}/dashboard"}}
-    return {"text": label, "url": f"{SITE_BASE}/dashboard"}
+        return {"text": label, "web_app": {"url": f"{SITE_BASE}/bots"}}
+    return {"text": label, "url": f"{SITE_BASE}/bots"}
 
 
 def _open_kb(label="🚀 Open CodeNest"):
@@ -304,7 +304,7 @@ def set_menu_button():
     res = _tg("setChatMenuButton", menu_button={
         "type": "web_app",
         "text": "Open CodeNest",
-        "web_app": {"url": f"{SITE_BASE}/dashboard"},
+        "web_app": {"url": f"{SITE_BASE}/bots"},
     })
     ok = bool((res or {}).get("ok"))
     if not ok:

@@ -1728,6 +1728,7 @@ body.rs-insp-open #tab-jobs .rs-insp { display: flex; }
 .rs-claim-review > div { display:flex; flex-direction:column; }
 .rs-claim-review span { color:var(--fg-3); font-size:var(--fs-2); }
 .rs-claim-review code { padding:7px 9px; border-radius:var(--r-sm); background:var(--card); user-select:all; }
+#tab-jobs .rs-meta[hidden] { display:none !important; }
 body.rs-composing.rs-step-connect #wbSplit { display:none; }
 body.rs-composing.rs-step-code #wbDivider,
 body.rs-composing.rs-step-code .rs-logs { display:none; }
@@ -1741,6 +1742,17 @@ body.rs-composing.rs-step-code .rs-logs { display:none; }
 .rs-source-option b { font-size:12px; }
 .rs-source-option small { color:var(--fg-3); font-size:10px; }
 .rs-source-option.is-active { border-color:var(--fg-2); background:var(--card-2); color:var(--fg); }
+.rs-deploy-actions { display:flex; align-items:center; gap:7px; }
+#rsTgVerify.is-loading::before,#rsTgAnalyze.is-loading::before { content:""; width:15px; height:15px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:spin .65s linear infinite; }
+body.rs-own-code-editor #tab-jobs .rs-wizard-steps,
+body.rs-own-code-editor #rsTgCodeStage > div:first-child,
+body.rs-own-code-editor #rsTgCodeStage .rs-source-options { display:none; }
+body.rs-own-code-editor #tab-jobs .rs-bot-wizard { padding:6px 10px; }
+body.rs-own-code-editor #rsTgCodeStage { display:block; padding:0; border:0; }
+body.rs-own-code-editor #rsTgCodeStage .rs-template-actions { display:flex; }
+body.rs-own-code-editor #rsTgCodeStage .rs-deploy-actions { width:100%; }
+body.rs-own-code-editor #rsTgCodeStage #rsTgAnalyze { flex:1; }
+body.rs-own-code-editor #tab-jobs .rs-split { flex:1 1 auto; min-height:0; }
 .rs-template-emoji { width:32px; height:32px; display:grid; place-items:center; border-radius:10px; background:var(--card); }
 .rs-template-modal-card { width:min(760px,calc(100vw - 24px)); max-height:min(86dvh,760px); overflow-y:auto; }
 .rs-template-modal-card .ah-modal-head { align-items:flex-start; }

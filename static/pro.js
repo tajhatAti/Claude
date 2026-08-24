@@ -147,7 +147,7 @@ function switchTab(tabId) {
   if (typeof _admSetPolling === "function") _admSetPolling(tabId === "admin");
   // ⚙️ Settings: keep the security panel truthful every time it opens.
   if (tabId === "profile") { refreshSecurityPanel(); loadSessionsList(); }
-  if (tabId === "code") { initCodeMirror(); if (cmEditor) cmEditor.refresh(); }
+  if (tabId === "code") { loadSnippets(); initCodeMirror(); if (cmEditor) cmEditor.refresh(); }
   // 🔗 Every section is a REAL URL — back/forward + refresh + sharing work.
   if (!_routeNav) {
     const p = TAB_PATHS[tabId];
@@ -400,7 +400,7 @@ async function api(path, method = "POST", body = null, auth = false,
     // a user error. Banner (not 11 racing toasts) + marked error kind so the
     // dashboard keeps the session and retries instead of logging you out.
     _serverDown();
-    const e = new Error("Waking up your RunSpace... this can take up to a minute on the free tier");
+    const e = new Error("Connecting to CodeNest…");
     e.kind = "infra";
     throw e;
   }
@@ -1186,8 +1186,6 @@ async function loadDashboard() {
 
     _lastProfile = profile;
     applyAdminVisibility(profile);
-    refreshSecurityPanel();
-    loadSessionsList();
   } catch (err) {
     console.error("Dashboard auth error:", err);
     // Infra failure (server asleep / 502-504 / no network): the session is
@@ -1200,17 +1198,8 @@ async function loadDashboard() {
     return;
   }
 
-  // 2) Section loads are NON-FATAL. If one section fails (network glitch,
-  //    transient 500, etc.) the dashboard must still show so the user can
-  //    use the buttons and retry. Don't collapse the whole UI on a section
-  //    failure, and never clear the token here.
-  try {
-    await Promise.all([loadSnippets()]);
-  } catch (err) {
-    console.error("Section load error (non-fatal):", err);
-  }
-  await loadStats(); // updates the stat counters
-
+  // Bots is the product home. Code Studio and overview data are loaded only
+  // when explicitly opened; fetching them here delayed every bot visit.
   showScreen("screen-dashboard");
 }
 
@@ -2425,17 +2414,16 @@ async function loadStats() {
        bounce to /sign-in and RETURN after successful login. */
 const ROUTES = {
   "/bots": "jobs", "/dashboard": "jobs", "/code": "code",
-  "/runspace": "jobs", "/jobs": "jobs",
   "/terminal": "term", "/term": "term",
   "/admin": "admin", "/profile": "profile",
 };
-// Canonical: /runspace/{job}[/{logs|details|database|env|settings}].
-// Legacy username-prefixed links and their /page suffix remain readable.
+// Canonical: /bots/{job}[/{logs|details|database|env|settings}].
+// Legacy /runspace links are redirected server-side and remain parseable.
 const JOB_SECTIONS = new Set(["logs", "details", "database", "env", "versions", "settings"]);
 function parseJobPath(path) {
   const clean = String(path || "").split(/[?#]/, 1)[0].replace(/\/+$/, "");
   const bits = clean.split("/").filter(Boolean);
-  if (bits[0] !== "runspace" || bits.length < 2 || bits.length > 4) return null;
+  if (!["bots","runspace"].includes(bits[0]) || bits.length < 2 || bits.length > 4) return null;
   const dec = (v) => { try { return decodeURIComponent(v); } catch (e) { return v; } };
   if (bits.length === 2) return {slug: dec(bits[1]), section: "editor", legacy: false};
   if (bits.length === 3) {
@@ -2481,6 +2469,7 @@ function routeFromUrl() {
     return "tab";
   }
   if (ROUTES[p]) {                                  // protected section URL
+    if (p==="/dashboard"&&hasToken) {try{history.replaceState({},"","/bots");}catch(e){}}
     if (!hasToken) {                                // standard "return after login"
       try { sessionStorage.setItem("ahad_return_to", p); } catch (e2) {}
       history.replaceState({}, "", "/sign-in");
@@ -3237,7 +3226,7 @@ function _deepSelectJobBySlug(slug) {
 }
 function _jobBasePath(job) {
   if (!job || !job.name) return null;
-  return "/runspace/" + _slugify(job.name);
+  return "/bots/" + _slugify(job.name);
 }
 
 function _sectionToTab(section) {
@@ -3341,7 +3330,7 @@ function _setJobsStatus(status) {
     }
     const t = emp.querySelector(".rs-empty-title");
     const s = emp.querySelector(".rs-empty-sub");
-    if (t) t.textContent = "Couldn’t load RunSpace";
+    if (t) t.textContent = "Couldn’t load your bots";
     if (s) s.textContent = "The server may be waking up. Tap Retry in a moment.";
     // Swap the new-job button handler for a retry handler
     if (btnNewEmpty && btnNewEmpty && !btnNewEmpty._errWired) {
@@ -3358,14 +3347,19 @@ function _setJobsStatus(status) {
   }
 }
 
+function _botCacheKey(){let h=2166136261;for(const ch of String(authToken||"")){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}return "codenest_bots_"+(h>>>0).toString(36);}
+function _readBotCache(){try{const x=JSON.parse(localStorage.getItem(_botCacheKey())||"null");return x&&Date.now()-x.at<86400000&&Array.isArray(x.jobs)?x.jobs:null;}catch(e){return null;}}
+function _saveBotCache(jobs){try{const safe=(jobs||[]).map(j=>({id:j.id,name:j.name,language:j.language,status:j.status,restarts:j.restarts||0,telegram_bot_detected:!!j.telegram_bot_detected,telegram_bot_username:j.telegram_bot_username||null,telegram_bot_url:j.telegram_bot_url||null}));localStorage.setItem(_botCacheKey(),JSON.stringify({at:Date.now(),jobs:safe}));}catch(e){}}
+
 async function loadJobs() {
   const list = document.getElementById("jobsList");
   if (!list || _jobsLoadBusy) return;
   _jobsLoadBusy = true;
-  // Always enter 'loading' first. Stale-while-revalidate: if we already have
-  // job rows on screen from a previous successful load, leave them in place
-  // instead of swapping to skeleton (avoids flicker). Only show skeleton
-  // when there is no prior content.
+  // Paint the last safe metadata immediately on refresh while the local DB
+  // request runs. The cache key is session-derived, so another account never
+  // sees this list.
+  if(!window._lastJobs){const cached=_readBotCache();if(cached&&cached.length){window._lastJobs=cached;_renderJobList(cached);}}
+  // Always enter 'loading' first. Stale-while-revalidate keeps cached/real rows.
   const hasPrior = !!(window._lastJobs && window._lastJobs.length) || !!list.querySelector(".job-item");
   // SECOND leak of the same class as the one below, and the one that actually
   // fires FIRST. _setJobsStatus("loading") does `ws.style.display = "none"`.
@@ -3380,6 +3374,7 @@ async function loadJobs() {
   try {
     const data = await api("/api/jobs", "GET", null, true);
     const jobs = (data && data.jobs) || [];
+    _saveBotCache(jobs);
     const sig = jobs.map(j => [j.id, j.status, j.restarts, j.web ? 1 : 0, j.web_public === false ? 0 : 1,
       j.telegram_bot_detected ? 1 : 0, j.telegram_bot_username || "", j.telegram_check_status || ""].join(":")).join("|");
     _lastJobsTs = Date.now();
@@ -3608,7 +3603,7 @@ let _rsTelegramVerificationId = "";
 let _rsBotAnalysis = null;
 
 function _rsWizardStep(step) {
-  const order=["code","connect"];
+  const order=["connect","code"];
   const at=Math.max(0,order.indexOf(step));
   document.querySelectorAll("#rsTgSetup [data-rs-step]").forEach(el=>{
     const i=order.indexOf(el.dataset.rsStep);
@@ -3624,7 +3619,7 @@ function _setBotWizardStage(stage) {
   const codeStage=document.getElementById("rsTgCodeStage");if(codeStage)codeStage.hidden=!source;
   const connectStage=document.getElementById("rsTgConnectStage");if(connectStage)connectStage.hidden=!connect;
   const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
-  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=!connect||(!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy);
+  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=!source||(!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy);
   _rsWizardStep(stage);
   const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
 }
@@ -3637,6 +3632,9 @@ let _rsTemplateAfterDeploy="";
 function _setRunSpaceSourceMode(mode) {
   const map={own:"rsUseOwnCode",template:"rsBrowseTemplates",upload:"rsUploadCode"};
   Object.entries(map).forEach(([key,id])=>document.getElementById(id)?.classList.toggle("is-active",key===mode));
+  document.body.classList.toggle("rs-own-code-editor",mode==="own");
+  const deploy=document.getElementById("rsTgAnalyze");if(deploy)deploy.hidden=!mode;
+  const change=document.getElementById("rsChangeSource");if(change)change.hidden=!mode;
 }
 
 function _newTemplateSecret() {
@@ -3727,31 +3725,18 @@ async function _analyzeRunSpaceBot() {
   const code=_jobCmGetValue();
   const language=(document.getElementById("jobLang")||{}).value||"python";
   const btn=document.getElementById("rsTgAnalyze");
-  const name=document.getElementById("jobName");
-  if(!name||!name.value.trim()){toast("Give your bot a name first","error");name?.focus();return;}
+  if(!_rsVerifiedBotToken){_setBotWizardStage("connect");toast("Verify the BotFather token first","info");return;}
   if(!code.trim()){toast("Paste or upload the bot code first","error");_jobCmFocus();return;}
+  const setupValues=_collectTemplateEnv(true);if(setupValues===null)return;
   try {
-    if(btn){btn.disabled=true;btn.textContent="Analyzing…";}
-    const data=await api("/api/telegram-bot/analyze","POST",{code,language},true);
-    _rsBotAnalysis=data;
-    const box=document.getElementById("rsTgAnalysis");
-    if(box){
-      box.textContent="";box.hidden=false;
-      const summary=document.createElement("div");summary.className="rs-analysis-summary";
-      const mark=document.createElement("span");mark.className="rs-analysis-check";mark.textContent="✓";
-      const copy=document.createElement("div");const title=document.createElement("b");title.textContent="Code ready";
-      const meta=document.createElement("span");meta.textContent=[data.language,data.framework,data.update_mode].filter(v=>v&&v!=="unknown").join(" · ")||"Bot code detected";
-      copy.append(title,meta);summary.append(mark,copy);box.appendChild(summary);
-      if(data.needs_token_fix||data.token_source==="not_found"){
-        const note=document.createElement("div");note.className="rs-analysis-note";
-        note.textContent=data.needs_token_fix?"An example or old token will be secured automatically.":"Your verified token will be provided safely as BOT_TOKEN.";
-        box.appendChild(note);
-      }
-    }
-    _setBotWizardStage("connect");
-    const token=document.getElementById("rsTgToken");if(token)setTimeout(()=>token.focus(),0);
+    if(btn){btn.disabled=true;btn.classList.add("is-loading");btn.textContent="Deploying…";}
+    _rsBotAnalysis=await api("/api/telegram-bot/analyze","POST",{code,language},true);
+    let launchUrl=(_rsVerifiedBotMeta&&(_rsVerifiedBotMeta.telegram_bot_url||_rsVerifiedBotMeta.url))||"";
+    if(setupValues.ADMIN_CLAIM_CODE&&launchUrl)launchUrl+=(launchUrl.includes("?")?"&":"?")+"start=claim_"+encodeURIComponent(setupValues.ADMIN_CLAIM_CODE);
+    await startJob({launchAfterDeploy:true,launchUrl});
+    if(!document.body.classList.contains("rs-launch-complete"))toast("Deployment did not finish. Tap Deploy bot to retry.","error");
   } catch(e){toast(e.message,"error");}
-  finally{if(btn){btn.disabled=false;btn.textContent="Continue";}}
+  finally{if(btn){btn.disabled=false;btn.classList.remove("is-loading");btn.textContent="Deploy bot";}}
 }
 
 async function _verifyRunSpaceTelegramBot() {
@@ -3759,24 +3744,21 @@ async function _verifyRunSpaceTelegramBot() {
   const btn=document.getElementById("rsTgVerify");
   const state=document.getElementById("rsTgVerifyState");
   const token=(input&&input.value||"").trim();
-  if(!_rsBotAnalysis){toast("Add your source first","error");return;}
-  const setupValues=_collectTemplateEnv(true);if(setupValues===null)return;
   if(!token){if(state){state.textContent="Paste the token from @BotFather first.";state.className="rs-tg-verify-state err";}return;}
   try{
-    if(btn){btn.disabled=true;btn.textContent="Verifying…";}
+    if(btn){btn.disabled=true;btn.classList.add("is-loading");btn.textContent="Verifying…";}
     if(state){state.textContent="Verifying bot…";state.className="rs-tg-verify-state";}
     const meta=await api("/api/telegram-bot/verify","POST",{token},true);
     _rsVerifiedBotToken=token;_rsVerifiedBotMeta=meta;
     _rsTelegramVerificationId=meta.telegram_verification_id||"";
-    if(state){state.textContent="Verified. Deploying…";state.className="rs-tg-verify-state ok";}
-    let launchUrl=meta.telegram_bot_url||"";
-    if(setupValues.ADMIN_CLAIM_CODE&&launchUrl)launchUrl+=(launchUrl.includes("?")?"&":"?")+"start=claim_"+encodeURIComponent(setupValues.ADMIN_CLAIM_CODE);
-    await startJob({launchAfterDeploy:true,launchUrl});
-    if(!document.body.classList.contains("rs-launch-complete")&&state){state.textContent="Deployment did not finish. Try again.";state.className="rs-tg-verify-state err";}
+    const name=document.getElementById("jobName");
+    if(name){const username=(meta.telegram_bot_username||meta.username||"").replace(/^@/,"");name.value=(username.replace(/bot$/i,"")||"telegram")+"-"+(meta.telegram_bot_id||Date.now().toString().slice(-5));}
+    if(state){state.textContent="Verified. Choose how to build your bot.";state.className="rs-tg-verify-state ok";}
+    _setBotWizardStage("code");
   }catch(e){
     _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
     if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
-  }finally{if(btn){btn.disabled=false;btn.textContent="Verify & deploy";}}
+  }finally{if(btn){btn.disabled=false;btn.classList.remove("is-loading");btn.textContent="Verify bot";}}
 }
 
 function _resetRunSpaceTelegramDraft(){
@@ -3784,10 +3766,11 @@ function _resetRunSpaceTelegramDraft(){
   const input=document.getElementById("rsTgToken");if(input)input.value="";
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
-  const analyze=document.getElementById("rsTgAnalyze");if(analyze)analyze.textContent="Continue";
+  const analyze=document.getElementById("rsTgAnalyze");if(analyze){analyze.textContent="Deploy bot";analyze.hidden=true;analyze.classList.remove("is-loading");}
   const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||101} production bots`;
   _renderTemplateConfig([]);
-  _setBotWizardStage("code");
+  _setRunSpaceSourceMode(null);
+  _setBotWizardStage("connect");
 }
 
 const _botHealthCache = new Map();
@@ -3948,10 +3931,10 @@ function _showEmpty(zeroJobs) {
   _clearWorkspaceChrome();
   _setHint("", "Ready");
   _updateStats();
-  // Reset URL to plain /runspace when nothing is selected
+  // Reset URL to plain /bots when nothing is selected
   try {
     if (currentTab === "jobs" && !_routeNav) {
-      history.replaceState({tab:"jobs"}, "", "/runspace");
+      history.replaceState({tab:"jobs"}, "", "/bots");
     }
   } catch (e) {}
 }
@@ -4255,7 +4238,7 @@ function selectJob(id) {
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
-  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review");
+  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor");
   // 👉 Paint sidebar selection + swap to workspace IMMEDIATELY (don't wait for
   // fetch/SSE to round-trip — that's what makes tab switches feel laggy).
   // Data fills in behind the paint with a subtle fade.
@@ -4295,7 +4278,7 @@ function selectJob(id) {
 function deselectJob() {
   _selectedJobId = null;
   _composingNew = false;
-  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review");
+  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor");
   stopLogStream();
   document.querySelectorAll("#jobsList .job-item.active").forEach(el => el.classList.remove("active"));
   const btn = document.getElementById("btnStartJob");
@@ -4637,13 +4620,14 @@ function _initWbWiring() {
   const btnStart = document.getElementById("btnStartJob");
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
-  _loadRunSpaceBotTemplates();
   const browseTemplates=document.getElementById("rsBrowseTemplates");
   if(browseTemplates&&!browseTemplates.dataset.wired){browseTemplates.dataset.wired="1";browseTemplates.addEventListener("click",_openRunSpaceTemplates);}
   const ownCode=document.getElementById("rsUseOwnCode");
   if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||101} production bots`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
   const uploadCode=document.getElementById("rsUploadCode");
   if(uploadCode&&!uploadCode.dataset.wired){uploadCode.dataset.wired="1";uploadCode.addEventListener("click",()=>document.getElementById("rsFileInput")?.click());}
+  const changeSource=document.getElementById("rsChangeSource");
+  if(changeSource&&!changeSource.dataset.wired){changeSource.dataset.wired="1";changeSource.addEventListener("click",()=>{_setRunSpaceSourceMode(null);_renderTemplateConfig([]);_setBotWizardStage("code");});}
   const templateSearch=document.getElementById("rsTemplateSearch");
   if(templateSearch&&!templateSearch.dataset.wired){templateSearch.dataset.wired="1";templateSearch.addEventListener("input",_renderRunSpaceTemplates);}
   const tgAnalyze = document.getElementById("rsTgAnalyze");
@@ -4678,7 +4662,6 @@ function _initWbWiring() {
     if (emp) emp.style.display = "none";
     _clearWorkspaceChrome();
     _resetRunSpaceTelegramDraft();
-    _setRunSpaceSourceMode("own");
     const wizard=document.getElementById("rsTgSetup");if(wizard)wizard.hidden=false;
     _renderLogs("");
     const n = document.getElementById("jobName"); if (n) { n.value = ""; n.classList.remove("rs-inp-err"); }
@@ -4692,8 +4675,8 @@ function _initWbWiring() {
     document.body.classList.remove("rs-side-open","rs-logs-open","rs-menu-open");
     const tab = document.getElementById("tab-jobs");
     if (tab) tab.classList.remove("side-open");
-    // Reset URL to /runspace
-    try { if (!_routeNav) history.replaceState({tab:"jobs"}, "", "/runspace"); } catch(e){}
+    // Reset URL to /bots
+    try { if (!_routeNav) history.replaceState({tab:"jobs"}, "", "/bots"); } catch(e){}
     setTimeout(() => {
       try { if (n) { n.focus(); } } catch(e){}
       _jobCmRefresh();
@@ -5879,7 +5862,7 @@ async function startJob(options) {
     _setHint("ok", "");
     _jobDirty = false;
     _composingNew = false;      // deployed — polling may take over again
-    document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review");
+    document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor");
     // 👉 Optimistic UI update: insert the new job into _lastJobs immediately
     // with status="starting" so sidebar + stats reflect the launch right away
     // instead of waiting 7s for the next poll round. SSE will correct to

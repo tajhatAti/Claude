@@ -2,8 +2,8 @@ const fs=require('fs');const HTML=fs.readFileSync('index.html','utf8'),CSS=fs.re
 let p=0,f=0;const ok=(n,c)=>c?p++:(f++,console.log('  FAIL '+n));
 console.log('[1] custom picker replaces native select');
 ok('native template select is gone',!HTML.includes('id="rsBotTemplate"'));
-ok('clear browse trigger exists',HTML.includes('id="rsBrowseTemplates"')&&HTML.includes('>Templates<'));
-ok('own code is explicit and template-free',HTML.includes('id="rsUseOwnCode"')&&HTML.includes('A template is optional'));
+ok('clear browse trigger exists',HTML.includes('id="rsBrowseTemplates"')&&HTML.includes('>Template<'));
+ok('own code is explicit and template-free',HTML.includes('id="rsUseOwnCode"')&&HTML.includes('Full-screen editor')&&JS.includes('no template required'));
 ok('code upload is a first-class source',HTML.includes('id="rsUploadCode"')&&/_setRunSpaceSourceMode\("upload"\)/.test(JS));
 ok('picker is a real modal',HTML.includes('id="rsTemplateModal"')&&HTML.includes('id="rsTemplateGrid"'));
 ok('search is available',HTML.includes('id="rsTemplateSearch"'));
@@ -15,13 +15,14 @@ ok('picker filters by category',/_rsTemplateCategory==="All"\|\|t\.category===_r
 ok('selected template is reflected on trigger',/rsSelectedTemplate/.test(JS)&&/selected`/.test(JS));
 ok('template strings use textContent, not card innerHTML',/card\.append\(top,desc,meta\)/.test(JS));
 ok('templates can request real setup values',/rsTemplateConfigFields/.test(HTML)&&/function _renderTemplateConfig/.test(JS));
-ok('required setup is validated before Verify & deploy',/setupValues=_collectTemplateEnv\(true\);if\(setupValues===null\)/.test(JS)&&/async function _verifyRunSpaceTelegramBot/.test(JS));
+ok('required setup is validated only at deploy',/async function _analyzeRunSpaceBot[\s\S]*setupValues=_collectTemplateEnv\(true\)/.test(JS));
 ok('setup values join the encrypted deployment env',/_collectTemplateEnv\(false\)/.test(JS)&&/BOT_TOKEN:_rsVerifiedBotToken/.test(JS));
 ok('admin claim codes are generated automatically',/crypto\.getRandomValues/.test(JS)&&/field\.type==="generated"/.test(JS));
 ok('claim code has a one-tap copy action',/copy\.textContent="Copy"/.test(JS)&&/navigator\.clipboard\.writeText/.test(JS));
 ok('Go to bot deep link claims admin automatically',/start=claim_/.test(JS)&&/setupValues\.ADMIN_CLAIM_CODE/.test(JS));
-ok('token verification immediately deploys',/startJob\(\{launchAfterDeploy:true,launchUrl\}\)/.test(JS));
-ok('template-specific next steps appear during Connect',/item\.after_deploy/.test(JS)&&/rs-template-after/.test(CSS));
+ok('token verification detects name then opens source',/telegram_bot_username[\s\S]*_setBotWizardStage\("code"\)/.test(JS));
+ok('source deploy is one click with spinner',/btn\.textContent="Deploying…"/.test(JS)&&/startJob\(\{launchAfterDeploy:true,launchUrl\}\)/.test(JS));
+ok('template-specific setup appears only after source choice',/item\.after_deploy/.test(JS)&&/rs-template-after/.test(CSS));
 ok('gallery advertises the full practical catalog',/101 production bots/.test(HTML));
 console.log('[3] responsive visual');
 ok('desktop uses two-column cards',/\.rs-template-grid \{[^}]*grid-template-columns:1fr 1fr/.test(CSS));
