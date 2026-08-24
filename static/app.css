@@ -1825,8 +1825,36 @@ body.rs-launch-complete #tab-jobs { height:100dvh; }
    by class, never deleted -- the same DOM has to work in a browser. */
 html.in-telegram nav.nav { display: none; }
 html.tg-hide-signout #btnLogout { display: none; }
+/* Telegram client colours must never repaint the product surface. Some
+   Android themes report a saturated blue bg_color; that is appropriate for
+   Telegram chrome, not for the CodeNest canvas. */
+html.in-telegram,
+html.in-telegram body,
+html.in-telegram .dashboard,
+html.in-telegram .dash-main,
+html.in-telegram #tab-jobs { background:#090909 !important; }
+html.in-telegram { scroll-behavior:auto; }
 /* 100vh is wrong in a Telegram webview; the SDK reports the real height. */
 html.in-telegram body { min-height: var(--tg-vh, 100vh); height: var(--tg-vh, 100vh); }
+/* Telegram's Android WebView pays heavily for blurred fixed layers and
+   animated shadows. Keep controls identical but use solid composited panels
+   and immediate state changes inside the Mini App. Spinners remain animated. */
+html.in-telegram .bottom-nav,
+html.in-telegram .rs-menu,
+html.in-telegram .ap-panel,
+html.in-telegram #tab-admin > .tab-head {
+  backdrop-filter:none !important;
+  -webkit-backdrop-filter:none !important;
+}
+html.in-telegram .bottom-nav,
+html.in-telegram .rs-menu { box-shadow:none !important; }
+html.in-telegram .dash-tab-content.active,
+html.in-telegram .rs-menu,
+html.in-telegram .rs-skel { animation:none !important; }
+html.in-telegram button,
+html.in-telegram .job-item,
+html.in-telegram .rs-menu,
+html.in-telegram .bottom-nav { transition-duration:.06s !important; }
 /* Auth screens are unreachable inside the Mini App: it is already signed in,
    and a login form there is a dead end.
 
@@ -3833,3 +3861,13 @@ body.rs-active .dash-main { height: 100dvh; }
   .bot-bottom-nav .bn-item.active { background: var(--card-2); color: var(--fg); box-shadow: none; }
   .bot-bottom-nav .bn-add { transform: translateY(-5px); }
 }
+
+/* Final Mini App guard: keep this after every auth/layout rule so even an
+   inline display written by stale navigation code cannot reveal a form. */
+html.tg-no-auth body > .auth,
+html.tg-no-auth body > #screen-signin,
+html.tg-no-auth body > #screen-signup,
+html.tg-no-auth body > #screen-otp,
+html.tg-no-auth body > #screen-forgot1,
+html.tg-no-auth body > #screen-forgot2,
+html.tg-no-auth body > #screen-forgot3 { display:none !important; }

@@ -6,7 +6,7 @@
  * Telegram" would hide the login screen from ordinary visitors and leave them
  * on a blank page. Detection has to be initData, not the SDK object.
  *
- * Also checked: theme values are validated before being written into CSS
+ * Also checked: Telegram theme colours never overwrite product CSS
  * custom properties (they arrive from the client and land in a stylesheet),
  * an existing session is reused rather than re-authenticated, and a failed
  * verification falls back to the normal login rather than trapping the user.
@@ -44,10 +44,13 @@ function boot({ initData, themeParams, colorScheme, fetchImpl, token }) {
       ready: () => calls.push('ready'),
       expand: () => calls.push('expand'),
       setHeaderColor: (c) => calls.push('header:' + c),
+      setBackgroundColor: (c) => calls.push('background:' + c),
+      setBottomBarColor: (c) => calls.push('bottom:' + c),
       onEvent: (name, fn) => { events[name] = fn; },
     },
   };
   w.API = '';
+  w.requestAnimationFrame = (fn) => { fn(); return 0; };
   w.localStorage.clear();
   if (token) w.localStorage.setItem('ahad_token', token);
   w.fetch = fetchImpl || (() => Promise.reject(new Error('no fetch')));
@@ -97,38 +100,33 @@ inTg.events.viewportChanged();
 ok('a resize updates the variable',
    inTg.d.documentElement.style.getPropertyValue('--tg-vh') === '400px');
 
-// ── 3. theme ────────────────────────────────────────────────────────────
-console.log('[3] the app takes the user\'s own Telegram theme');
+// ── 3. product colour ───────────────────────────────────────────────────
+console.log('[3] Telegram chrome cannot turn the product blue');
 const themed = boot({
   initData: GOOD_INIT,
   colorScheme: 'light',
-  themeParams: { bg_color: '#ffffff', text_color: '#111111',
-                 button_color: '#0088cc', hint_color: '#999999' },
+  themeParams: { bg_color: '#2481cc', text_color: '#ffffff',
+                 button_color: '#2481cc', hint_color: '#99bbee' },
 });
 const st = themed.d.documentElement.style;
-ok('background is applied', st.getPropertyValue('--bg') === '#ffffff');
-ok('text colour is applied', st.getPropertyValue('--ink') === '#111111');
-ok('the accent follows Telegram\'s button colour',
-   st.getPropertyValue('--acc') === '#0088cc');
-ok('the light/dark scheme is honoured',
-   themed.d.documentElement.getAttribute('data-theme') === 'light');
-ok('and a theme change is re-applied, not read once',
-   typeof themed.events.themeChanged === 'function');
-
-// themeParams come from the client and are written into a stylesheet. A value
-// like "red;} body{display:none" must never reach setProperty.
-const hostile = boot({
-  initData: GOOD_INIT,
-  themeParams: { bg_color: 'red;}body{display:none}', text_color: 'javascript:x',
-                 button_color: '#00ff00' },
-});
-const hs = hostile.d.documentElement.style;
-ok('a non-hex theme value is refused', hs.getPropertyValue('--bg') === '');
-ok('so is a javascript: value', hs.getPropertyValue('--ink') === '');
-ok('while a legitimate hex still applies',
-   hs.getPropertyValue('--acc') === '#00ff00');
-ok('the guard is a hex pattern, not a blocklist',
-   /\/\^#\[0-9a-f\]\{3,8\}\$\/i/.test(SRC));
+ok('Telegram bg is not injected into --bg', st.getPropertyValue('--bg') === '');
+ok('Telegram button blue is not injected into --acc', st.getPropertyValue('--acc') === '');
+ok('the product remains in its supported dark scheme',
+   themed.d.documentElement.getAttribute('data-theme') === 'dark');
+ok('Telegram header uses the neutral product background',
+   themed.calls.includes('header:#090909'));
+ok('Telegram webview background uses the neutral product background',
+   themed.calls.includes('background:#090909'));
+ok('themeChanged does not trigger full product restyling',
+   typeof themed.events.themeChanged === 'undefined');
+ok('the source contains no themeParams-to-CSS map',
+   !/root\.style\.setProperty\(cssVar/.test(SRC));
+ok('viewport changes are coalesced into one animation frame',
+   /if \(viewportFrame\) return;[\s\S]*requestAnimationFrame/.test(SRC));
+ok('Telegram canvas is forced to the neutral product background',
+   /html\.in-telegram #tab-jobs \{ background:#090909 !important/.test(CSS));
+ok('blurred fixed panels are disabled in the WebView',
+   /html\.in-telegram \.bottom-nav,[\s\S]{0,220}backdrop-filter:none !important/.test(CSS));
 
 // ── 4. auto-login ───────────────────────────────────────────────────────
 console.log('[4] auto-login: zero taps');
@@ -262,7 +260,6 @@ const okFetch = (url, opts) => {
     const e = ww.document.getElementById('screen-signin');
     if (!e) return false;
     e.classList.add('active');
-    e.style.display = 'block';
     return ww.getComputedStyle(e).display !== 'none';
   }
 
@@ -286,7 +283,7 @@ const okFetch = (url, opts) => {
   ['screen-signup', 'screen-otp', 'screen-forgot1'].forEach((id) => {
     const e = normal.document.getElementById(id);
     if (!e) return;
-    e.classList.add('active'); e.style.display = 'block';
+    e.classList.add('active');
     ok(`${id} is unreachable inside Telegram`,
        normal.getComputedStyle(e).display === 'none');
   });
