@@ -6637,8 +6637,8 @@ function renderAdminStats(ov) {
     chip("on telegram", ov.telegram_linked ?? 0) +
     chip("bot secrets", ov.bot_secrets_encrypted ? "encrypted" : "NOT ENCRYPTED", ov.bot_secrets_encrypted ? "" : "warn") +
     chip("runner", ov.runner_isolation === "remote" ? "isolated service" : "embedded", ov.runner_isolation === "remote" ? "" : "warn") +
-    chip("memory", ov.mem_safe_mb != null
-        ? `${Math.round(ov.mem_used_mb ?? 0)}MB / ${ov.mem_safe_mb}MB`
+    chip("runner memory used", ov.mem_safe_mb != null
+        ? `${Math.round(ov.mem_used_mb ?? 0)}MB used`
         : "—",
       (ov.mem_pct ?? 0) >= 90 ? "warn" : "");
   const cap = document.getElementById("admCap");
@@ -6647,8 +6647,8 @@ function renderAdminStats(ov) {
     // the same RAM, so a slot count never predicted whether the next job fits.
     if (ov.mem_safe_mb != null) {
       const jobs = ov.runner_running ?? 0;
-      let txt = `${Math.round(ov.mem_used_mb ?? 0)}MB / ${ov.mem_safe_mb}MB`
-              + ` (${ov.mem_pct ?? 0}%) — ${jobs} job${jobs === 1 ? "" : "s"} running`;
+      let txt = `${Math.round(ov.mem_used_mb ?? 0)}MB currently used · ${ov.mem_safe_mb}MB safe fleet capacity`
+              + ` (${ov.mem_pct ?? 0}%) — ${jobs} bot${jobs === 1 ? "" : "s"} running`;
       if (ov.mem_total_mb) txt += ` · ${ov.mem_total_mb}MB total`;
       if ((ov.workers || []).length > 1) {
         txt += ` · ${ov.workers_online ?? 0}/${ov.workers.length} workers online`;

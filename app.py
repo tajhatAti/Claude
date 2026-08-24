@@ -79,6 +79,14 @@ async def startup_event():
     except Exception as exc:
         logger.warning("Retention cleanup failed: %s", exc)
     asyncio.create_task(_self_ping_loop())
+    # A full Render deploy kills every subprocess. Desired-running bots are
+    # recreated from their saved source/env after secret migration completes;
+    # this runs in the background so the website still starts immediately.
+    try:
+        from services import job_recovery
+        asyncio.create_task(job_recovery.recover_background())
+    except Exception as exc:
+        logger.warning("Bot recovery scheduler failed: %s", exc)
     # Telegram server-alive bot — starts automatically if TELEGRAM_PING_BOT_TOKEN is set
     try:
         from services.pingbot import start_bot as _start_pingbot

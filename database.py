@@ -590,6 +590,7 @@ _SCHEMA_TABLES = [
         -- first in the pool, so with 2+ workers the site would report a
         -- perfectly healthy bot as dead. NULL = the single-worker default.
         worker_url TEXT,
+        desired_state TEXT NOT NULL DEFAULT 'running',
         env TEXT,
         telegram_bot_detected INTEGER NOT NULL DEFAULT 0,
         telegram_bot_username TEXT,
@@ -910,6 +911,11 @@ def init_db():
         # are — so this migration cannot strand a running bot.
         if not _column_exists(conn, "jobs", "worker_url"):
             conn.execute("ALTER TABLE jobs ADD COLUMN worker_url TEXT")
+        # Desired process state survives control-plane and runner redeploys.
+        # Existing deployed rows default to running, matching the platform's
+        # 24/7 promise; future Stop actions set this to stopped explicitly.
+        if not _column_exists(conn, "jobs", "desired_state"):
+            conn.execute("ALTER TABLE jobs ADD COLUMN desired_state TEXT NOT NULL DEFAULT 'running'")
 
         # Telegram bot metadata is safe identity/status only. Raw tokens remain
         # solely in the user's source/env and are never copied here.

@@ -156,7 +156,7 @@ def snapshot_meta(job_id: int) -> Optional[dict]:
 
 
 def restore_snapshot(job_id: int, runner_job_id: str,
-                     overwrite: bool = False) -> dict:
+                     overwrite: bool = False, worker: str = None) -> dict:
     """Push the stored workspace back to the runner. Best-effort by design."""
     if not SNAPSHOTS_ENABLED or not runner_job_id:
         return {"restored": 0, "reason": "disabled"}
@@ -168,6 +168,7 @@ def restore_snapshot(job_id: int, runner_job_id: str,
         resp = runner_client._runner_http(
             "POST", f"/internal/jobs/{runner_job_id}/snapshot/restore",
             {"tarball_b64": snap["tarball_b64"], "overwrite": bool(overwrite)},
+            worker=worker,
         )
     except Exception as exc:
         logger.warning("snapshot: restore call failed for job %s: %s", job_id, exc)

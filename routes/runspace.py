@@ -249,7 +249,7 @@ def _restore_then_restart(job_id: int, info: dict, worker: str = None) -> dict:
         return info
     try:
         from services import snapshots
-        res = snapshots.restore_snapshot(job_id, rid, overwrite=True)
+        res = snapshots.restore_snapshot(job_id, rid, overwrite=True, worker=worker)
         if res.get("restored"):
             r = runner_client._runner_http("POST", f"/internal/jobs/{rid}/restart", worker=worker)
             if r.status_code == 200:
@@ -545,7 +545,7 @@ def list_jobs(authorization: Optional[str] = Header(None)):
     jobs = []
     for stored in rows:
         row = dict(stored)
-        row["status"] = row.get("status") or "unknown"
+        row["status"] = "stopped" if row.get("desired_state") == "stopped" else "running"
         row["status_stale"] = True
         row["env"] = _public_env(_row_env(row))
         _attach_telegram_public(row)
@@ -559,7 +559,7 @@ def get_job(job_id: int, authorization: Optional[str] = Header(None)):
     """Return saved code immediately; live health refreshes in background."""
     user, _ = get_current_user_and_session(authorization)
     row = dict(_get_own_job(job_id, user))
-    row["status"] = row.get("status") or "unknown"
+    row["status"] = "stopped" if row.get("desired_state") == "stopped" else "running"
     row["status_stale"] = True
     row["env"] = _public_env(_row_env(row))
     _attach_telegram_public(row)
@@ -685,7 +685,7 @@ def rollback_bot_revision(job_id: int, revision_id: int,
             action=f"rollback_to_v{rev['version']}", status="healthy")
         conn.execute("UPDATE bot_revisions SET promoted_at=? WHERE id=?", (now, new_revision_id))
         conn.execute(
-            "UPDATE jobs SET language=?,code=?,runner_job_id=?,worker_url=?,"
+            "UPDATE jobs SET language=?,code=?,runner_job_id=?,worker_url=?,desired_state='running',"
             "telegram_framework=?,telegram_update_mode=?,telegram_token_source=?,updated_at=? WHERE id=?",
             (rev["language"], rev["code"], new_runner_id, new_worker,
              analysis["framework"], analysis["update_mode"], analysis["token_source"],
@@ -1012,7 +1012,7 @@ def restore_job_snapshot(job_id: int, authorization: Optional[str] = Header(None
     from services import snapshots
     if not snapshots.load_snapshot(job_id):
         raise HTTPException(status_code=404, detail="No backup stored for this job.")
-    res = snapshots.restore_snapshot(job_id, rid, overwrite=True)
+    res = snapshots.restore_snapshot(job_id, rid, overwrite=True, worker=_worker_of(row))
     if not res.get("restored"):
         raise HTTPException(status_code=502,
                             detail=f"Restore failed — {res.get('reason') or 'unknown error'}.")
@@ -1084,6 +1084,13 @@ def stop_job(job_id: int, authorization: Optional[str] = Header(None)):
         resp = runner_client._runner_http("POST", f"/internal/jobs/{rid}/stop", worker=_worker_of(row))
         if resp.status_code not in (200, 404):
             raise HTTPException(status_code=502, detail="Runner refused to stop the job.")
+    conn = get_db_connection()
+    try:
+        conn.execute("UPDATE jobs SET desired_state='stopped',updated_at=? WHERE id=?",
+                     (now_utc_str(), job_id))
+        conn.commit()
+    finally:
+        conn.close()
     return {"status": "stopped"}
 
 
@@ -1146,6 +1153,8 @@ def restart_job(job_id: int, request: Request, authorization: Optional[str] = He
     }
     conn = get_db_connection()
     try:
+        conn.execute("UPDATE jobs SET desired_state='running',updated_at=? WHERE id=?",
+                     (now_utc_str(), job_id))
         _record_deploy_event(conn, user["id"], job_id, "restart", row["name"], meta, now_utc_str())
         conn.commit()
     finally:
@@ -1282,7 +1291,7 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     conn = get_db_connection()
     try:
         conn.execute(
-            "UPDATE jobs SET name=?,language=?,code=?,env=?,runner_job_id=?,worker_url=?,"
+            "UPDATE jobs SET name=?,language=?,code=?,env=?,runner_job_id=?,worker_url=?,desired_state='running',"
             "telegram_bot_detected=?,telegram_bot_username=?,telegram_bot_id=?,"
             "telegram_check_status=?,telegram_verified_at=?,telegram_token_fingerprint=?,"
             "telegram_framework=?,telegram_update_mode=?,telegram_token_source=?,updated_at=? WHERE id=?",
