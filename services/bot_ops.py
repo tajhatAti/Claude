@@ -70,7 +70,7 @@ def list_apps(user_id: int) -> list:
     conn = get_db_connection()
     try:
         rows = [dict(r) for r in conn.execute(
-            "SELECT id, name, language, runner_job_id, worker_url, created_at "
+            "SELECT id, name, language, runner_job_id, worker_url, desired_state, created_at "
             "FROM jobs WHERE user_id = ? ORDER BY id DESC", (user_id,)
         ).fetchall()]
     finally:
@@ -78,7 +78,7 @@ def list_apps(user_id: int) -> list:
     live = runner_client.fleet_jobs()
     for r in rows:
         info = live.get(r.get("runner_job_id")) or {}
-        r["status"] = info.get("status") or ("offline" if r.get("runner_job_id") else "stopped")
+        r["status"] = info.get("status") or ("stopped" if r.get("desired_state")=="stopped" else "recovering")
         r["mem_mb"] = info.get("mem_mb")
         r["uptime_s"] = info.get("uptime_s")
         r["restarts"] = info.get("restarts")
@@ -138,19 +138,127 @@ def _row_env(row) -> dict:
         return {}
 
 
+def _set_assignment(row, runner_id, worker, desired="running"):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE jobs SET runner_job_id=?,worker_url=?,desired_state=?,updated_at=? "
+            "WHERE id=? AND user_id=?",
+            (runner_id, worker, desired, now_utc_str(), row["id"], row["user_id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    row["runner_job_id"] = runner_id
+    row["worker_url"] = worker
+    row["desired_state"] = desired
+
+
+def _cold_start(row, code=None, language=None) -> dict:
+    """Create a fresh internal job and atomically replace its assignment.
+
+    The jobs-table id/name remains the user's stable identity. Runner ids are
+    disposable implementation details and may change after any runner deploy.
+    """
+    env = _row_env(row)
+    if row.get("telegram_bot_detected") and not env.get("BOT_TOKEN"):
+        return {"ok": False, "error": "The saved bot token is unavailable. Ask the owner to restore the previous encryption key."}
+    # Older Telegram-created rows did not persist worker_url. Before creating
+    # anything, find the process by its stable internal name across the whole
+    # fleet. This adopts the real assignment and prevents a second poller from
+    # being launched with the same Telegram token.
+    stable_name = f"u{row['user_id']}-{row['name']}"
+    try:
+        matches = [info for info in runner_client.fleet_jobs(refresh=True).values()
+                   if info.get("name") == stable_name]
+    except Exception:
+        matches = []
+    if matches:
+        chosen = next((x for x in matches if x.get("status") == "running"), matches[0])
+        worker = chosen.get("worker")
+        _set_assignment(row, chosen["id"], worker, "running")
+        # Clean up duplicates left by the old ambiguous routing code.
+        for duplicate in matches:
+            if duplicate.get("id") == chosen.get("id"):
+                continue
+            try:
+                runner_client._runner_http("POST", f"/internal/jobs/{duplicate['id']}/stop",
+                                           worker=duplicate.get("worker"))
+            except Exception:
+                pass
+        try:
+            restarted = runner_client._runner_http(
+                "POST", f"/internal/jobs/{chosen['id']}/restart", worker=worker)
+            if restarted.status_code == 200:
+                chosen = restarted.json()
+        except Exception:
+            pass
+        return {"ok": True, "job": row, "info": chosen}
+    body = {
+        "language": language or row.get("language") or "python",
+        "code": code if code is not None else (row.get("code") or ""),
+        "name": f"u{row['user_id']}-{row['name']}",
+        "env": env,
+    }
+    try:
+        response = runner_client._runner_http("POST", "/internal/jobs", body)
+    except Exception as exc:
+        logger.warning("cold start failed for DB job %s: %s", row.get("id"), exc)
+        return {"ok": False, "error": "No runner is ready yet. Try again shortly."}
+    if response.status_code != 201:
+        try:
+            detail = response.json().get("detail", "Runner rejected the bot.")
+        except Exception:
+            detail = "Runner rejected the bot."
+        return {"ok": False, "error": detail}
+    info = response.json()
+    worker = getattr(response, "placed_on", None)
+    _set_assignment(row, info["id"], worker, "running")
+    try:
+        from services import snapshots
+        restored = snapshots.restore_snapshot(
+            row["id"], info["id"], overwrite=True, worker=worker)
+        if restored.get("restored"):
+            restarted = runner_client._runner_http(
+                "POST", f"/internal/jobs/{info['id']}/restart", worker=worker)
+            if restarted.status_code == 200:
+                info = restarted.json()
+    except Exception as exc:
+        logger.warning("cold start snapshot failed for DB job %s: %s", row.get("id"), exc)
+    return {"ok": True, "job": row, "info": info}
+
+
+def _ensure_present(row) -> dict:
+    rid = row.get("runner_job_id")
+    if rid:
+        try:
+            response = runner_client._runner_http(
+                "GET", f"/internal/jobs/{rid}", worker=_worker_of(row))
+            if response.status_code == 200:
+                return {"ok": True, "job": row, "info": response.json() or {}}
+            if response.status_code != 404:
+                return {"ok": False, "error": f"Runner returned HTTP {response.status_code}."}
+        except Exception as exc:
+            logger.warning("assignment check failed for DB job %s: %s", row.get("id"), exc)
+            return {"ok": False, "error": "The assigned runner did not answer. Try again shortly."}
+    if row.get("desired_state") == "stopped":
+        return {"ok": False, "error": f"“{row['name']}” is stopped. Use /restart {row['name']}."}
+    return _cold_start(row)
+
+
 def active_count(user_id: int) -> int:
     """Apps the runner reports as alive. Counting rows would lock an account
     out after MAX_JOBS_PER_USER lifetime jobs even with all of them stopped."""
     conn = get_db_connection()
     try:
         rows = conn.execute(
-            "SELECT runner_job_id FROM jobs WHERE user_id = ?", (user_id,)
+            "SELECT runner_job_id,desired_state FROM jobs WHERE user_id = ?", (user_id,)
         ).fetchall()
     finally:
         conn.close()
     live = set(runner_client.fleet_jobs())
     if not live:
-        return len(rows)
+        return sum(1 for r in rows if dict(r).get("desired_state") != "stopped")
     return sum(1 for r in rows if dict(r).get("runner_job_id") in live)
 
 
@@ -159,15 +267,34 @@ def _act(user_id: int, ref: str, verb: str) -> dict:
     if not row:
         return {"ok": False, "error": f"No app called “{ref}”. /apps lists yours."}
     rid = row.get("runner_job_id")
-    if not rid:
-        return {"ok": False, "error": f"“{row['name']}” was never deployed."}
-    path = {"restart": f"/internal/jobs/{rid}/restart",
-            "stop": f"/internal/jobs/{rid}/stop"}[verb]
-    try:
-        runner_client._runner_http("POST", path, worker=_worker_of(row))
-    except Exception as exc:
-        logger.warning("bot %s failed for job %s: %s", verb, row.get("id"), exc)
-        return {"ok": False, "error": "The worker did not answer. Try again shortly."}
+    if verb == "restart":
+        if rid:
+            try:
+                response = runner_client._runner_http(
+                    "POST", f"/internal/jobs/{rid}/restart", worker=_worker_of(row))
+                if response.status_code == 200:
+                    _set_assignment(row, rid, _worker_of(row), "running")
+                    return {"ok": True, "job": row}
+                if response.status_code != 404:
+                    return {"ok": False, "error": f"Runner rejected restart (HTTP {response.status_code})."}
+            except Exception as exc:
+                logger.warning("bot restart failed for job %s: %s", row.get("id"), exc)
+                return {"ok": False, "error": "The assigned runner did not answer. Try again shortly."}
+        # Internal id vanished after a deploy: create on the least-loaded
+        # runner and replace the DB assignment instead of claiming success.
+        return _cold_start(row)
+
+    # Stop is idempotent: a missing internal id is already stopped.
+    if rid:
+        try:
+            response = runner_client._runner_http(
+                "POST", f"/internal/jobs/{rid}/stop", worker=_worker_of(row))
+            if response.status_code not in (200, 404):
+                return {"ok": False, "error": f"Runner rejected stop (HTTP {response.status_code})."}
+        except Exception as exc:
+            logger.warning("bot stop failed for job %s: %s", row.get("id"), exc)
+            return {"ok": False, "error": "The assigned runner did not answer. Try again shortly."}
+    _set_assignment(row, rid, _worker_of(row), "stopped")
     return {"ok": True, "job": row}
 
 
@@ -229,18 +356,10 @@ def logs(user_id: int, ref: str, lines: int = 40) -> dict:
     row = find_app(user_id, ref)
     if not row:
         return {"ok": False, "error": f"No app called “{ref}”. /apps lists yours."}
-    rid = row.get("runner_job_id")
-    if not rid:
-        return {"ok": False, "error": f"“{row['name']}” was never deployed."}
-    try:
-        resp = runner_client._runner_http(
-            "GET", f"/internal/jobs/{rid}", worker=_worker_of(row))
-    except Exception as exc:
-        logger.warning("bot logs: worker unreachable for %s: %s", rid, exc)
-        return {"ok": False, "error": "The worker did not answer."}
-    if resp is None or resp.status_code != 200:
-        return {"ok": False, "error": "That app is not on the worker any more."}
-    info = resp.json() or {}
+    present = _ensure_present(row)
+    if not present.get("ok"):
+        return present
+    info = present.get("info") or {}
     text = (info.get("logs") or "").splitlines()
     return {"ok": True, "job": row, "info": info,
             "logs": "\n".join(text[-lines:]),
@@ -267,17 +386,17 @@ def create_app(user_id: int, name: str, language: str, code: str) -> dict:
             return {"ok": False,
                     "error": f"You already have an app called “{clean}”. Use /update {clean} instead."}
         rows = conn.execute(
-            "SELECT runner_job_id FROM jobs WHERE user_id = ?", (user_id,)
+            "SELECT runner_job_id,desired_state FROM jobs WHERE user_id = ?", (user_id,)
         ).fetchall()
     finally:
         conn.close()
 
     live = set(runner_client.fleet_jobs())
     active = (sum(1 for r in rows if dict(r).get("runner_job_id") in live)
-              if live else len(rows))
+              if live else sum(1 for r in rows if dict(r).get("desired_state") != "stopped"))
     if active >= MAX_JOBS_PER_USER:
         return {"ok": False,
-                "error": (f"You already have {active} of {MAX_JOBS_PER_USER} RunSpace apps "
+                "error": (f"You already have {active} of {MAX_JOBS_PER_USER} bots "
                           f"running — stop one before making another.")}
 
     body = {"language": language, "code": code, "name": f"u{user_id}-{clean}", "env": {}}
@@ -294,9 +413,9 @@ def create_app(user_id: int, name: str, language: str, code: str) -> dict:
     conn = get_db_connection()
     try:
         cursor = conn.execute(
-            "INSERT INTO jobs (user_id, name, language, code, runner_job_id, env, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, clean, language, code, info["id"], None, now, now))
+            "INSERT INTO jobs (user_id,name,language,code,runner_job_id,worker_url,desired_state,env,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,'running',?,?,?)",
+            (user_id,clean,language,code,info["id"],getattr(resp,"placed_on",None),None,now,now))
         conn.commit()
         job_db_id = cursor.lastrowid
     finally:
@@ -344,8 +463,8 @@ def update_code(user_id: int, ref: str, code: str, language: str = None) -> dict
         info = resp.json()
         conn = get_db_connection()
         try:
-            conn.execute("UPDATE jobs SET runner_job_id = ?, updated_at = ? WHERE id = ?",
-                         (info["id"], now_utc_str(), row["id"]))
+            conn.execute("UPDATE jobs SET runner_job_id=?,worker_url=?,desired_state='running',updated_at=? WHERE id=?",
+                         (info["id"],getattr(resp,"placed_on",None),now_utc_str(),row["id"]))
             conn.commit()
         finally:
             conn.close()
@@ -356,7 +475,7 @@ def update_code(user_id: int, ref: str, code: str, language: str = None) -> dict
     # if the runner has to cold-start.
     try:
         from services import snapshots
-        snapshots.save_snapshot(row["id"], rid)
+        snapshots.save_snapshot(row["id"], rid, worker=_worker_of(row))
     except Exception as exc:
         logger.warning("bot update_code: pre-update snapshot failed for job %s: %s", row["id"], exc)
 
@@ -364,6 +483,7 @@ def update_code(user_id: int, ref: str, code: str, language: str = None) -> dict
     resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", patch_body,
                                        worker=_worker_of(row))
     if resp.status_code == 200:
+        _set_assignment(row, rid, _worker_of(row), "running")
         return {"ok": True, "job": row}
 
     if resp.status_code == 404:
@@ -380,8 +500,8 @@ def update_code(user_id: int, ref: str, code: str, language: str = None) -> dict
         info = resp2.json()
         conn = get_db_connection()
         try:
-            conn.execute("UPDATE jobs SET runner_job_id = ?, worker_url = ?, updated_at = ? WHERE id = ?",
-                         (info["id"], getattr(resp2, "placed_on", None), now_utc_str(), row["id"]))
+            conn.execute("UPDATE jobs SET runner_job_id=?,worker_url=?,desired_state='running',updated_at=? WHERE id=?",
+                         (info["id"],getattr(resp2,"placed_on",None),now_utc_str(),row["id"]))
             conn.commit()
         finally:
             conn.close()

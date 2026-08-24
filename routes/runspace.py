@@ -433,13 +433,13 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
         # count. If the runner is unreachable we fall back to the row count
         # rather than letting the cap disappear entirely.
         rows = conn.execute(
-            "SELECT runner_job_id FROM jobs WHERE user_id = ?", (user["id"],)
+            "SELECT runner_job_id,desired_state FROM jobs WHERE user_id = ?", (user["id"],)
         ).fetchall()
         live_ids = limits.running_runner_ids()
         if live_ids:
             active = sum(1 for r in rows if dict(r).get("runner_job_id") in live_ids)
         else:
-            active = len(rows)
+            active = sum(1 for r in rows if dict(r).get("desired_state") != "stopped")
         if active >= MAX_JOBS_PER_USER:
             conn.close()
             raise HTTPException(
@@ -988,7 +988,7 @@ def create_job_snapshot(job_id: int, authorization: Optional[str] = Header(None)
     if not rid:
         raise HTTPException(status_code=409, detail="Job is not deployed yet.")
     from services import snapshots
-    res = snapshots.save_snapshot(job_id, rid)
+    res = snapshots.save_snapshot(job_id, rid, worker=_worker_of(row))
     if not res.get("saved"):
         reason = res.get("reason") or "nothing to back up"
         # "no data files" is a normal state for a bot that hasn't written
@@ -1078,7 +1078,7 @@ def stop_job(job_id: int, authorization: Optional[str] = Header(None)):
         # likely one to be sitting idle when the next deploy wipes the disk.
         try:
             from services import snapshots
-            snapshots.save_snapshot(job_id, rid)
+            snapshots.save_snapshot(job_id, rid, worker=_worker_of(row))
         except Exception as exc:
             logger.warning("pre-stop snapshot failed for job %s: %s", job_id, exc)
         resp = runner_client._runner_http("POST", f"/internal/jobs/{rid}/stop", worker=_worker_of(row))
@@ -1240,7 +1240,7 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     # data recoverable. Best-effort — a failed backup must not block the edit.
     try:
         from services import snapshots
-        snapshots.save_snapshot(job_id, rid)
+        snapshots.save_snapshot(job_id, rid, worker=_worker_of(row))
     except Exception as exc:
         logger.warning("pre-update snapshot failed for job %s: %s", job_id, exc)
 

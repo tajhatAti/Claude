@@ -61,16 +61,17 @@ def _stop_user_jobs_best_effort(user_id: int):
     try:
         conn = get_db_connection()
         try:
-            rows = conn.execute(
-                "SELECT runner_job_id FROM jobs WHERE user_id=? AND runner_job_id IS NOT NULL",
+            rows = [dict(r) for r in conn.execute(
+                "SELECT runner_job_id,worker_url FROM jobs WHERE user_id=? AND runner_job_id IS NOT NULL",
                 (user_id,),
-            ).fetchall()
-            rids = [dict(r)["runner_job_id"] for r in rows if dict(r).get("runner_job_id")]
+            ).fetchall()]
+            conn.execute("UPDATE jobs SET desired_state='stopped' WHERE user_id=?",(user_id,))
+            conn.commit()
         finally:
             conn.close()
-        for rid in rids:
+        for item in rows:
             try:
-                runner_client._runner_http("POST", f"/internal/jobs/{rid}/stop")
+                runner_client._runner_http("POST", f"/internal/jobs/{item['runner_job_id']}/stop", worker=item.get("worker_url"))
             except Exception:
                 pass
     except Exception:

@@ -472,7 +472,7 @@ def _fmt_uptime(sec):
 
 
 _ICON = {"running": "🟢", "crashed": "🔴", "installing": "🟡",
-         "starting": "🟡", "restarting": "🟡", "stopped": "⚪", "offline": "⚪"}
+         "starting": "🟡", "restarting": "🟡", "recovering": "🟡", "stopped": "⚪", "offline": "⚪"}
 
 
 def cmd_apps(chat_id, user):
