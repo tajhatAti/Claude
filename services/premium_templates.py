@@ -43,7 +43,7 @@ async def start(u:Update,c:ContextTypes.DEFAULT_TYPE):
 async def ask(u:Update,c:ContextTypes.DEFAULT_TYPE):
  uid=u.effective_user.id
  if not allowed(uid):await u.message.reply_text("Daily quota reached or access restricted.");return
- if not KEY:await u.message.reply_text("The owner must add AI_API_KEY during deployment.");return
+ if not KEY:await u.message.reply_text("The owner must add AI_API_KEY in bot settings.");return
  prompt=setting("system",ROLE);text=clean(u.message.text);messages=[{{"role":"system","content":prompt}},*history(uid),{{"role":"user","content":text}}]
  wait=await u.message.reply_text("Working…")
  try:

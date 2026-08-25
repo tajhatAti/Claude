@@ -3619,7 +3619,7 @@ function _setBotWizardStage(stage) {
   const codeStage=document.getElementById("rsTgCodeStage");if(codeStage)codeStage.hidden=!source;
   const connectStage=document.getElementById("rsTgConnectStage");if(connectStage)connectStage.hidden=!connect;
   const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
-  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=!source||(!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy);
+  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=true;
   _rsWizardStep(stage);
   const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
 }
@@ -3627,7 +3627,9 @@ function _setBotWizardStage(stage) {
 let _rsTemplates=[];
 let _rsTemplateCategory="All";
 let _rsTemplateEnvFields=[];
+let _rsTemplateEnvValues={};
 let _rsTemplateAfterDeploy="";
+let _rsTemplateDeploying=false;
 
 function _setRunSpaceSourceMode(mode) {
   const map={own:"rsUseOwnCode",template:"rsBrowseTemplates",upload:"rsUploadCode"};
@@ -3644,10 +3646,11 @@ function _newTemplateSecret() {
 
 function _renderTemplateConfig(fields,afterDeploy) {
   _rsTemplateEnvFields=Array.isArray(fields)?fields:[];
+  _rsTemplateEnvValues={};
   _rsTemplateAfterDeploy=afterDeploy||"";
   const box=document.getElementById("rsTemplateConfig"),host=document.getElementById("rsTemplateConfigFields");
   if(!box||!host)return;
-  host.textContent="";box.hidden=!_rsTemplateEnvFields.length&&!_rsTemplateAfterDeploy;
+  host.textContent="";box.hidden=true;
   _rsTemplateEnvFields.forEach(field=>{
     const label=document.createElement("label");label.className="field";
     const title=document.createElement("span");title.textContent=field.label+(field.required?" · required":"");
@@ -3664,10 +3667,16 @@ function _renderTemplateConfig(fields,afterDeploy) {
 }
 
 function _collectTemplateEnv(showError) {
-  const values={};let missing=null;
-  _rsTemplateEnvFields.forEach(field=>{const input=document.querySelector(`#rsTemplateConfigFields [data-env-key="${field.key}"]`);const value=(input?.value||"").trim();if(value)values[field.key]=value;else if(field.required&&!missing)missing=input;});
-  if(missing&&showError){toast("Complete the required template setup first","error");missing.focus();}
-  return missing?null:values;
+  // Template deploy is one tap: values are pre-filled silently (generated
+  // claim codes, defaults). Optional API keys can be added later in bot
+  // settings, so nothing here ever blocks the run.
+  const values={..._rsTemplateEnvValues};
+  _rsTemplateEnvFields.forEach(field=>{
+    const input=document.querySelector(`#rsTemplateConfigFields [data-env-key="${field.key}"]`);
+    const value=(input?.value||"").trim();
+    if(value)values[field.key]=value;
+  });
+  return values;
 }
 
 function _renderRunSpaceTemplates() {
@@ -3707,18 +3716,23 @@ async function _openRunSpaceTemplates() {
 
 async function _applyRunSpaceBotTemplate(templateId,templateName) {
   if(!templateId)return;
+  if(_rsTemplateDeploying)return;
   if((_jobCmGetValue()||"").trim()&&!confirm("Replace the current code with this template?"))return;
+  _rsTemplateDeploying=true;
   try{
     const item=await api(`/api/telegram-bot/templates/${encodeURIComponent(templateId)}`,"GET",null,true);
     _jobCmSetValue(item.code||"");
     const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
     const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
     _renderTemplateConfig(item.env_fields||[],item.after_deploy||"");
+    _rsTemplateEnvValues=_collectTemplateEnv(false)||{};
     _setRunSpaceSourceMode("template");
     const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${templateName||item.name} selected`;
     closeModal("rsTemplateModal");_rsBotAnalysis=null;_setBotWizardStage("code");
-    toast("Template ready — edit anything, then Continue","success");
+    toast(`Deploying ${item.name}…`,"info");
+    await _analyzeRunSpaceBot();
   }catch(e){toast(e.message,"error");}
+  finally{_rsTemplateDeploying=false;}
 }
 
 async function _analyzeRunSpaceBot() {
@@ -3727,7 +3741,7 @@ async function _analyzeRunSpaceBot() {
   const btn=document.getElementById("rsTgAnalyze");
   if(!_rsVerifiedBotToken){_setBotWizardStage("connect");toast("Verify the BotFather token first","info");return;}
   if(!code.trim()){toast("Paste or upload the bot code first","error");_jobCmFocus();return;}
-  const setupValues=_collectTemplateEnv(true);if(setupValues===null)return;
+  const setupValues=_collectTemplateEnv(false)||{};
   try {
     if(btn){btn.disabled=true;btn.classList.add("is-loading");btn.textContent="Deploying…";}
     _rsBotAnalysis=await api("/api/telegram-bot/analyze","POST",{code,language},true);
@@ -3735,6 +3749,7 @@ async function _analyzeRunSpaceBot() {
     if(setupValues.ADMIN_CLAIM_CODE&&launchUrl)launchUrl+=(launchUrl.includes("?")?"&":"?")+"start=claim_"+encodeURIComponent(setupValues.ADMIN_CLAIM_CODE);
     await startJob({launchAfterDeploy:true,launchUrl});
     if(!document.body.classList.contains("rs-launch-complete"))toast("Deployment did not finish. Tap Deploy bot to retry.","error");
+    else if(_rsTemplateAfterDeploy)toast("Deployed. "+_rsTemplateAfterDeploy,"success");
   } catch(e){toast(e.message,"error");}
   finally{if(btn){btn.disabled=false;btn.classList.remove("is-loading");btn.textContent="Deploy bot";}}
 }
@@ -3767,7 +3782,7 @@ function _resetRunSpaceTelegramDraft(){
   const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
   const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
   const analyze=document.getElementById("rsTgAnalyze");if(analyze){analyze.textContent="Deploy bot";analyze.hidden=true;analyze.classList.remove("is-loading");}
-  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||5} complete bot products`;
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||7} complete bot products`;
   _renderTemplateConfig([]);
   _setRunSpaceSourceMode(null);
   _setBotWizardStage("connect");
@@ -4623,7 +4638,7 @@ function _initWbWiring() {
   const browseTemplates=document.getElementById("rsBrowseTemplates");
   if(browseTemplates&&!browseTemplates.dataset.wired){browseTemplates.dataset.wired="1";browseTemplates.addEventListener("click",_openRunSpaceTemplates);}
   const ownCode=document.getElementById("rsUseOwnCode");
-  if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||5} complete bot products`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
+  if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||7} complete bot products`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
   const uploadCode=document.getElementById("rsUploadCode");
   if(uploadCode&&!uploadCode.dataset.wired){uploadCode.dataset.wired="1";uploadCode.addEventListener("click",()=>document.getElementById("rsFileInput")?.click());}
   const changeSource=document.getElementById("rsChangeSource");
@@ -8130,7 +8145,7 @@ async function _rsHandleUpload(file) {
   _jobCmSetValue(text);
   _renderTemplateConfig([]);
   _setRunSpaceSourceMode("upload");
-  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="5 complete bot products";
+  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="7 complete bot products";
   _rsBotAnalysis=null;
   _setBotWizardStage("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);

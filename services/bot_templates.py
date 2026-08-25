@@ -848,9 +848,9 @@ app.run_polling()
 ''', "Simple"),
 }
 
-# Public catalog: five complete products. The legacy definitions above remain
-# only as source-history while this migration settles; they are not listed or
-# retrievable through the template API.
+# Public catalog: seven complete products, one template = one job. The legacy
+# definitions above remain only as source-history while this migration settles;
+# they are not listed or retrievable through the template API.
 from services.flagship_templates import build_flagship_templates
 TEMPLATES = build_flagship_templates()
 

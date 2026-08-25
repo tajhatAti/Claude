@@ -1,14 +1,16 @@
 # Telegram bot product research
 
-Research updated: 2026-08-24
+Research updated: 2026-08-25
 
 There is no trustworthy official global installation ranking. Repeated categories across current Telegram directories and mature open-source products were used instead:
 
 - group moderation/captcha/anti-spam;
-- file storage, conversion, OCR and security;
+- channel management (force-join, approvals, scheduling, forwarding, tag removal, captions, inline buttons);
+- referral & rewards (invite tracking, points, withdrawals);
+- file storage/sharing;
+- media & AI conversion (image/PDF/voice/text);
 - AI assistants and business support;
-- shops, carts, payments and order tracking;
-- channel publishing, referrals and paid membership.
+- shops, carts, payments and order tracking.
 
 References:
 
@@ -20,9 +22,13 @@ References:
 - shop architecture: https://github.com/ilyarolf/AiogramShopBot
 - support architecture: https://github.com/bostrot/telegram-support-bot
 
-## Decision
+## One template = one job
 
-The previous 101-entry catalog reused a few engines across many names. It was removed. The public catalog now has five integrated products; each groups related features users expect to work together.
+The previous 101-entry catalog reused a few engines across many names and merged neighbouring categories (e.g. channel management with referral payouts). It was removed. The public catalog now has seven integrated products; each product owns exactly one category exhaustively — depth inside the category is welcome, borrowing another category's core feature is not.
+
+## One-tap deploy
+
+Template selection deploys immediately after token verification. No second options screen: optional API keys are added later from bot settings, and the admin claim code is generated automatically into the Go-to-bot link.
 
 ## Validation
 
@@ -34,4 +40,5 @@ Automated tests require every public product to:
 - compile successfully;
 - use polling correctly;
 - execute its embedded SQLite schema;
-- contain the advertised integrated controls for its category.
+- contain the advertised integrated controls for its category;
+- contain **no** marker from a neighbouring category (no `referrer` inside channel management, no `Image.open` inside file share, no `virustotal` inside the media converter, …).
