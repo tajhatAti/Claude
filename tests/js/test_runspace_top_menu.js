@@ -12,9 +12,16 @@ ok('primary action says Save & Run',/id="btnStartJob"[\s\S]{0,500}>Save &amp; Ru
 ok('status copy distinguishes process/stopped/problem',/Process running/.test(JS)&&/Needs attention/.test(JS)&&/Stopped/.test(JS));
 ok('bot rows switch in place, not to another page',/rs-jp-item[\s\S]{0,900}selectJob\(row\.getAttribute/.test(JS));
 ok('bot rows expose direct delete',/data-delete-jid/.test(JS)&&/deleteJobById\(id,del\)/.test(JS));
-console.log('[3] compact glass visual');
+/* [3] compact OPAQUE visual. This used to require a bounded backdrop blur.
+   test_no_glass.js is the newer and stricter brief — "remove it entirely, no
+   exceptions" — and the panel's own mobile override already set
+   backdrop-filter:none, so desktop was the only place glass survived. The
+   panel is now a solid card at every width; one rule, not two. */
+console.log('[3] compact opaque visual');
 ok('panel is capped at 310px',/#tab-jobs #rsMoreMenu \{[^}]*width:310px/.test(CSS));
-ok('panel uses bounded glass blur',/#tab-jobs #rsMoreMenu \{[^}]*backdrop-filter:blur\(18px\)/.test(CSS));
+ok('panel is a solid card, never frosted',
+   /#tab-jobs #rsMoreMenu \{[^}]*background:var\(--card\)/.test(CSS) &&
+   !/#tab-jobs #rsMoreMenu \{[^}]*backdrop-filter:blur/.test(CSS));
 ok('panel stays below viewport height',/#tab-jobs #rsMoreMenu \{[^}]*max-height:min\(72dvh,620px\)/.test(CSS));
 ok('the panel is the only scroll owner',/#tab-jobs #rsUnifiedBotList \{ overflow:visible; \}/.test(CSS)&&!/#tab-jobs #rsUnifiedBotList \{[^}]*overflow-y:auto/.test(CSS));
 ok('reduced transparency has a solid fallback',/@media \(prefers-reduced-transparency:reduce\)[\s\S]{0,180}backdrop-filter:none/.test(CSS));

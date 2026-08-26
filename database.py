@@ -812,6 +812,86 @@ _SCHEMA_TABLES = [
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
     )
     """,
+    """
+    -- Bot Store. One row = one complete bot product you can deploy in one tap.
+    -- `source` separates the built-in products (mirrored from
+    -- services/bot_templates on boot, so counts and ratings attach to them
+    -- like any other listing) from community submissions, which stay `pending`
+    -- until an owner approves them. `code` is always one complete, runnable
+    -- Python file — never a fragment and never a platform-specific dialect.
+    CREATE TABLE IF NOT EXISTS store_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL DEFAULT 'built-in',
+        builtin_id TEXT,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'Uncategorised',
+        tags TEXT NOT NULL DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'python',
+        framework TEXT NOT NULL DEFAULT '',
+        difficulty TEXT NOT NULL DEFAULT 'Intermediate',
+        features TEXT NOT NULL DEFAULT '',
+        setup_notes TEXT NOT NULL DEFAULT '',
+        env_fields TEXT NOT NULL DEFAULT '[]',
+        code TEXT NOT NULL DEFAULT '',
+        code_hash TEXT NOT NULL DEFAULT '',
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        status TEXT NOT NULL DEFAULT 'pending',
+        review_note TEXT NOT NULL DEFAULT '',
+        author_user_id INTEGER,
+        author_name TEXT NOT NULL DEFAULT 'CodeNest',
+        featured INTEGER NOT NULL DEFAULT 0,
+        install_count INTEGER NOT NULL DEFAULT 0,
+        rating_sum INTEGER NOT NULL DEFAULT 0,
+        rating_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        published_at TEXT,
+        FOREIGN KEY (author_user_id) REFERENCES users (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    -- Every deploy that started from a store listing. Kept per install (not as
+    -- a bare counter) so the owner console can show WHICH bot each person
+    -- took, and so an abusive listing can be traced to its installs.
+    CREATE TABLE IF NOT EXISTS store_installs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_slug TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        job_id INTEGER,
+        version TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    -- One rating per person per listing (the UNIQUE index is created in
+    -- init_db because an added constraint cannot live on an added column).
+    CREATE TABLE IF NOT EXISTS store_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_slug TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        rating INTEGER NOT NULL DEFAULT 5,
+        comment TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    -- Saved-for-later listings. A favourite is not an install: it only pins
+    -- the listing into the person's own library tab.
+    CREATE TABLE IF NOT EXISTS store_favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_slug TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
 ]
 
 
@@ -956,6 +1036,22 @@ def init_db():
                      "ON bot_revisions (job_id, version)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_runner_nodes_enabled "
                      "ON runner_nodes (enabled)")
+
+        # Bot Store lookups: the catalog is filtered by status + sorted by
+        # installs, and every detail/library call resolves a listing by slug.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_items_status "
+                     "ON store_items (status, category)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_items_installs "
+                     "ON store_items (install_count)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_installs_user "
+                     "ON store_installs (user_id, item_slug)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_installs_slug "
+                     "ON store_installs (item_slug)")
+        # One rating and one favourite per person per listing.
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_store_reviews_one "
+                     "ON store_reviews (item_slug, user_id)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_store_favorites_one "
+                     "ON store_favorites (item_slug, user_id)")
 
         conn.commit()
     finally:

@@ -284,7 +284,7 @@ for _p, _fn in _NEGOTIATED.items():
 
 # Section URLs with NO API collision can serve the shell directly.
 CLIENT_ONLY_PATHS = [
-    "dashboard", "code", "bots", "activity",
+    "dashboard", "code", "bots", "activity", "store",
     "sign-in", "sign-up", "login", "forgot",
 ]
 for _p in CLIENT_ONLY_PATHS:
@@ -560,11 +560,12 @@ from routes.code_editor import router as code_editor_router
 from routes.runspace import router as runspace_router
 from routes.admin import router as admin_router
 from routes.ping import router as ping_router
+from routes.store import router as store_router
 from services.term_proxy import router as term_router
 
 for _r in (auth_router, profile_router, dashboard_router,
            code_editor_router, runspace_router, admin_router,
-           ping_router, term_router):
+           ping_router, term_router, store_router):
     app.include_router(_r)
 
 

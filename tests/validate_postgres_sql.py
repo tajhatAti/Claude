@@ -1,7 +1,7 @@
 """Validate that every SQL statement the app sends is valid PostgreSQL.
 
-No live Postgres server needed: collect every string literal from app.py +
-database.py, apply the EXACT transformations the wrapper performs when
+No live Postgres server needed: collect every string literal from app.py,
+database.py and the Bot Store modules, apply the EXACT transformations the wrapper performs when
 DIALECT == 'postgres', then parse each with pglast (the real PostgreSQL grammar).
 """
 import ast
@@ -88,7 +88,10 @@ def collect_from(path):
                 SQL_STATEMENTS.append((base, s))
 
 
-for f in ("app.py", "database.py"):
+# The Bot Store owns its own tables and queries, so it is scanned too: it is
+# the newest place where SQLite-only syntax could sneak into a statement that
+# only ever runs on PostgreSQL, i.e. only in production.
+for f in ("app.py", "database.py", "services/store.py", "routes/store.py"):
     collect_from(os.path.join(ROOT, f))
 
 

@@ -510,13 +510,95 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .feat:hover { transform: translateY(-3px); box-shadow: var(--e3), var(--rim); border-color: var(--line-2); }
 .feat h3 { margin-bottom: 6px; }
 .foot { padding: var(--s6) var(--s5); border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-3); text-align: center; }
-/* ──────────────────────────────── AUTH ────────────────────────────────── */
-.auth { min-height: 100vh; display: grid; place-items: center; padding: var(--s5); }
-.auth-card { width: 100%; max-width: 420px; padding: var(--s6); }
-.auth-head { text-align: center; margin-bottom: var(--s5); }
-.auth-head .brand-mark { margin: 0 auto var(--s4); }
-.auth-head h2 { margin-bottom: 6px; }
-.auth-head p { font-size: var(--fs-3); color: var(--fg-3); }
+/* ──────────────────────────────── AUTH ──────────────────────────────────
+   Rebuilt as a split screen. The old card was a 420px box floating in an
+   empty black viewport: nothing on it said what CodeNest is, so the one
+   screen every new visitor sees first carried none of the product. Now the
+   left half makes the case and the right half asks for the minimum.
+
+   Two rules keep it honest:
+     · the brand panel is decoration. It is injected from a <template> and
+       hidden below 900px and inside Telegram, so a phone and a Mini App get
+       the card alone and a failed script still leaves a complete form;
+     · it introduces no colour. Surfaces stay on the neutral ramp, the one
+       accent is still the white slab, and the only hue is the ✓ that marks
+       a fact as included. */
+.auth {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+.auth-aside {
+  display: flex; flex-direction: column; justify-content: space-between;
+  gap: var(--s7);
+  padding: var(--s7) var(--s6);
+  background: var(--bar);
+  border-right: 1px solid var(--line);
+}
+.auth-aside-brand { align-self: flex-start; }
+.auth-aside-copy h1 {
+  margin: var(--s3) 0;
+  font-size: var(--fs-8);
+  line-height: 1.14;
+  letter-spacing: -.015em;
+  max-width: 18ch;
+}
+.auth-aside-copy p { color: var(--fg-2); font-size: var(--fs-4); max-width: 46ch; }
+.auth-points { list-style: none; margin: var(--s5) 0 0; padding: 0; display: grid; gap: var(--s3); }
+.auth-points li {
+  position: relative;
+  padding-left: 26px;
+  color: var(--fg-2);
+  font-size: var(--fs-3);
+}
+.auth-points li::before {
+  content: "✓";
+  position: absolute; left: 0; top: 0;
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: var(--pill);
+  color: var(--ok);
+  font-size: var(--fs-1);
+}
+.auth-aside-foot { color: var(--fg-4); font-size: var(--fs-2); }
+
+.auth-main {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  padding: var(--s7) var(--s5);
+}
+.auth-card { position: relative; width: 100%; max-width: 400px; }
+.auth-card.center { text-align: center; display: grid; justify-items: center; gap: var(--s3); }
+.auth-head { margin-bottom: var(--s5); }
+.auth-head .brand-mark { margin: 0 0 var(--s4); }
+.auth-head h2 { margin-bottom: 6px; font-size: var(--fs-7); letter-spacing: -.01em; }
+.auth-head p, .auth-sub { font-size: var(--fs-3); color: var(--fg-3); }
+
+/* Back is a real control now: it had no rule at all, so it rendered as a
+   browser-default grey button sitting on the card's top edge. */
+.back {
+  position: absolute; top: 0; left: -4px;
+  height: var(--ctl-h-sm);
+  padding: 0 var(--s2);
+  border: 0; border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-2);
+  cursor: pointer;
+}
+.back:hover { color: var(--fg); background: var(--card-2); }
+
+/* The brand already sits on the panel beside the card, so a second copy
+   inside the card is noise — except when the panel is gone. */
+@media (min-width: 901px) {
+  .auth-aside + .auth-main .auth-head .brand-mark { display: none; }
+  .auth-head { padding-top: var(--s6); }
+}
+
 .auth-form { display: flex; flex-direction: column; gap: var(--s4); }
 .auth-or {
   display: flex; align-items: center; gap: var(--s3);
@@ -526,12 +608,49 @@ hr, .tab-sep { border: 0; border-top: 1px solid var(--line); margin: var(--s4) 0
 .auth-switch { text-align: center; font-size: var(--fs-3); color: var(--fg-3); margin-top: var(--s4); }
 .auth-switch a, .auth-switch span[onclick] { color: var(--fg); font-weight: 600; }
 .auth-hint, .auth-note { font-size: var(--fs-2); color: var(--fg-3); }
-.otp-boxes { display: flex; gap: var(--s2); justify-content: center; }
+/* The "what is true either way" line under the submit button. Quiet by
+   design: it answers the price question without competing with the form. */
+.auth-trust { margin: 2px 0 0; text-align: center; font-size: var(--fs-1); color: var(--fg-4); }
+
+/* Password reveal. The input keeps its id (every form handler reads it);
+   only the wrapper and the button are new. */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { width: 100%; padding-right: 62px; }
+.pw-toggle {
+  position: absolute; top: 50%; right: 6px;
+  transform: translateY(-50%);
+  height: calc(var(--ctl-h) - 12px);
+  padding: 0 var(--s2);
+  border: 0; border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.pw-toggle:hover { color: var(--fg); background: var(--card-2); }
+
+.otp-boxes { display: flex; gap: var(--s2); justify-content: center; margin-bottom: var(--s4); }
 .otp-boxes input { width: 46px; height: 54px; text-align: center; font-size: var(--fs-6); font-weight: 700; font-family: var(--mono); padding: 0; }
 .otp-err, .tfa-err { color: var(--danger); font-size: var(--fs-2); }
 .strength { height: 4px; background: var(--line); border-radius: var(--pill); overflow: hidden; }
 .strength-fill { height: 100%; background: var(--fg); transition: width var(--med), background-color var(--med); }
 .strength-label { font-size: var(--fs-1); color: var(--fg-3); margin-top: 5px; }
+
+/* A phone has no room for the panel: the card is the whole screen. */
+@media (max-width: 900px) {
+  .auth { grid-template-columns: minmax(0, 1fr); }
+  .auth-aside { display: none; }
+  .auth-main { padding: var(--s7) var(--s5) var(--s6); align-content: start; }
+  .auth-card { max-width: 440px; }
+}
+/* Inside Telegram the panel is marketing the reader did not ask for. */
+html.tg-no-auth .auth-aside { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .auth-aside, .auth-main { transition: none; }
+}
 /* ───────────────────────────── DASHBOARD ──────────────────────────────── */
 .dashboard { min-height: 100vh; display: flex; flex-direction: column; }
 .dash-bar {
@@ -1498,7 +1617,10 @@ body.signed-out-in .hero {
 .adm-act    { display: flex; gap: var(--s1); }
 @media (max-width: 760px) {
   #tab-admin { padding-inline:10px; }
-  #tab-admin > .tab-head { position:sticky; top:0; z-index:8; margin:0 -10px var(--s3); padding:10px 12px; background:color-mix(in srgb,var(--bg) 94%,transparent); backdrop-filter:blur(12px); }
+  /* Opaque, not frosted: the sheet bans backdrop-filter outright (see
+     tests/js/test_no_glass.js), and a sticky header over a scrolling table
+     reads better solid than semi-transparent with content showing through. */
+  #tab-admin > .tab-head { position:sticky; top:0; z-index:8; margin:0 -10px var(--s3); padding:10px 12px; background:var(--bg); border-bottom:1px solid var(--line); }
   #tab-admin > .tab-head h2 { font-size:var(--fs-6); }
   .adm-head-right { margin-left:auto; }
   .adm-section-nav { top:61px; margin-inline:-10px; padding:8px 10px; }
@@ -3718,13 +3840,11 @@ body.rs-menu-open .rs-menu-scrim { opacity: 1; visibility: visible; pointer-even
   padding:8px;
   overflow-y:auto;
   overscroll-behavior:contain;
-  background:rgba(20,20,22,.88);
-  border:1px solid rgba(255,255,255,.13);
-  box-shadow:0 18px 46px rgba(0,0,0,.42),inset 0 1px rgba(255,255,255,.06);
-  backdrop-filter:blur(18px) saturate(125%);
-  -webkit-backdrop-filter:blur(18px) saturate(125%);
+  background:var(--card);
+  border:1px solid var(--line);
+  box-shadow:var(--shadow-lift);
 }
-#tab-jobs .rs-menu-current { display:flex; align-items:center; gap:10px; padding:10px; margin-bottom:4px; border:1px solid var(--line); border-radius:var(--r-row); background:rgba(255,255,255,.045); }
+#tab-jobs .rs-menu-current { display:flex; align-items:center; gap:10px; padding:10px; margin-bottom:4px; border:1px solid var(--line); border-radius:var(--r-row); background:var(--card-2); }
 #tab-jobs .rs-menu-current[hidden] { display:none; }
 #tab-jobs .rs-menu-status-dot { width:9px; height:9px; flex:0 0 auto; border-radius:50%; background:var(--fg-3); }
 #tab-jobs .rs-menu-status-dot.running { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 16%,transparent); }
@@ -3871,3 +3991,507 @@ html.tg-no-auth body > #screen-otp,
 html.tg-no-auth body > #screen-forgot1,
 html.tg-no-auth body > #screen-forgot2,
 html.tg-no-auth body > #screen-forgot3 { display:none !important; }
+
+/* ============================ BOT STORE ============================
+   One listing = one complete Python file. The card carries the facts a
+   buyer needs before deploying: what it does, what it needs, how big the
+   file is, and what other people think of it. Surfaces stay on the neutral
+   ramp; the only accent is the same white slab the rest of the product
+   uses, so the store cannot invent a second visual language. */
+#tab-store { display: none; }
+#tab-store.active { display: block; }
+
+.store-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s5);
+  margin-bottom: var(--s5);
+}
+.store-head-copy h1 { margin: var(--s2) 0 var(--s2); font-size: var(--t-h1, 26px); }
+.store-head-copy p { margin: 0; color: var(--fg-2); max-width: 62ch; }
+.store-head-copy code,
+.store-modal-card code {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+  font-size: var(--fs-3);
+}
+.store-head-actions { display: flex; gap: var(--s2); flex: none; }
+
+.store-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s3);
+  align-items: center;
+  margin-bottom: var(--s3);
+}
+.store-sorts { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.store-chip {
+  height: var(--ctl-h-sm);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
+  background: var(--card);
+  color: var(--fg-2);
+  font-size: var(--fs-3);
+  cursor: pointer;
+}
+.store-chip:hover { border-color: var(--line-2); color: var(--fg); }
+.store-chip.is-active {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-fg);
+  font-weight: 600;
+}
+
+.store-categories { display: flex; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s3); }
+.store-cat {
+  height: var(--ctl-h-sm);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-3);
+  cursor: pointer;
+}
+.store-cat:hover { color: var(--fg); border-color: var(--line-2); }
+.store-cat.is-active { color: var(--fg); border-color: var(--fg-3); background: var(--card-2); }
+.store-cat b { font-weight: 600; color: var(--fg-2); margin-left: 6px; }
+
+.store-facets { color: var(--fg-3); font-size: var(--fs-3); margin-bottom: var(--s3); }
+
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--s3);
+}
+.store-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 196px;
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--e1), var(--rim);
+  text-align: left;
+  cursor: pointer;
+}
+.store-card:hover { border-color: var(--line-2); background: var(--card-2); }
+.store-card-top { display: flex; align-items: center; gap: var(--s2); }
+.store-card-lang {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-deep);
+  color: var(--fg-2);
+  font-size: var(--fs-1);
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.store-card-top b { font-size: var(--fs-4); line-height: 1.25; }
+.store-card-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.store-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
+  color: var(--fg-3);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+}
+.store-badge.is-featured { border-color: var(--fg-3); color: var(--fg); }
+.store-card-desc { color: var(--fg-2); font-size: var(--fs-3); line-height: 1.5; }
+.store-card-meta {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  color: var(--fg-3);
+  font-size: var(--fs-2);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s2);
+}
+.store-card-meta .store-taken { color: var(--ok); }
+
+.store-empty {
+  padding: var(--s6);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-card);
+  text-align: center;
+  color: var(--fg-3);
+}
+.store-empty b { display: block; color: var(--fg-2); margin-bottom: var(--s2); }
+
+/* The shell itself: the store's modals are wider than the default ah-modal
+   card because a listing has to show a whole Python file. */
+.store-modal { align-items: flex-start; padding-top: 4dvh; }
+
+/* ---- listing detail ---- */
+.store-modal-card { width: min(940px, 94vw); max-height: min(88dvh, 860px); overflow-y: auto; }
+.store-detail-meta { display: flex; gap: 6px; flex-wrap: wrap; margin: var(--s3) 0; }
+.store-detail-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px var(--s4);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  background: var(--card);
+  margin-bottom: var(--s3);
+}
+.store-detail-features span { color: var(--fg-2); font-size: var(--fs-3); }
+.store-detail-features span::before { content: "✓ "; color: var(--ok); }
+.store-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  color: var(--fg-3);
+  font-size: var(--fs-2);
+  margin-bottom: var(--s2);
+}
+.store-code {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0 0 var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  background: var(--bg-deep);
+  color: var(--fg-2);
+  font-size: var(--fs-2);
+  line-height: 1.55;
+  white-space: pre;
+}
+.store-detail-actions { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.store-rating { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); flex-wrap: wrap; }
+.store-stars { display: flex; gap: 2px; }
+.store-star {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--fg-3);
+  cursor: pointer;
+  font-size: var(--fs-4);
+  line-height: 1;
+}
+.store-star.is-on { color: var(--warn); border-color: var(--line-2); }
+.store-rating small { color: var(--fg-3); }
+.store-reviews { display: grid; gap: var(--s2); margin-top: var(--s2); }
+.store-review {
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  background: var(--card);
+  font-size: var(--fs-3);
+  color: var(--fg-2);
+}
+.store-review b { color: var(--fg); font-weight: 600; }
+
+/* ---- publish form + library ---- */
+.store-form { display: grid; gap: var(--s3); }
+.store-form-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+.store-form .field { display: grid; gap: 6px; }
+.store-form .field > span { color: var(--fg-2); font-size: var(--fs-3); }
+.store-form .field small { color: var(--fg-4); font-weight: 400; }
+.store-code-input { font-family: var(--mono, ui-monospace, monospace); font-size: var(--fs-2); line-height: 1.55; }
+.store-form-state { color: var(--fg-3); font-size: var(--fs-3); min-height: 18px; }
+.store-form-state.is-error { color: var(--danger); }
+.store-form-state.is-ok { color: var(--ok); }
+.store-form-actions { display: flex; gap: var(--s2); }
+.store-library { display: grid; gap: var(--s4); }
+.store-library h4 { margin: 0 0 var(--s2); font-size: var(--fs-3); color: var(--fg-3); text-transform: uppercase; letter-spacing: .06em; }
+.store-lib-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  background: var(--card);
+  font-size: var(--fs-3);
+}
+.store-lib-row + .store-lib-row { margin-top: 6px; }
+.store-lib-row small { color: var(--fg-3); }
+.store-status { padding: 2px 8px; border-radius: var(--pill); border: 1px solid var(--line); font-size: var(--fs-1); color: var(--fg-3); }
+.store-status.is-published { color: var(--ok); border-color: var(--ok); }
+.store-status.is-pending { color: var(--warn); border-color: var(--warn); }
+.store-status.is-rejected, .store-status.is-removed { color: var(--danger); border-color: var(--danger); }
+
+@media (max-width: 900px) {
+  .store-head { flex-direction: column; }
+  .store-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .store-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .store-grid { grid-template-columns: 1fr; }
+  .store-form-row { grid-template-columns: minmax(0, 1fr); }
+  .store-card { min-height: 0; }
+  .store-code { max-height: 240px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   AURORA — the design system, restated.
+
+   Reference: the interactive analytics dashboard (tajhatAti/dashb). Its
+   language, copied rather than approximated:
+
+     · LIGHT-FIRST marketing surfaces over an ambient aurora wash
+     · indigo as the ONE accent (#4f46e5 light / #6366f1 dark) — the previous
+       brief was a hueless white slab, and that decision is superseded here
+     · Inter for text, Space Grotesk for headings, JetBrains Mono for code
+     · 16px cards on a 1px border with a SOFT shadow; 10px controls
+     · hover lifts, press sinks (active: scale .95) — never a glow
+     · emerald/rose reserved for up/down meaning only
+
+   The app's IDE surfaces (Bots, Code Studio, terminal) keep a dark palette —
+   an editor on white paper is a worse tool — but they now sit on the same
+   indigo accent and the same 16px card language, so the product reads as one
+   system instead of a dark tool inside a light site.
+
+   These tokens OVERRIDE the neutral ramp declared at the top of this file.
+   Both live here on purpose: the ramp above is the audit trail of the
+   previous brief, and deleting it would hide why the values changed.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  /* Surfaces — kei dark. */
+  --bg:        #090b10;
+  --bg-deep:   #05070c;
+  --bg-2:      #0d1017;
+  --bg-3:      #181d28;
+  --bar:       #0d1017;
+  --card:      #10131b;
+  --card-2:    #181d28;
+  --line:      #1e2431;
+  --line-2:    #2a3242;
+
+  /* Ink */
+  --fg:        #edf0f6;
+  --fg-2:      #b9c1d0;
+  --fg-3:      #8993a5;
+  --fg-4:      #8993a5;
+  --fg-off:    #5b6577;
+
+  /* ONE accent: indigo, and the SAME value in both themes. The reference
+     lightens it to #6366f1 on dark; measured against white label text that
+     is 4.46:1, one hundredth under the AA floor, so the filled button keeps
+     #4f46e5 (6.31:1) everywhere. The lighter tint survives as --acc-bright
+     for glow and icon tints, where no text sits on top of it. */
+  --acc:       #4f46e5;
+  --acc-fg:    #ffffff;
+  --accent:    var(--acc);
+  --acc-bright:#6366f1;
+  --acc-soft:  rgb(99 102 241 / .16);
+  --ring:      rgb(99 102 241 / .5);
+  --chart-grid:#1a202d;
+
+  /* Status — emerald / amber / rose, only where colour means something. */
+  --ok:        #10b981;
+  --warn:      #f59e0b;
+  --danger:    #f43f5e;
+  --ok-dim:    rgb(16 185 129 / .14);
+  --warn-dim:  rgb(245 158 11 / .14);
+  --danger-dim:rgb(244 63 94 / .14);
+
+  /* Radius + elevation, straight from the reference. */
+  --r-card: 16px;
+  --r-row:  12px;
+  --r-ctl:  10px;
+  --r-sm:   8px;
+  --shadow-soft: 0 1px 2px rgb(16 24 40 / .05);
+  --shadow-lift: 0 16px 40px -16px rgb(16 24 40 / .25);
+  --e1: var(--shadow-soft);
+  --e2: var(--shadow-lift);
+  --e3: 0 20px 48px -18px rgb(16 24 40 / .45);
+  --rim: inset 0 1px 0 rgb(255 255 255 / .04);
+  --glow: 0 0 24px rgb(99 102 241 / .35);   /* decorative only, never behind text */
+
+  /* Type: display face for headings, Inter for everything else. */
+  --display: 'Space Grotesk', 'Inter', var(--ui);
+}
+
+/* The IDE surfaces pin their own ramp so a theme flip cannot put an editor on
+   white paper. Retuned onto the same colours so they stop reading as a
+   different product sitting inside this one. */
+#tab-jobs, .code-studio, .workbench, #tab-jobs .jd {
+  --bg:     #090b10;
+  --bg-2:   #10131b;
+  --bg-3:   #181d28;
+  --line:   #1e2431;
+  --line-2: #2a3242;
+  --fg:     #edf0f6;
+}
+
+/* ── Ambient aurora. Two soft radial washes, no blur, no image. ───────── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(50rem 26rem at 82% -10%, rgb(99 102 241 / .15), transparent 65%),
+    radial-gradient(38rem 22rem at 6% -14%, rgb(14 165 233 / .09), transparent 60%);
+}
+/* The marketing surfaces are light, so they carry the light wash. */
+#screen-landing::before, .auth::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(50rem 26rem at 82% -10%, rgb(79 70 229 / .08), transparent 65%),
+    radial-gradient(38rem 22rem at 6% -14%, rgb(16 185 129 / .06), transparent 60%);
+}
+#screen-landing, .auth { position: relative; isolation: isolate; }
+
+/* ── LIGHT surfaces: the landing page and the auth screens ──────────────
+   Scoped, not global: the app stays dark, the shop window goes light —
+   exactly how the reference dashboard defaults to light. */
+#screen-landing, .auth {
+  --bg:        #f3f4f7;
+  --bg-deep:   #0d1117;   /* the terminal transcript stays a console */
+  --bg-2:      #ffffff;
+  --bg-3:      #edeff3;
+  --bar:       #ffffff;
+  --card:      #ffffff;
+  --card-2:    #edeff3;
+  --line:      #e2e5eb;
+  --line-2:    #d3d8e0;
+  --fg:        #0d1420;
+  --fg-2:      #3d4757;
+  --fg-3:      #5e6a7a;
+  --fg-4:      #5e6a7a;
+  --fg-off:    #9aa3b2;
+  --acc:       #4f46e5;
+  --acc-soft:  rgb(79 70 229 / .10);
+  --ring:      rgb(79 70 229 / .4);
+  --ok:        #059669;
+  --warn:      #b45309;
+  --danger:    #e11d48;
+  --shadow-soft: 0 1px 2px rgb(16 24 40 / .05);
+  --shadow-lift: 0 16px 40px -16px rgb(16 24 40 / .25);
+  color-scheme: light;
+}
+
+/* ── Typography ──────────────────────────────────────────────────────── */
+h1, h2, h3, .hero-title, .auth-head h2, .store-head-copy h1,
+.auth-aside-copy h1, .welcome h1, .dash-tab-content > h2 {
+  font-family: var(--display);
+  letter-spacing: -.02em;
+}
+.tnum, .stat-card b, .otp-boxes input, .jd-num { font-variant-numeric: tabular-nums; }
+
+/* ── Controls: 10px, soft shadow, press sinks ─────────────────────────── */
+.btn-primary, .btn-secondary, .btn-ghost, .btn-danger { border-radius: var(--r-ctl); }
+.btn-primary {
+  background: var(--acc); border-color: var(--acc); color: var(--acc-fg);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--shadow-soft);
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+  filter: brightness(1.06);
+}
+.btn-primary:active:not(:disabled) { transform: scale(.97); box-shadow: var(--shadow-soft); }
+.btn-secondary, .btn-ghost {
+  background: var(--card); border-color: var(--line); color: var(--fg);
+  border-radius: var(--r-ctl); box-shadow: var(--shadow-soft);
+}
+.btn-ghost { background: transparent; box-shadow: none; }
+.btn-secondary:hover, .btn-ghost:hover {
+  background: var(--card-2); border-color: var(--line-2);
+  transform: translateY(-1px); box-shadow: var(--shadow-soft);
+}
+.btn-secondary:active, .btn-ghost:active { transform: scale(.97); }
+
+/* Fields lose the inset well: on a light card it reads as dirt, and the
+   reference uses a flat bordered input with a ring on focus. */
+input, select, textarea {
+  background: var(--card);
+  border-radius: var(--r-ctl);
+  box-shadow: none;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+::selection { background: rgb(99 102 241 / .22); }
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+.card, .stat-card, .quick-card, .feat-card, .auth-card, .feat, .adm-panel,
+.ah-modal-card, .set-group, .store-card, .hero-art {
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-soft);
+}
+.feat:hover, .store-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+
+/* ── KPI cards: icon chip, big tabular number, quiet label ───────────── */
+.stat-card {
+  position: relative;
+  padding: var(--s4);
+  gap: var(--s3);
+  overflow: hidden;
+}
+.stat-card .stat-ic {
+  width: 38px; height: 38px;
+  border-radius: var(--r-ctl);
+  display: grid; place-items: center;
+  background: var(--acc-soft);
+  color: var(--acc);
+  border: 0;
+}
+.stat-card b { font-family: var(--display); font-size: var(--fs-7); letter-spacing: -.02em; }
+.stat-card span { color: var(--fg-3); }
+/* Each KPI keeps its own tint, the way the reference gives every metric one. */
+.stat-card:nth-child(2) .stat-ic { background: rgb(14 165 233 / .14); color: #0ea5e9; }
+.stat-card:nth-child(3) .stat-ic { background: rgb(16 185 129 / .14); color: var(--ok); }
+.stat-card:nth-child(4) .stat-ic { background: rgb(245 158 11 / .14); color: var(--warn); }
+
+/* ── Tabs read as the reference's nav: filled pill, indigo when active ── */
+.dash-tab, .tab-secondary, .cs-tab { border-radius: var(--r-ctl); }
+.dash-tab.active, .cs-tab.active {
+  background: var(--acc-soft);
+  border-color: transparent;
+  color: var(--acc);
+}
+.dash-tab.active .tab-ic { color: var(--acc); }
+
+/* ── Scrollbar, from the reference ───────────────────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+
+/* ── Entrance motion: one rise, staggered by the caller ──────────────── */
+@keyframes aurora-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: aurora-rise .7s var(--ease) both; }
+#screen-landing .section, .auth-main { animation: aurora-rise .6s var(--ease) both; }
+@media (prefers-reduced-motion: reduce) {
+  .rise, #screen-landing .section, .auth-main { animation: none; }
+  .btn-primary:hover, .btn-secondary:hover, .btn-ghost:hover,
+  .feat:hover, .store-card:hover { transform: none; }
+}

@@ -57,12 +57,17 @@ function isWarm(c) {
   return h >= 10 && h <= 60 && s > 0.22 && l > 0.12;
 }
 
-/* ANY visible hue on a core token is wrong now, not just a warm one. The
-   threshold is deliberately loose (0.12) because the dark IDE greys are very
-   slightly blue-tinted by design and must not trip this. */
-function hasHue(c) {
+/* Round 2 escalated this to "any visible hue is wrong", which is a different
+   claim than the one this file exists to make — and the aurora redesign
+   (indigo accent, cool slate ramp) falsifies it on purpose. What still has to
+   hold, and what the name of this file actually says: nothing is WARM, and a
+   surface never gets saturated enough to read as a colour. The accent itself
+   is exempt; it is supposed to be indigo. */
+function isHueOverreach(c, token) {
   if (!c) return false;
-  return hsl(c).s >= 0.12;
+  if (/^--(acc|accent|btn|ring|glow|chart-grid)/.test(token || '')) return false;
+  const { s, h } = hsl(c);
+  return s >= 0.45 || (h >= 10 && h <= 60 && s > 0.2);
 }
 
 /* WCAG relative luminance -> contrast ratio. Guards the case where a token
@@ -107,8 +112,7 @@ for (const theme of [null, 'dark']) {
        and test_one_accent_no_hue. Skip rather than crash on it. */
     if (!rgb(v)) continue;
     ok(`[${label}] token ${t} is not warm`, !isWarm(rgb(v)), v);
-    // Round 2: and not blue, or any other hue either.
-    ok(`[${label}] token ${t} has no hue`, !hasHue(rgb(v)),
+    ok(`[${label}] token ${t} stays neutral, not a colour`, !isHueOverreach(rgb(v), t),
        `${v} sat=${hsl(rgb(v)).s.toFixed(2)}`);
   }
   for (const sel of CONTROLS) {

@@ -22,7 +22,8 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
   tests/test_bot_list_fast.py \
   tests/test_secrets_rotation.py \
   tests/test_job_recovery.py \
-  tests/test_bot_ops_multirunner.py
+  tests/test_bot_ops_multirunner.py \
+  tests/test_store.py
 
 npm run check:js
 npm run test:js

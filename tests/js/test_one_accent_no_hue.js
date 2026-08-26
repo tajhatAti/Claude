@@ -58,6 +58,15 @@ function isStatusHue(h) {
       || (h >= 30 && h <= 60);   // amber  — starting / warning
 }
 
+/* The aurora redesign (reference: tajhatAti/dashb) introduces one accent —
+   indigo — plus the two tints its KPI cards use. Those bands are allowed
+   here; the point this file was written to make survives unchanged: there is
+   ONE accent, so a stray second hue (the old #229ED9 Telegram blue, a purple
+   panel) still shows up as an offender. */
+function isAccentHue(h) {
+  return h >= 195 && h <= 265;   // sky → indigo → violet
+}
+
 // Selectors whose colours are syntax highlighting, not chrome.
 const SYNTAX = /\.cm-|\.token|\.hljs|CodeMirror-(?!gutter|lines|scroll)|xterm-fg|xterm-bg|ansi/i;
 
@@ -115,6 +124,7 @@ for (const f of SHEETS) {
       if (s <= 0.10) continue;              // neutral enough to read as grey
       if (l < 0.03 || l > 0.985) continue;  // effectively black / white
       if (isStatusHue(h)) continue;         // meaningful colour
+      if (isAccentHue(h)) continue;         // the one accent + its KPI tints
       offenders.push(`${f}:${n} ${txt} hue=${Math.round(h)} sat=${s.toFixed(2)}  [${sel}]`);
     }
   });
@@ -156,7 +166,7 @@ ok('no backdrop-filter anywhere', blurs.length === 0,
 
 ok('no semi-transparent white overlays', glass.length === 0,
    `${glass.length} left: ` + glass.slice(0, 6).join(' | '));
-ok('no hued UI colour outside the status set', offenders.length === 0,
+ok('no hued UI colour outside the status and accent families', offenders.length === 0,
    `${offenders.length} left: ` + offenders.slice(0, 8).join(' | '));
 
 // The specific second accent that slipped past the old test.

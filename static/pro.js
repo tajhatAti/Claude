@@ -148,6 +148,8 @@ function switchTab(tabId) {
   // ⚙️ Settings: keep the security panel truthful every time it opens.
   if (tabId === "profile") { refreshSecurityPanel(); loadSessionsList(); }
   if (tabId === "code") { loadSnippets(); initCodeMirror(); if (cmEditor) cmEditor.refresh(); }
+  // 🛍️ Store: fetch the shelf the first time it is opened, then reuse it.
+  if (tabId === "store" && typeof loadStore === "function") { loadStore(); }
   // 🔗 Every section is a REAL URL — back/forward + refresh + sharing work.
   if (!_routeNav) {
     const p = TAB_PATHS[tabId];
@@ -2415,7 +2417,7 @@ async function loadStats() {
 const ROUTES = {
   "/bots": "jobs", "/dashboard": "jobs", "/code": "code",
   "/terminal": "term", "/term": "term",
-  "/admin": "admin", "/profile": "profile",
+  "/admin": "admin", "/profile": "profile", "/store": "store",
 };
 // Canonical: /bots/{job}[/{logs|details|database|env|settings}].
 // Legacy /runspace links are redirected server-side and remain parseable.
@@ -8436,4 +8438,470 @@ async function _rsPullRepoEntry(jobId) {
     return r;
   };
   selectJob = window.selectJob;
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   BOT STORE — a shelf of complete bots, each one a single raw Python file.
+
+   The point of this screen is the opposite of a visual command builder:
+   there is nothing to assemble. A listing IS the program. So the UI shows
+   the whole file before you deploy it, and "Deploy this bot" hands that
+   exact file to the one Add Bot wizard the rest of the product uses.
+   ══════════════════════════════════════════════════════════════════════ */
+let _storeItems = [];
+let _storeFacets = null;
+let _storeCategory = "All";
+let _storeSort = "popular";
+let _storeQuery = "";
+let _storeLoaded = false;
+let _storeLoading = false;
+let _storeCurrent = null;      // listing open in the detail modal
+let _storeDeploying = false;
+let _storeFavs = new Set();
+let _storeTaken = new Set();
+let _storeSearchTimer = null;
+
+const _STORE_SORTS = { popular: "Popular", rating: "Top rated", newest: "Newest", name: "A–Z" };
+
+function _storeEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+async function loadStore(force) {
+  if (_storeLoading) return;
+  if (_storeLoaded && !force) return;
+  _storeLoading = true;
+  const facets = document.getElementById("storeFacets");
+  try {
+    const params = new URLSearchParams({ sort: _storeSort, limit: "48" });
+    if (_storeQuery) params.set("q", _storeQuery);
+    if (_storeCategory !== "All") params.set("category", _storeCategory);
+    const data = await api("/api/store?" + params.toString(), "GET", null, true);
+    _storeItems = data.items || [];
+    _storeFacets = data.facets || null;
+    _storeFavs = new Set(data.favorite_slugs || []);
+    _storeTaken = new Set(data.installed_slugs || []);
+    _storeLoaded = true;
+    renderStore();
+  } catch (e) {
+    if (facets) facets.textContent = "Could not load the store.";
+    toast("Could not load the store", "error");
+  } finally {
+    _storeLoading = false;
+  }
+}
+
+function _storeRenderCategories() {
+  const host = document.getElementById("storeCategories");
+  if (!host) return;
+  host.textContent = "";
+  const counts = {};
+  (_storeFacets && _storeFacets.categories || []).forEach(c => { counts[c.name] = c.count; });
+  const names = ["All", ...(_storeFacets ? _storeFacets.categories.map(c => c.name) : [])];
+  names.forEach(name => {
+    const btn = _storeEl("button", "store-cat" + (name === _storeCategory ? " is-active" : ""));
+    btn.type = "button";
+    btn.appendChild(document.createTextNode(name));
+    if (counts[name]) btn.appendChild(_storeEl("b", "", String(counts[name])));
+    btn.onclick = () => { _storeCategory = name; loadStore(true); };
+    host.appendChild(btn);
+  });
+}
+
+function renderStore() {
+  const grid = document.getElementById("storeGrid");
+  const empty = document.getElementById("storeEmpty");
+  const facets = document.getElementById("storeFacets");
+  if (!grid) return;
+  _storeRenderCategories();
+
+  if (facets && _storeFacets) {
+    const parts = [`${_storeFacets.listings} complete bots`,
+                   `${_storeFacets.community} from the community`,
+                   `${_storeFacets.installs} installs`];
+    facets.textContent = parts.join(" · ") + " · every listing is one Python file";
+  } else if (facets) {
+    facets.textContent = "";
+  }
+
+  grid.textContent = "";
+  _storeItems.forEach(item => grid.appendChild(_storeCard(item)));
+  if (empty) empty.classList.toggle("hidden", _storeItems.length > 0);
+}
+
+function _storeCard(item) {
+  const card = _storeEl("button", "store-card");
+  card.type = "button";
+
+  const top = _storeEl("span", "store-card-top");
+  top.appendChild(_storeEl("span", "store-card-lang", item.language === "javascript" ? "JS" : "PY"));
+  top.appendChild(_storeEl("b", "", item.title));
+  card.appendChild(top);
+
+  const badges = _storeEl("span", "store-card-badges");
+  badges.appendChild(_storeEl("span", "store-badge", item.category));
+  badges.appendChild(_storeEl("span", "store-badge", item.difficulty));
+  if (item.featured) badges.appendChild(_storeEl("span", "store-badge is-featured", "Featured"));
+  if (item.source === "community") badges.appendChild(_storeEl("span", "store-badge", "by " + item.author));
+  card.appendChild(badges);
+
+  card.appendChild(_storeEl("span", "store-card-desc", item.summary));
+
+  const meta = _storeEl("span", "store-card-meta");
+  const left = _storeEl("span", "", `${item.code_lines} lines · ${item.framework || "python"}`);
+  const right = _storeEl("span", "", item.rating_count
+    ? `★ ${item.rating} (${item.rating_count}) · ${item.install_count} installs`
+    : `${item.install_count} installs`);
+  meta.append(left, right);
+  if (_storeTaken.has(item.slug)) meta.appendChild(_storeEl("span", "store-taken", "Installed"));
+  card.appendChild(meta);
+
+  card.onclick = () => openStoreItem(item.slug);
+  return card;
+}
+
+async function openStoreItem(slug) {
+  try {
+    const item = await api("/api/store/" + encodeURIComponent(slug), "GET", null, true);
+    _storeCurrent = item;
+    _storeRenderDetail(item);
+    openModal("storeModal");
+  } catch (e) {
+    toast(e.message || "Could not open that listing", "error");
+  }
+}
+
+function _storeRenderDetail(item) {
+  document.getElementById("storeDetailTitle").textContent = item.title;
+  document.getElementById("storeDetailSummary").textContent = item.summary;
+
+  const meta = document.getElementById("storeDetailMeta");
+  meta.textContent = "";
+  const chips = [item.category, item.difficulty, item.framework || "python",
+                 `v${item.version}`, `${item.code_lines} lines`,
+                 `${item.install_count} installs`, "by " + item.author];
+  chips.forEach(text => meta.appendChild(_storeEl("span", "store-badge", text)));
+
+  const features = document.getElementById("storeDetailFeatures");
+  features.textContent = "";
+  (item.features || []).forEach(line => features.appendChild(_storeEl("span", "", line)));
+  features.hidden = !(item.features || []).length;
+
+  const code = document.getElementById("storeDetailCode");
+  const label = document.getElementById("storeCodeLabel");
+  if (item.code_full) {
+    code.textContent = item.code || "";
+    label.textContent = `One complete Python file · ${item.code_lines} lines`;
+  } else {
+    code.textContent = (item.code_preview || "") + "\n\n… sign in to read and deploy the whole file";
+    label.textContent = "Preview — the full file opens when you are signed in";
+  }
+
+  const fav = document.getElementById("storeFavBtn");
+  fav.textContent = _storeFavs.has(item.slug) ? "Saved ✓" : "Save";
+  const deploy = document.getElementById("storeDeployBtn");
+  deploy.textContent = _storeTaken.has(item.slug) ? "Deploy again" : "Deploy this bot";
+  deploy.disabled = !item.code_full;
+
+  _storeRenderRating(item);
+}
+
+function _storeRenderRating(item) {
+  const host = document.getElementById("storeRating");
+  const reviews = document.getElementById("storeReviews");
+  if (!host) return;
+  host.textContent = "";
+  const stars = _storeEl("span", "store-stars");
+  for (let i = 1; i <= 5; i++) {
+    const star = _storeEl("button", "store-star" + (i <= Math.round(item.rating || 0) ? " is-on" : ""), "★");
+    star.type = "button";
+    star.title = "Rate " + i + "/5";
+    star.onclick = () => _storeRate(item.slug, i);
+    stars.appendChild(star);
+  }
+  host.appendChild(stars);
+  host.appendChild(_storeEl("small", "", item.rating_count
+    ? `${item.rating} from ${item.rating_count} review${item.rating_count === 1 ? "" : "s"}`
+    : "No reviews yet — deploy it and tell people how it went"));
+
+  if (reviews) {
+    reviews.textContent = "";
+    (item.reviews || []).forEach(row => {
+      const box = _storeEl("div", "store-review");
+      box.appendChild(_storeEl("b", "", `${"★".repeat(row.rating)} `));
+      box.appendChild(document.createTextNode(row.comment || "(no comment)"));
+      box.appendChild(_storeEl("small", "", "  — " + (row.author || "member")));
+      reviews.appendChild(box);
+    });
+  }
+}
+
+async function _storeRate(slug, rating) {
+  const comment = window.prompt("Anything to add to that rating?", "") || "";
+  try {
+    const result = await api(`/api/store/${encodeURIComponent(slug)}/rate`, "POST",
+                             { rating, comment }, true);
+    toast("Thanks for the review", "success");
+    if (_storeCurrent && _storeCurrent.slug === slug) {
+      _storeCurrent.rating = result.rating_average;
+      _storeCurrent.rating_count = result.rating_count;
+      _storeCurrent.reviews = result.reviews || _storeCurrent.reviews;
+      _storeRenderRating(_storeCurrent);
+    }
+  } catch (e) {
+    toast(e.message || "Could not save that rating", "error");
+  }
+}
+
+async function _storeToggleFavorite() {
+  if (!_storeCurrent) return;
+  const slug = _storeCurrent.slug;
+  const next = !_storeFavs.has(slug);
+  try {
+    if (next) await api(`/api/store/${encodeURIComponent(slug)}/favorite`, "POST", { favorite: true }, true);
+    else await api(`/api/store/${encodeURIComponent(slug)}/favorite`, "DELETE", null, true);
+    if (next) _storeFavs.add(slug); else _storeFavs.delete(slug);
+    const fav = document.getElementById("storeFavBtn");
+    if (fav) fav.textContent = next ? "Saved ✓" : "Save";
+    toast(next ? "Saved to your library" : "Removed from your library", "success");
+  } catch (e) {
+    toast(e.message || "Could not update your library", "error");
+  }
+}
+
+/* Deploy = hand the listing's file to the ONE Add Bot wizard. The store
+   records the install, then the wizard does exactly what it does for a
+   pasted file: verify the token, deploy, open the bot. */
+async function _storeDeployCurrent() {
+  if (!_storeCurrent || _storeDeploying) return;
+  const slug = _storeCurrent.slug;
+  _storeDeploying = true;
+  const btn = document.getElementById("storeDeployBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
+  try {
+    const res = await api(`/api/store/${encodeURIComponent(slug)}/install`, "POST", { job_id: null }, true);
+    const item = (res && res.item) || {};
+    if (!item.code) throw new Error("That listing has no code.");
+    closeModal("storeModal");
+    _storeTaken.add(slug);
+    openAddBot();
+    // The wizard renders on the next tick; wait for it before filling code.
+    await new Promise(resolve => setTimeout(resolve, 160));
+    if ((_jobCmGetValue() || "").trim() && !confirm("Replace the current code with this store bot?")) return;
+    _jobCmSetValue(item.code);
+    const lang = document.getElementById("jobLang");
+    if (lang) { lang.value = item.language || "python"; _jobCmSetMode(item.language || "python"); }
+    const name = document.getElementById("jobName");
+    if (name && !name.value.trim()) name.value = (item.title || slug).replace(/ bot$/i, "");
+    _renderTemplateConfig(item.env_fields || [], item.after_deploy || "");
+    _rsTemplateEnvValues = _collectTemplateEnv(false) || {};
+    _setRunSpaceSourceMode("template");
+    const selected = document.getElementById("rsSelectedTemplate");
+    if (selected) selected.textContent = `${item.title || slug} from the Store`;
+    _rsBotAnalysis = null;
+    _setBotWizardStage("code");
+    toast(`Deploying ${item.title || slug}…`, "info");
+    await _analyzeRunSpaceBot();
+    renderStore();
+  } catch (e) {
+    toast(e.message || "Could not deploy that listing", "error");
+  } finally {
+    _storeDeploying = false;
+    const again = document.getElementById("storeDeployBtn");
+    if (again) { again.disabled = false; again.textContent = "Deploy this bot"; }
+  }
+}
+
+/* ---------------- publish a listing ---------------- */
+
+function _storeOpenPublish() {
+  const select = document.getElementById("storePubCategory");
+  if (select && !select.options.length) {
+    const allowed = (_storeFacets && _storeFacets.allowed) ||
+      ["Community", "Channels", "Rewards", "Commerce", "Files", "Media & AI", "AI & Support", "Utilities", "Tools"];
+    allowed.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name; opt.textContent = name;
+      select.appendChild(opt);
+    });
+    select.value = "Utilities";
+  }
+  const state = document.getElementById("storePubState");
+  if (state) { state.textContent = ""; state.className = "store-form-state"; }
+  openModal("storePublishModal");
+}
+
+async function _storeSubmitListing() {
+  const state = document.getElementById("storePubState");
+  const btn = document.getElementById("storePubSubmit");
+  const code = (document.getElementById("storePubCode") || {}).value || "";
+  const payload = {
+    title: ((document.getElementById("storePubTitle") || {}).value || "").trim(),
+    summary: ((document.getElementById("storePubSummary") || {}).value || "").trim(),
+    category: (document.getElementById("storePubCategory") || {}).value || "Utilities",
+    difficulty: (document.getElementById("storePubDifficulty") || {}).value || "Intermediate",
+    version: ((document.getElementById("storePubVersion") || {}).value || "1.0.0").trim(),
+    tags: ((document.getElementById("storePubTags") || {}).value || "").split(",").map(t => t.trim()).filter(Boolean),
+    features: ((document.getElementById("storePubFeatures") || {}).value || "").split("\n").map(f => f.trim()).filter(Boolean),
+    setup_notes: ((document.getElementById("storePubSetup") || {}).value || "").trim(),
+    description: ((document.getElementById("storePubSummary") || {}).value || "").trim(),
+    env_fields: [],
+    code,
+  };
+  if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+  if (state) { state.className = "store-form-state"; state.textContent = "Checking the file…"; }
+  try {
+    const result = await api("/api/store/items", "POST", payload, true);
+    if (state) {
+      state.className = "store-form-state is-ok";
+      state.textContent = "Submitted — an owner reviews new listings before they go live.";
+    }
+    toast("Submitted for review", "success");
+    closeModal("storePublishModal");
+    ["storePubTitle", "storePubSummary", "storePubTags", "storePubFeatures", "storePubSetup", "storePubCode"]
+      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+    loadStore(true);
+  } catch (e) {
+    if (state) { state.className = "store-form-state is-error"; state.textContent = e.message || "Submission failed."; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Submit for review"; }
+  }
+}
+
+/* ---------------- my library ---------------- */
+
+async function _storeOpenLibrary() {
+  const host = document.getElementById("storeLibrary");
+  if (!host) return;
+  host.textContent = "";
+  try {
+    const data = await api("/api/store/mine/library", "GET", null, true);
+    const section = (title, rows, render) => {
+      const box = _storeEl("div", "");
+      box.appendChild(_storeEl("h4", "", title));
+      if (!rows.length) box.appendChild(_storeEl("div", "store-lib-row", "Nothing here yet."));
+      rows.forEach(row => box.appendChild(render(row)));
+      host.appendChild(box);
+    };
+    section("Saved", data.favorites || [], item => {
+      const row = _storeEl("div", "store-lib-row");
+      const left = _storeEl("span", "");
+      left.appendChild(_storeEl("b", "", item.title));
+      left.appendChild(_storeEl("small", "", "  " + item.category));
+      const open = _storeEl("button", "btn-ghost sm", "Open");
+      open.type = "button";
+      open.onclick = () => { closeModal("storeLibraryModal"); openStoreItem(item.slug); };
+      row.append(left, open);
+      return row;
+    });
+    section("Deployed", data.installs || [], row => {
+      const line = _storeEl("div", "store-lib-row");
+      const left = _storeEl("span", "");
+      left.appendChild(_storeEl("b", "", row.title || row.item_slug));
+      left.appendChild(_storeEl("small", "", `  v${row.version || "1.0.0"} · ${row.created_at || ""}`));
+      line.append(left, _storeEl("span", "store-status is-published", "installed"));
+      return line;
+    });
+    section("Published by you", data.submissions || [], row => {
+      const line = _storeEl("div", "store-lib-row");
+      const left = _storeEl("span", "");
+      left.appendChild(_storeEl("b", "", row.title));
+      left.appendChild(_storeEl("small", "", `  ${row.install_count} installs · ${row.review_note || "no note"}`));
+      line.append(left, _storeEl("span", "store-status is-" + row.status, row.status));
+      return line;
+    });
+    openModal("storeLibraryModal");
+  } catch (e) {
+    toast(e.message || "Could not load your library", "error");
+  }
+}
+
+/* ---------------- wiring ---------------- */
+(function _initStore() {
+  function wire() {
+    const search = document.getElementById("storeSearch");
+    if (search) {
+      search.addEventListener("input", () => {
+        clearTimeout(_storeSearchTimer);
+        _storeSearchTimer = setTimeout(() => { _storeQuery = search.value.trim(); loadStore(true); }, 260);
+      });
+    }
+    document.querySelectorAll("#storeSorts .store-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll("#storeSorts .store-chip").forEach(c => c.classList.remove("is-active"));
+        chip.classList.add("is-active");
+        _storeSort = chip.dataset.sort || "popular";
+        loadStore(true);
+      });
+    });
+    const deploy = document.getElementById("storeDeployBtn");
+    if (deploy) deploy.addEventListener("click", _storeDeployCurrent);
+    const fav = document.getElementById("storeFavBtn");
+    if (fav) fav.addEventListener("click", _storeToggleFavorite);
+    const copy = document.getElementById("storeCopyCode");
+    if (copy) copy.addEventListener("click", async () => {
+      const text = (document.getElementById("storeDetailCode") || {}).textContent || "";
+      try { await navigator.clipboard.writeText(text); toast("Code copied", "success"); }
+      catch (e) { toast("Select the code and copy it manually", "info"); }
+    });
+    const publish = document.getElementById("btnStorePublish");
+    if (publish) publish.addEventListener("click", async () => { await loadStore(); _storeOpenPublish(); });
+    const submit = document.getElementById("storePubSubmit");
+    if (submit) submit.addEventListener("click", _storeSubmitListing);
+    const library = document.getElementById("btnStoreLibrary");
+    if (library) library.addEventListener("click", _storeOpenLibrary);
+    // Mobile / menu entry point: the bottom nav stays Bots + Add + Account,
+    // so the store is reached from the one Bots menu (and the desktop tab).
+    const inMenu = document.getElementById("btnStoreInMenu");
+    if (inMenu) inMenu.addEventListener("click", () => switchTab("store"));
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(wire, 50));
+  else setTimeout(wire, 50);
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   AUTH SCREENS — brand panel + password reveal.
+
+   Both are pure presentation bolted onto screens whose behaviour already
+   works, so neither may be able to break a form:
+
+     · The panel is cloned from <template id="authAside"> into every .auth
+       screen at boot. One source, seven screens, no drift. If this never
+       runs, the card is still complete and simply centred.
+     · The reveal button changes the input's type in place. Handlers read
+       the input by id, so the id never moves and no submit path changes.
+   ══════════════════════════════════════════════════════════════════════ */
+(function _initAuthScreens() {
+  function injectPanel() {
+    const tpl = document.getElementById("authAside");
+    if (!tpl || !tpl.content) return;
+    document.querySelectorAll(".auth").forEach((screen) => {
+      if (screen.querySelector(".auth-aside")) return;
+      screen.insertBefore(tpl.content.cloneNode(true), screen.firstChild);
+    });
+  }
+
+  function wireReveal() {
+    document.querySelectorAll(".pw-toggle").forEach((btn) => {
+      if (btn.dataset.pwWired) return;
+      btn.dataset.pwWired = "1";
+      btn.addEventListener("click", () => {
+        const input = document.getElementById(btn.dataset.pw);
+        if (!input) return;
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        btn.textContent = showing ? "Show" : "Hide";
+        btn.setAttribute("aria-pressed", showing ? "false" : "true");
+        // Keep the caret where the reader left it instead of at the start.
+        try { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+      });
+    });
+  }
+
+  function go() { injectPanel(); wireReveal(); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(go, 20));
+  else setTimeout(go, 20);
 })();

@@ -176,6 +176,11 @@ function hsl(hex) {
 // --st-* are aliases of the same three; they are status, not surfaces.
 const STATUS = new Set(['--ok', '--warn', '--danger',
                         '--st-ok', '--st-warn', '--st-danger']);
+/* The aurora palette is an indigo accent on a cool slate ramp, so the accent
+   family is exempt from the surface scan — it is not a surface. What is still
+   policed below: a surface token may be COOL, but it may not be warm, and it
+   may not be saturated enough to read as a colour rather than a grey. */
+const ACCENT_FAMILY = /^--(acc|accent|btn|ring|glow|chart-grid)/;
 let hued = [];
 for (const m of SRC.matchAll(/(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
   if (STATUS.has(m[1])) continue;
@@ -183,10 +188,12 @@ for (const m of SRC.matchAll(/(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
   // already-stripped string shifted every channel by one and reported
   // #090909 at saturation .88, which is nonsense -- caught because a pure
   // grey cannot be saturated.
-  const s = hsl(m[2]).s;
-  if (s > 0.03) hued.push(`${m[1]}=${m[2]} sat=${s.toFixed(2)}`);
+  if (ACCENT_FAMILY.test(m[1])) continue;
+  const { s, h } = hsl(m[2]);
+  const warm = h >= 10 && h <= 60 && s > 0.2;
+  if (warm || s > 0.45) hued.push(`${m[1]}=${m[2]} sat=${s.toFixed(2)} h=${h.toFixed(0)}`);
 }
-ok('no surface or ink token carries a hue', hued.length === 0, hued.join(' '));
+ok('no surface or ink token is warm or reads as a colour', hued.length === 0, hued.join(' '));
 for (const t of ['--ok', '--warn', '--danger'])
   ok(`${t} kept (colour means something)`, new RegExp(t + ':\\s*#').test(SRC));
 

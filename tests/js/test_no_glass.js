@@ -12,7 +12,8 @@
  *   2. no glass tokens left behind
  *   3. core surfaces are fully opaque
  *   4. the dark palette matches the brief, at full contrast
- *   5. one accent, and it stays hueless (a standing decision)
+ *   5. one accent — indigo — and only one (the hueless rule was reversed
+ *      when the aurora design was adopted; see section 6)
  *   6. the RunSpace drawer still opens and closes, five times running
  */
 const fs = require('fs');
@@ -128,10 +129,17 @@ function sat(h) {
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
   return mx === 0 ? 0 : (mx - mn) / mx;
 }
-// A previous round shipped an indigo accent and turned the whole UI blue; it
-// was reverted, and that decision stands. Colour is reserved for status.
-ok('--acc is hueless', sat(hex('--acc')) < 0.06, hex('--acc') + ' sat=' + sat(hex('--acc')).toFixed(2));
-ok('--btn is hueless', sat(hex('--btn')) < 0.06, hex('--btn'));
+/* BRIEF CHANGE (aurora redesign, reference: tajhatAti/dashb). This section
+   used to require a hueless accent, because an earlier indigo round had
+   turned the whole UI blue. The product owner asked for that dashboard's
+   language explicitly, so indigo is now the accent — and the useful part of
+   the old rule survives: there is exactly ONE of it, and it is the same
+   value in both themes rather than a second colour wearing the same name. */
+const ACC = hex('--acc');
+ok('--acc is the indigo accent', ACC === '#4f46e5', ACC);
+ok('--acc really is coloured now', sat(ACC) > 0.5, 'sat=' + sat(ACC).toFixed(2));
+ok('--btn is the same accent, not a second one', hex('--btn') === ACC, hex('--btn'));
+ok('--btn-fg is white so the label clears AA', /^#f{6}$|^#ffffff$/i.test(hex('--btn-fg')), hex('--btn-fg'));
 ok('status colours still exist and ARE coloured',
    sat(hex('--st-warn') || '#000000') > 0.3 || !hex('--st-warn'), hex('--st-warn'));
 

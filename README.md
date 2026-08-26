@@ -15,11 +15,23 @@ The Add Bot flow includes 21 searchable, categorized starters rather than demo s
 
 Admin-capable templates do not ask users to discover a numeric Telegram ID. The wizard generates an encrypted one-time `ADMIN_CLAIM_CODE`, then puts it into the **Go to bot** deep link after deployment. Pressing Start through that link makes the bot store the sender's real Telegram user ID and refuse future claims—no ID or command needs to be typed. The Master Referral template follows the requested first-opener rule instead.
 
+## Bot Store
+
+The **Store** tab (`/store`) is a shelf of complete bots — and every listing is
+one complete **Python** file, not a set of commands in a platform dialect. Read
+the whole source before you deploy, deploy it in one tap, then keep editing the
+same file. The seven curated products are mirrored from `services/bot_templates`
+so installs, ratings and favourites attach to them like any other listing, and
+signed-in users can publish their own bots: the file must compile, read
+`BOT_TOKEN` from the environment and embed no token, then an owner approves it.
+Full details in `STORE.md`.
+
 ## Main capabilities
 
 - Email and Telegram authentication
 - Telegram Mini App sign-in verification
 - Code-first bot hosting wizard with Python/Node starter templates
+- Bot Store: curated + community listings, each one raw Python file
 - Encrypted bot environment secrets at rest
 - Duplicate-token deployment prevention
 - Polling/webhook diagnostics and duplicate-poller detection
@@ -160,6 +172,7 @@ DATA_DIR=$(mktemp -d) DB_PATH=$(mktemp -d)/test.db \
 
 ## Additional documentation
 
+- `STORE.md`
 - `TELEGRAM_JOB_DETECTION.md`
 - `BOT_TEMPLATE_GUIDE.md`
 - `JOB_URLS_AND_BOT_ANALYTICS.md`
