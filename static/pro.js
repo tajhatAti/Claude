@@ -148,6 +148,8 @@ function switchTab(tabId) {
   // ⚙️ Settings: keep the security panel truthful every time it opens.
   if (tabId === "profile") { refreshSecurityPanel(); loadSessionsList(); }
   if (tabId === "code") { loadSnippets(); initCodeMirror(); if (cmEditor) cmEditor.refresh(); }
+  // 📈 Overview is the analytics dashboard: load on open, reuse after.
+  if (tabId === "overview" && typeof loadOverview === "function") { loadOverview(); }
   // 🛍️ Store: fetch the shelf the first time it is opened, then reuse it.
   if (tabId === "store" && typeof loadStore === "function") { loadStore(); }
   // 🔗 Every section is a REAL URL — back/forward + refresh + sharing work.
@@ -8904,4 +8906,242 @@ async function _storeOpenLibrary() {
   function go() { injectPanel(); wireReveal(); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(go, 20));
   else setTimeout(go, 20);
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   OVERVIEW — the analytics dashboard.
+
+   A metric, its change against the previous period, and the shape of the
+   recent days. The chart is hand-drawn SVG rather than a chart library:
+   the product ships one stylesheet and no runtime dependencies, and four
+   numbers plus one area chart do not justify adding either.
+
+   Two honesty rules the rendering follows:
+     · a null delta prints "new", never a fabricated +100%
+     · a zero day is a point on the line, not a gap in it
+   ══════════════════════════════════════════════════════════════════════ */
+let _ovDays = 14;
+let _ovData = null;
+let _ovLoading = false;
+
+const OV_SVG = "http://www.w3.org/2000/svg";
+
+function _ovEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function _ovSvg(tag, attrs) {
+  const node = document.createElementNS(OV_SVG, tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => node.setAttribute(k, String(v)));
+  return node;
+}
+
+function _ovFmt(n) {
+  const v = Number(n || 0);
+  if (v >= 1000000) return (v / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (v >= 1000) return (v / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(v);
+}
+
+function _ovDeltaChip(delta) {
+  const chip = _ovEl("span", "ov-delta");
+  if (delta === null || delta === undefined) {
+    chip.classList.add("is-new");
+    chip.textContent = "new";
+    return chip;
+  }
+  const up = delta >= 0;
+  chip.classList.add(up ? "is-up" : "is-down");
+  chip.textContent = (up ? "▲ " : "▼ ") + Math.abs(delta) + "%";
+  return chip;
+}
+
+/* Sparkline: a polyline scaled to the card, with the last point marked so a
+   flat line and a line that ends flat are not the same picture. */
+function _ovSparkline(values) {
+  const w = 104, h = 30, pad = 3;
+  const svg = _ovSvg("svg", { viewBox: `0 0 ${w} ${h}`, class: "ov-spark", "aria-hidden": "true" });
+  const max = Math.max(1, ...values);
+  const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
+  const pts = values.map((v, i) => [pad + i * step, h - pad - (v / max) * (h - pad * 2)]);
+  svg.appendChild(_ovSvg("polyline", {
+    points: pts.map(p => p.join(",")).join(" "),
+    fill: "none", stroke: "currentColor", "stroke-width": "1.6",
+    "stroke-linejoin": "round", "stroke-linecap": "round",
+  }));
+  if (pts.length) {
+    const last = pts[pts.length - 1];
+    svg.appendChild(_ovSvg("circle", { cx: last[0], cy: last[1], r: "2.2", fill: "currentColor" }));
+  }
+  return svg;
+}
+
+/* Area chart: grid lines from the chart-grid token, two series, and x labels
+   thinned so a 30-day range does not print 30 overlapping dates. */
+function _ovChart(series) {
+  const host = document.getElementById("ovChart");
+  if (!host) return;
+  host.textContent = "";
+  if (!series || !series.length) { host.appendChild(_ovEl("p", "ov-empty", "No activity yet.")); return; }
+
+  const w = 720, h = 220, padL = 34, padR = 12, padT = 14, padB = 26;
+  const svg = _ovSvg("svg", { viewBox: `0 0 ${w} ${h}`, class: "ov-svg", role: "img",
+                              "aria-label": "Deploys and new bots per day" });
+  const defs = _ovSvg("defs");
+  const grad = _ovSvg("linearGradient", { id: "ovFill", x1: "0", y1: "0", x2: "0", y2: "1" });
+  grad.appendChild(_ovSvg("stop", { offset: "0%", "stop-color": "var(--acc)", "stop-opacity": ".28" }));
+  grad.appendChild(_ovSvg("stop", { offset: "100%", "stop-color": "var(--acc)", "stop-opacity": "0" }));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  const max = Math.max(1, ...series.map(d => Math.max(d.deploys, d.new_bots)));
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const x = i => padL + (series.length > 1 ? (i * innerW) / (series.length - 1) : innerW / 2);
+  const y = v => padT + innerH - (v / max) * innerH;
+
+  // Grid + y labels: four steps, so the reader can estimate a value.
+  for (let g = 0; g <= 4; g++) {
+    const value = Math.round((max / 4) * g);
+    const gy = y(value);
+    svg.appendChild(_ovSvg("line", { x1: padL, y1: gy, x2: w - padR, y2: gy,
+                                     stroke: "var(--chart-grid)", "stroke-width": "1" }));
+    const label = _ovSvg("text", { x: padL - 8, y: gy + 4, "text-anchor": "end",
+                                   class: "ov-axis" });
+    label.textContent = String(value);
+    svg.appendChild(label);
+  }
+
+  const line = key => series.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(" ");
+  const area = key => `${line(key)} L${x(series.length - 1).toFixed(1)},${(padT + innerH).toFixed(1)}` +
+                      ` L${x(0).toFixed(1)},${(padT + innerH).toFixed(1)} Z`;
+
+  svg.appendChild(_ovSvg("path", { d: area("deploys"), fill: "url(#ovFill)" }));
+  svg.appendChild(_ovSvg("path", { d: line("deploys"), fill: "none", stroke: "var(--acc)",
+                                   "stroke-width": "2", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  svg.appendChild(_ovSvg("path", { d: line("new_bots"), fill: "none", stroke: "var(--ok)",
+                                   "stroke-width": "1.6", "stroke-dasharray": "4 3",
+                                   "stroke-linejoin": "round" }));
+
+  // Hover targets: one invisible column per day, so the tooltip follows the
+  // pointer instead of requiring a 3-pixel bullseye.
+  const every = Math.ceil(series.length / 7);
+  series.forEach((d, i) => {
+    const band = innerW / series.length;
+    const rect = _ovSvg("rect", { x: x(i) - band / 2, y: padT, width: band, height: innerH,
+                                  fill: "transparent" });
+    const tip = _ovSvg("title");
+    tip.textContent = `${d.label}: ${d.deploys} deploys, ${d.new_bots} new bots`;
+    rect.appendChild(tip);
+    svg.appendChild(rect);
+    if (i % every === 0 || i === series.length - 1) {
+      const label = _ovSvg("text", { x: x(i), y: h - 8, "text-anchor": "middle", class: "ov-axis" });
+      label.textContent = d.label;
+      svg.appendChild(label);
+    }
+  });
+
+  host.appendChild(svg);
+}
+
+function _ovKpiCard(kpi, spark) {
+  const card = _ovEl("div", "ov-kpi");
+  const top = _ovEl("div", "ov-kpi-top");
+  top.appendChild(_ovEl("span", "ov-kpi-label", kpi.label));
+  top.appendChild(_ovDeltaChip(kpi.delta));
+  card.appendChild(top);
+  const row = _ovEl("div", "ov-kpi-row");
+  row.appendChild(_ovEl("b", "ov-kpi-value", _ovFmt(kpi.value)));
+  if (spark && spark.length > 1) row.appendChild(_ovSparkline(spark));
+  card.appendChild(row);
+  card.appendChild(_ovEl("p", "ov-kpi-sub", kpi.sub || ""));
+  return card;
+}
+
+function renderOverview(data) {
+  _ovData = data;
+  const sub = document.getElementById("ovSub");
+  if (sub) sub.textContent = `${data.range.start} → ${data.range.end}, against the previous ${data.days} days`;
+  const label = document.getElementById("ovRangeLabel");
+  if (label) label.textContent = String(data.days);
+
+  const kpis = document.getElementById("ovKpis");
+  if (kpis) {
+    kpis.textContent = "";
+    const sparkFor = { deploys: data.series.map(d => d.deploys),
+                       bots: data.series.map(d => d.new_bots),
+                       new_bots: data.series.map(d => d.new_bots) };
+    data.kpis.forEach(kpi => kpis.appendChild(_ovKpiCard(kpi, sparkFor[kpi.key] || [])));
+  }
+
+  _ovChart(data.series);
+  const chartSub = document.getElementById("ovChartSub");
+  if (chartSub) chartSub.textContent = `${data.totals.deploys} deploys · ${data.totals.new_bots} new bots`;
+
+  const top = document.getElementById("ovTopBots");
+  if (top) {
+    top.textContent = "";
+    if (!data.top_bots.length) top.appendChild(_ovEl("p", "ov-empty", "No bots yet — deploy one and it shows up here."));
+    data.top_bots.forEach(bot => {
+      const row = _ovEl("button", "ov-row");
+      row.type = "button";
+      const left = _ovEl("span", "ov-row-main");
+      left.appendChild(_ovEl("b", "", bot.name));
+      left.appendChild(_ovEl("small", "", bot.username ? "@" + bot.username : bot.language));
+      const right = _ovEl("span", "ov-row-side");
+      right.appendChild(_ovEl("span", "ov-pill" + (bot.live ? " is-live" : ""), bot.live ? "live" : "stopped"));
+      right.appendChild(_ovEl("span", "ov-count", bot.actions + (bot.actions === 1 ? " action" : " actions")));
+      row.append(left, right);
+      row.onclick = () => switchTab("jobs");
+      top.appendChild(row);
+    });
+  }
+
+  const recent = document.getElementById("ovRecent");
+  if (recent) {
+    recent.textContent = "";
+    if (!data.recent.length) recent.appendChild(_ovEl("p", "ov-empty", "Nothing deployed yet."));
+    data.recent.forEach(item => {
+      const row = _ovEl("div", "ov-row");
+      const left = _ovEl("span", "ov-row-main");
+      left.appendChild(_ovEl("b", "", item.job_name || "bot"));
+      left.appendChild(_ovEl("small", "", (item.action || "") + (item.username ? " · @" + item.username : "")));
+      row.append(left, _ovEl("span", "ov-when", (item.created_at || "").slice(5, 16)));
+      recent.appendChild(row);
+    });
+  }
+}
+
+async function loadOverview(force) {
+  if (_ovLoading) return;
+  if (_ovData && !force && _ovData.days === _ovDays) return;
+  _ovLoading = true;
+  try {
+    const data = await api(`/api/analytics/overview?days=${_ovDays}`, "GET", null, true);
+    renderOverview(data);
+  } catch (e) {
+    const sub = document.getElementById("ovSub");
+    if (sub) sub.textContent = "Could not load your numbers.";
+  } finally {
+    _ovLoading = false;
+  }
+}
+
+(function _initOverview() {
+  function wire() {
+    document.querySelectorAll("#ovRanges .ov-range").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#ovRanges .ov-range").forEach(b => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+        _ovDays = parseInt(btn.dataset.days, 10) || 14;
+        loadOverview(true);
+      });
+    });
+    const refresh = document.getElementById("ovRefresh");
+    if (refresh) refresh.addEventListener("click", () => loadOverview(true));
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(wire, 40));
+  else setTimeout(wire, 40);
 })();

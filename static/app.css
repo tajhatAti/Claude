@@ -4495,3 +4495,103 @@ input:focus, select:focus, textarea:focus {
   .btn-primary:hover, .btn-secondary:hover, .btn-ghost:hover,
   .feat:hover, .store-card:hover { transform: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   OVERVIEW — the analytics dashboard.
+   Card + metric + delta chip + chart, in the aurora language: 16px cards,
+   soft shadow, tabular numerals, and colour only where it means something
+   (emerald up, rose down, indigo for the line being read).
+   ══════════════════════════════════════════════════════════════════════ */
+.ov-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s4); flex-wrap: wrap; margin-bottom: var(--s4);
+}
+.ov-title { font-size: var(--fs-7); margin: 2px 0 4px; }
+.ov-sub { color: var(--fg-3); font-size: var(--fs-3); margin: 0; }
+.ov-controls { display: flex; align-items: center; gap: var(--s2); }
+.ov-ranges { display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-ctl); box-shadow: var(--shadow-soft); }
+.ov-range {
+  height: 28px; padding: 0 var(--s3);
+  border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--fg-3);
+  font-size: var(--fs-2); font-weight: 600; cursor: pointer;
+}
+.ov-range:hover { color: var(--fg); }
+.ov-range.is-active { background: var(--acc-soft); color: var(--acc); }
+
+.ov-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }
+.ov-kpi {
+  padding: var(--s4);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-card); box-shadow: var(--shadow-soft);
+}
+.ov-kpi-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.ov-kpi-label { color: var(--fg-3); font-size: var(--fs-2); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; }
+.ov-delta {
+  padding: 2px 8px; border-radius: var(--pill);
+  font-size: var(--fs-1); font-weight: 700; font-variant-numeric: tabular-nums;
+  border: 1px solid transparent;
+}
+.ov-delta.is-up   { background: var(--ok-dim);     color: var(--ok);     border-color: var(--ok); }
+.ov-delta.is-down { background: var(--danger-dim); color: var(--danger); border-color: var(--danger); }
+.ov-delta.is-new  { background: var(--acc-soft);   color: var(--acc);    border-color: var(--acc); }
+.ov-kpi-row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s2); margin: var(--s2) 0 6px; }
+.ov-kpi-value { font-family: var(--display); font-size: var(--fs-8); line-height: 1;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ov-spark { width: 104px; height: 30px; color: var(--acc); flex: none; }
+.ov-kpi-sub { margin: 0; color: var(--fg-4); font-size: var(--fs-2); }
+
+.ov-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--s3); margin-top: var(--s3); }
+.ov-card {
+  padding: var(--s4);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-card); box-shadow: var(--shadow-soft);
+  min-width: 0;
+}
+.ov-chart-card { grid-row: span 2; }
+.ov-card-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--s3); margin-bottom: var(--s3); }
+.ov-card-head h3 { font-size: var(--fs-5); margin: 0; }
+.ov-card-sub { margin: 2px 0 0; color: var(--fg-3); font-size: var(--fs-2); }
+.ov-legend { display: inline-flex; align-items: center; gap: 6px;
+  color: var(--fg-3); font-size: var(--fs-1); white-space: nowrap; }
+.ov-dot { width: 8px; height: 8px; border-radius: var(--pill); background: var(--acc); }
+.ov-dot-2 { background: var(--ok); }
+
+.ov-chart { width: 100%; }
+.ov-svg { width: 100%; height: auto; display: block; }
+.ov-axis { fill: var(--fg-4); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ov-empty { color: var(--fg-4); font-size: var(--fs-2); margin: var(--s3) 0; }
+
+.ov-list { display: grid; gap: 6px; }
+.ov-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line); border-radius: var(--r-row);
+  background: var(--bg); color: inherit; text-align: left; cursor: pointer;
+}
+div.ov-row { cursor: default; }
+.ov-row:hover { border-color: var(--line-2); background: var(--card-2); }
+.ov-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ov-row-main b { font-size: var(--fs-3); font-weight: 600; }
+.ov-row-main small { color: var(--fg-3); font-size: var(--fs-1); }
+.ov-row-side { display: inline-flex; align-items: center; gap: var(--s2); flex: none; }
+.ov-pill { padding: 2px 8px; border-radius: var(--pill); border: 1px solid var(--line);
+  color: var(--fg-3); font-size: var(--fs-1); }
+.ov-pill.is-live { color: var(--ok); border-color: var(--ok); background: var(--ok-dim); }
+.ov-count, .ov-when { color: var(--fg-3); font-size: var(--fs-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 1100px) {
+  .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-grid { grid-template-columns: minmax(0, 1fr); }
+  .ov-chart-card { grid-row: auto; }
+}
+@media (max-width: 560px) {
+  .ov-kpis { grid-template-columns: minmax(0, 1fr); }
+  .ov-head { align-items: flex-start; }
+  .ov-spark { display: none; }
+}

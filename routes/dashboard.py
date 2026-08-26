@@ -4,6 +4,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from routes.deps import *  # shared kernel (config, helpers, models)
+from services import user_analytics
 
 
 router = APIRouter()
@@ -64,5 +65,26 @@ def get_user_stats(authorization: Optional[str] = Header(None)):
             "active_sessions": sessions_count,
             "member_since": user["created_at"],
         }
+    finally:
+        conn.close()
+
+
+# ================================
+# OVERVIEW ANALYTICS
+# ================================
+
+
+@router.get("/api/analytics/overview")
+def analytics_overview(days: int = 14, authorization: Optional[str] = Header(None)):
+    """KPIs, a daily series and the recent trail for ONE account.
+
+    Every figure is read from events the product already records — see
+    services/user_analytics.py for which table each number comes from and why
+    a delta can legitimately be null.
+    """
+    user, _ = get_current_user_and_session(authorization)
+    conn = get_db_connection()
+    try:
+        return user_analytics.overview(conn, user["id"], days)
     finally:
         conn.close()
