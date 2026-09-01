@@ -15,10 +15,11 @@ ok('mobile navigation exists', !!bottom);
 ok('mobile navigation has Bots', />Bots</.test(bottom));
 ok('mobile navigation has one Add Bot action', /id="bnAddBot"/.test(bottom));
 ok('mobile navigation has Account', />Account</.test(bottom));
+ok('mobile navigation advertises Store', />Store</.test(bottom));
+ok('mobile navigation advertises Code', />Code</.test(bottom));
 ok('mobile navigation does not advertise generic Home', !/>Home</.test(bottom));
-ok('mobile navigation does not advertise Code Studio', !/>Code</.test(bottom));
 ok('mobile navigation does not advertise a second Menu', !/>Menu</.test(bottom));
-ok('only two real mobile destinations exist', (bottom.match(/data-tab=/g) || []).length === 2);
+ok('four real mobile destinations exist', (bottom.match(/data-tab=/g) || []).length === 4);
 
 // Existing bookmarks keep working, but the bot product owns the default route.
 ok('/bots is the canonical jobs route', /"\/bots":\s*"jobs"/.test(js));

@@ -1582,10 +1582,14 @@ async function loadDashboard() {
     _dashRetries = 0;                     // healthy again — reset the backoff
     document.getElementById("dashUsername").textContent = profile.username;
     document.getElementById("dashUsername2").textContent = profile.username;
-    document.getElementById("profileUsername").value = profile.username;
-    document.getElementById("profileEmail").value = profile.email;
-    document.getElementById("profilePhone").value = profile.phone || "";
-    document.getElementById("profileCode").value = profile.custom_code || "";
+    const pu = document.getElementById("profileUsername");
+    const pe = document.getElementById("profileEmail");
+    const pp = document.getElementById("profilePhone");
+    const pc = document.getElementById("profileCode");
+    if (pu) pu.value = profile.username;
+    if (pe) pe.value = profile.email;
+    if (pp) pp.value = profile.phone || "";
+    if (pc) pc.value = profile.custom_code || "";
 
     _lastProfile = profile;
     applyAdminVisibility(profile);
@@ -2305,8 +2309,10 @@ function applyTheme(theme) {
 
 /* ==================== PROFILE ==================== */
 async function saveProfile() {
-  const phone = document.getElementById("profilePhone").value.trim();
-  const custom_code = document.getElementById("profileCode").value.trim();
+  const phoneEl = document.getElementById("profilePhone");
+  const codeEl = document.getElementById("profileCode");
+  const phone = phoneEl ? phoneEl.value.trim() : "";
+  const custom_code = codeEl ? codeEl.value.trim() : "";
   try { await api("/profile/update", "POST", { phone, custom_code }, true); toast("Profile saved!", "success"); }
   catch (err) { toast(err.message, "error"); }
 }
@@ -3127,6 +3133,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   const bnAddBot = document.getElementById("bnAddBot");
   if (bnAddBot) bnAddBot.addEventListener("click", openAddBot);
+  const mobileFab = document.getElementById("mobileFabAdd");
+  if (mobileFab) mobileFab.addEventListener("click", openAddBot);
   const rsAccountMenu = document.getElementById("rsAccountMenu");
   if (rsAccountMenu) rsAccountMenu.addEventListener("click", () => {
     if (typeof closeRsMoreMenu === "function") closeRsMoreMenu();
@@ -6562,6 +6570,37 @@ function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobs
    never leaked. Moderation actions are admin-only and written to the audit log. */
 let _admPending = null;   // { user_id, suspended } awaiting 2FA confirm
 
+/* Section nav: highlight the section the admin is looking at. This lives in
+   pro.js rather than only in the template because a plain <a> jump feels
+   abandoned without a visual response, and the active state must also work
+   after the panel's markup is fetched late. */
+function _admWireSectionNav() {
+  const nav = document.querySelector("#tab-admin .adm-section-nav");
+  if (!nav || nav.dataset.wired) return;
+  nav.dataset.wired = "1";
+  nav.addEventListener("click", e => {
+    const a = e.target.closest("a"); if (!a) return;
+    nav.querySelectorAll("a").forEach(x => x.classList.toggle("active", x === a));
+  });
+  const links = [...nav.querySelectorAll("a[href^='#']")];
+  const ids = links.map(a => a.getAttribute("href").slice(1));
+  if (!ids.some(id => document.getElementById(id))) return;
+  let busy = false;
+  const setActive = () => {
+    if (busy) return;
+    const y = window.scrollY + 92;                 // below the sticky header
+    let best = 0;
+    links.forEach((a, i) => {
+      const el = document.getElementById(ids[i]);
+      if (!el) return;
+      if (el.getBoundingClientRect().top + window.scrollY <= y) best = i;
+    });
+    links.forEach((a, i) => a.classList.toggle("active", i === best));
+  };
+  window.addEventListener("scroll", setActive, { passive: true });
+  setActive();
+}
+
 let _adminFetching = false;  // guard: one in-flight markup fetch at a time
 let _adminSectHtml = null;   // pristine copy so the panel can come BACK on
 let _adminProfile = null;    // needed when a failed first fetch is retried
@@ -6604,6 +6643,7 @@ function applyAdminVisibility(profile) {
   let sect = document.getElementById("tab-admin");
 
   if (isAdm) {
+    if (sect) _admWireSectionNav();
     // routeFromUrl runs before /profile has proved admin status. Remember a
     // direct /admin navigation and complete it after protected markup arrives.
     if (_clientPath() === "/admin") _adminRequested = true;
@@ -6615,6 +6655,7 @@ function applyAdminVisibility(profile) {
         const host = document.querySelector(".dash-main");
         if (host) host.insertAdjacentHTML("beforeend", _adminSectHtml);
         sect = document.getElementById("tab-admin");
+        _admWireSectionNav();
         if (sect && _adminRequested) {
           _adminRequested = false;
           switchTab("admin");
@@ -6634,6 +6675,7 @@ function applyAdminVisibility(profile) {
             if (host && !document.getElementById("tab-admin")) {
               host.insertAdjacentHTML("beforeend", html);
             }
+            _admWireSectionNav();
             if (_adminRequested && document.getElementById("tab-admin")) {
               _adminRequested = false;
               switchTab("admin");
@@ -6756,6 +6798,7 @@ function _loadAdminRiskData() {
 async function loadAdminPanel(force) {
   const stats = document.getElementById("admStats");
   if (!stats) return;
+  if (typeof _admWireSectionNav === "function") _admWireSectionNav();
   // A slow poll must not stack on the previous one. Without this, a runner
   // taking longer than the interval to answer queues refreshes until the
   // whole pool is being hammered by the panel watching it.

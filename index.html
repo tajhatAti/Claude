@@ -1590,8 +1590,6 @@
           <h3>Account</h3>
           <label class="field"><span>Username</span><input type="text" id="profileUsername" class="input-text" disabled></label>
           <label class="field"><span>Email</span><input type="email" id="profileEmail" class="input-text" disabled></label>
-          <label class="field"><span>Phone</span><input type="tel" id="profilePhone" class="input-text" placeholder="+880 1XXX XXXXXX"></label>
-          <label class="field"><span>Custom code</span><input type="text" id="profileCode" class="input-text" placeholder="AHAD-001"></label>
           <button class="btn-primary sm" onclick="saveProfile()">Save changes</button>
         </div>
 
@@ -1634,34 +1632,15 @@
           <button class="btn-secondary block left" id="btnTelegram" onclick="manageTelegram()">Connect Telegram</button>
         </div>
 
-        <!-- Active sessions -->
-        <div class="profile-card set-group">
+        <!-- Security note -->
+        <div class="profile-card note-card">
           <div class="set-row">
-            <div class="set-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="16" height="6.5" rx="1.5"/><path d="M8 7.3h.01M8 16.8h.01M12.5 7.3H17M12.5 16.8H17"/></svg></div>
+            <div class="set-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 5 6v5.5c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6z"/><path d="M9.2 11.8l2 2 3.6-4"/></svg></div>
             <div class="set-tx">
-              <h3>Active sessions</h3>
-              <p>Devices currently signed in to your account. Revoke anything you don't recognise.</p>
+              <h3>Keep your account safe</h3>
+              <p>Use a strong password and keep 2FA on. Telegram keeps your bots reachable from anywhere.</p>
             </div>
           </div>
-          <div class="sess-list" id="sessList"><div class="muted" style="font-size:13px">Loading…</div></div>
-        </div>
-
-        <!-- Recent activity -->
-        <div class="profile-card set-group">
-          <div class="set-row">
-            <div class="set-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20.5h16"/><path d="M7 16.5v-4M12 16.5v-9M17 16.5v-6.5"/></svg></div>
-            <div class="set-tx">
-              <h3>Recent activity</h3>
-              <p>Sign-ins, OTP attempts and security events, newest first.</p>
-            </div>
-          </div>
-          <button class="btn-ghost block left" onclick="openActivityPanel()">Open activity log</button>
-        </div>
-
-        <div class="profile-card danger">
-          <h3>Danger zone</h3>
-          <p class="muted">Permanently delete your account and all data.</p>
-          <button class="btn-danger block">Delete account</button>
         </div>
       </div>
     </div>
@@ -1669,30 +1648,36 @@
     <div class="dash-tab-content" id="tab-admin">
       <div class="tab-head">
         <div><div class="eyebrow">OWNER CONSOLE</div><h2>Admin</h2></div>
-        <button class="btn-ghost sm" id="admRefresh" onclick="loadAdminPanel(true)">↻ Refresh</button>
+        <div class="adm-head-right">
+          <span class="adm-hint adm-fresh" id="admFresh"></span>
+          <button class="btn-ghost sm" id="admRefresh" onclick="loadAdminPanel(true)">↻ Refresh</button>
+        </div>
       </div>
+      <nav class="adm-section-nav" aria-label="Admin sections">
+        <a href="#admOverviewSection" class="active">Overview</a><a href="#admBotsSection">Bots</a><a href="#admUsersSection">Users</a><a href="#admPackagesSection">Packages</a><a href="#admReportsSection">Reports</a><a href="#admAuditSection">Audit</a>
+      </nav>
       <div class="adm-stats" id="admStats"></div>
-      <div class="adm-panel">
+      <div class="adm-panel" id="admOverviewSection">
         <div class="adm-panel-head"><h3>Signups · last 14 days</h3><span class="adm-hint" id="admCap"></span></div>
         <div class="adm-spark" id="admSpark"></div>
       </div>
-      <div class="adm-panel">
+      <div class="adm-panel" id="admBotsSection">
         <div class="adm-panel-head"><h3>Hosted bots</h3><span class="adm-hint">metadata only — code stays private</span></div>
         <div class="adm-table-wrap"><table class="adm-table" id="admJobs"></table></div>
       </div>
-      <div class="adm-panel">
+      <div class="adm-panel" id="admPackagesSection">
         <div class="adm-panel-head"><h3>Installed packages</h3><span class="adm-hint">across running jobs — hover a row for owners</span></div>
         <div class="adm-libs" id="admLibs"></div>
       </div>
-      <div class="adm-panel">
+      <div class="adm-panel" id="admUsersSection">
         <div class="adm-panel-head"><h3>Users</h3><span class="adm-hint">suspending needs your 2FA code</span></div>
         <div class="adm-table-wrap"><table class="adm-table" id="admUsers"></table></div>
       </div>
-      <div class="adm-panel">
+      <div class="adm-panel" id="admReportsSection">
         <div class="adm-panel-head"><h3>Abuse reports</h3><span class="adm-hint">sent from the public report page</span></div>
         <div class="adm-table-wrap"><table class="adm-table" id="admReports"></table></div>
       </div>
-      <div class="adm-panel">
+      <div class="adm-panel" id="admAuditSection">
         <div class="adm-panel-head"><h3>Audit log</h3><span class="adm-hint">every admin action, recorded</span></div>
         <div class="adm-table-wrap"><table class="adm-table" id="admAudit"></table></div>
       </div>
@@ -1703,9 +1688,14 @@
   <!-- ============ MOBILE BOTTOM NAV ============ -->
   <nav class="bottom-nav bot-bottom-nav" id="bottomNav" aria-label="Main navigation">
     <button class="bn-item active" data-tab="jobs"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="12" rx="4"/><path d="M9 12h.01M15 12h.01M9 16h6M12 7V4"/></svg></span><span class="bn-l">Bots</span></button>
+    <button class="bn-item" data-tab="store"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16l-1 10.5H5z"/><path d="M8.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></svg></span><span class="bn-l">Store</span></button>
     <button class="bn-item bn-add" id="bnAddBot" type="button"><span class="bn-add-circle">+</span><span class="bn-l">Add Bot</span></button>
+    <button class="bn-item" data-tab="code"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8l-4.5 4L9 16M15 8l4.5 4L15 16"/></svg></span><span class="bn-l">Code</span></button>
     <button class="bn-item" data-tab="profile"><span class="bn-ic"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c.8-3.7 3.2-5.5 6.5-5.5s5.7 1.8 6.5 5.5"/></svg></span><span class="bn-l">Account</span></button>
   </nav>
+  <button class="mobile-fab" id="mobileFabAdd" type="button" title="Add a bot" aria-label="Add a bot">
+    <svg viewBox="0 0 24 24" class="tab-ic" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
   <!-- (the old "more sheet" was removed — the left drawer is the ONE mobile menu;
        two overlapping menus was the "mixed content" navigation bug) -->
 </div>

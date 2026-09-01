@@ -2,8 +2,8 @@ const fs=require('fs');
 const HTML=fs.readFileSync('index.html','utf8'),CSS=fs.readFileSync('static/app.css','utf8'),JS=fs.readFileSync('static/pro.js','utf8');
 let pass=0,fail=0;const ok=(n,c,e)=>{if(c)pass++;else{fail++;console.log(`  FAIL ${n}${e?' -> '+e:''}`)}};
 console.log('[1] bot-first global navigation remains visible');
-for(const label of ['Bots','Add Bot','Account'])ok(`${label} remains in mobile nav`,new RegExp(`class="bn-l">${label}<`).test(HTML));
-for(const label of ['Home','Code','Menu'])ok(`${label} is removed from primary mobile nav`,!new RegExp(`class="bn-l">${label}<`).test(HTML));
+for(const label of ['Bots','Add Bot','Account','Store','Code'])ok(`${label} remains in mobile nav`,new RegExp(`class="bn-l">${label}<`).test(HTML));
+for(const label of ['Home','Menu'])ok(`${label} is removed from primary mobile nav`,!new RegExp(`class="bn-l">${label}<`).test(HTML));
 ok('RunSpace no longer hides the mobile nav',!/body\.rs-active \.bottom-nav \{ display: none !important/.test(CSS));
 ok('mobile RunSpace explicitly shows the nav',/body\.rs-active:not\(\.rs-detail-open\) \.bottom-nav \{ display:flex !important/.test(CSS));
 ok('space is reserved so nav cannot cover editor',/body\.rs-active:not\(\.rs-detail-open\) \.dash-main \{[^}]*padding-bottom:calc\(var\(--bottom-nav-h\)/.test(CSS));
@@ -16,5 +16,5 @@ ok('hidden overlay cannot leave a grey veil or eat clicks',/\.side-overlay\.hidd
 ok('closed RunSpace menu scrim cannot eat clicks',/\.rs-menu-scrim \{[^}]*pointer-events:\s*none/.test(CSS));
 console.log('[3] active state remains coherent');
 ok('RunSpace button still receives active state',/b\.classList\.toggle\("active", b\.dataset\.tab ===/.test(JS));
-ok('legacy Code and Overview remain addressable but hidden from product nav',/data-tab="overview"/.test(HTML)&&/data-tab="code"/.test(HTML)&&/\.product-legacy\s*\{\s*display:\s*none/.test(CSS));
+ok('legacy Overview remains addressable but hidden from product nav',/data-tab="overview"/.test(HTML)&&/\.product-legacy\s*\{\s*display:\s*none/.test(CSS));
 console.log(`test_runspace_global_nav: ${pass} passed, ${fail} failed`);process.exit(fail?1:0);

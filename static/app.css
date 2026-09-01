@@ -1652,6 +1652,26 @@ body.signed-out-in .hero {
 .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .adm-table  { min-width: 560px; }
 .adm-act    { display: flex; gap: var(--s1); }
+/* Admin console keeps the same rhythm as the rest of the app: on wide
+   screens the panels settle into a two-column bento so the console stops
+   being one long list of full-width tables; on phones it collapses to one
+   column just like every other tab. */
+.adm-section-nav a.active { background: var(--acc); color: var(--acc-fg); border-color: var(--acc); }
+.adm-section-nav a.active:hover,
+.adm-section-nav a.active:focus-visible { border-color: var(--acc); color: var(--acc-fg); }
+@media (min-width: 761px) {
+  #tab-admin.active { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); align-items: start; }
+  #tab-admin > .tab-head,
+  #tab-admin > .adm-section-nav,
+  #tab-admin > .adm-stats { grid-column: 1 / -1; }
+  #tab-admin > .adm-panel { margin-bottom: 0; align-self: stretch; display: flex; flex-direction: column; }
+  #tab-admin > .adm-panel .adm-table-wrap,
+  #tab-admin > .adm-panel .adm-libs,
+  #tab-admin > .adm-panel .adm-spark { flex: 1; }
+}
+/* Account tab: a small contextual note instead of a wall of extra cards. */
+.profile-card.note-card { border-style: dashed; }
+.profile-card.note-card .set-tx p { margin: 0; }
 @media (max-width: 760px) {
   #tab-admin { padding-inline:10px; }
   /* Opaque, not frosted: the sheet bans backdrop-filter outright (see
@@ -4041,6 +4061,24 @@ body.rs-active .dash-main { height: 100dvh; }
   line-height: 1;
 }
 .bot-bottom-nav .bn-add:active .bn-add-circle { transform: scale(.92); }
+/* Floating "Add bot" on mobile. Sits above the bottom bar, never in the way
+   of the editor's own controls, and disappears when a detail modal is open. */
+.mobile-fab {
+  display: none;
+  position: fixed; right: 20px; bottom: calc(var(--bottom-nav-h) + 22px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-nav);
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--accent); color: var(--acc-fg);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, #fff);
+  box-shadow: var(--e3); align-items: center; justify-content: center;
+}
+.mobile-fab svg { width: 24px; height: 24px; }
+@media (max-width: 760px) {
+  .mobile-fab { display: inline-flex; }
+  body.rs-detail-open .mobile-fab,
+  body.rs-menu-open .mobile-fab,
+  body.rs-launch-complete .mobile-fab { display: none; }
+}
 
 @media (max-width: 760px) {
   .bot-steps { grid-template-columns: 1fr; }

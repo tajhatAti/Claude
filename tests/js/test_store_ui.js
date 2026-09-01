@@ -32,8 +32,8 @@ ok('store is a real URL', /"\/store":\s*"store"/.test(JS));
 ok('server serves /store as the SPA shell', /"dashboard", "code", "bots", "activity", "store"/.test(
   fs.readFileSync(path.join(ROOT, 'app.py'), 'utf8')));
 ok('opening the tab loads the shelf', /tabId === "store" && typeof loadStore === "function"/.test(JS));
-ok('bottom nav still has only two destinations',
-   ((HTML.match(/<nav class="bottom-nav bot-bottom-nav"[\s\S]*?<\/nav>/) || [''])[0].match(/data-tab=/g) || []).length === 2);
+ok('bottom nav exposes all four real destinations',
+   ((HTML.match(/<nav class="bottom-nav bot-bottom-nav"[\s\S]*?<\/nav>/) || [''])[0].match(/data-tab=/g) || []).length === 4);
 ok('mobile reaches the store from the one Bots menu', /id="btnStoreInMenu"/.test(HTML) &&
    /btnStoreInMenu"\);[\s\S]{0,120}switchTab\("store"\)/.test(JS));
 
