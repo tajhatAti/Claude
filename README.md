@@ -54,6 +54,27 @@ Full details in `STORE.md`.
 
 > **Production warning:** the embedded runner executes user code in the main container and is intended for development/single-owner deployments. Public multi-tenant production should set `RUNNER_SERVICE_URL` and `RUNNER_SERVICE_SECRET` and run the execution service separately. Strong per-job container/microVM isolation is still recommended for hostile public code.
 
+## Local UI preview (no backend)
+
+If you only want to review/fix the UI without starting the Python server, the
+front-end has a self-contained demo mode. It serves sample bots, store items,
+snippets and admin numbers from the browser — no database, no runner, no
+backend touched.
+
+```bash
+git clone <your-repo-url>
+cd Claude
+python3 -m http.server 8080
+```
+
+Then open `http://localhost:8080`. The app detects the static server and shows
+the dashboard in **Demo UI** mode with a small pill in the header. To force
+demo mode anywhere, append `?demo=1` (for example `http://localhost:8080/?demo=1`).
+
+In demo mode the **···** menu's **Stop**, **Restart** and **Bot details**
+actions are simulated locally, and the left drawer's **Overview / Bots /
+Store / Profile / Admin** items are fully clickable.
+
 ## Quick start
 
 ```bash

@@ -695,6 +695,15 @@ html.tg-no-auth .auth-aside { display: none; }
   flex: 0 0 auto; flex-wrap: nowrap; min-width: 0;
 }
 .dash-user > button { flex: 0 0 auto; cursor: pointer; }
+.demo-pill {
+  display: inline-flex; align-items: center; gap: var(--s1);
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--acc, #4f8cff); background: color-mix(in srgb, var(--acc, #4f8cff) 12%, transparent);
+  color: var(--acc, #4f8cff);
+  font-size: var(--fs-1, 11px); font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.demo-pill[hidden] { display: none !important; }
 /* Tabs use mockup C's raised treatment: a slab that depresses when hit. */
 .dash-tab, .tab-secondary, .cs-tab {
   height: 36px; padding: 0 var(--s4);
@@ -2677,6 +2686,14 @@ html[data-theme="dark"] {
     overflow-y: auto;
   }
   .dash-tabs.open { transform: translateX(0); visibility: visible; }
+  /* THE "প্রলেপ" BUG. The drawer (.dash-tabs) lives INSIDE the sticky
+     .dash-bar, which establishes a stacking context at --z-sticky (700).
+     The scrim (.side-overlay) is a sibling at --z-scrim-nav (930), so it
+     painted over the drawer even though the drawer's own z-index (940) was
+     higher — the drawer was trapped in its parent's 700 context. When the
+     drawer is open, lift the whole header to the drawer layer so the
+     drawer really is above its scrim and every item is tappable. */
+  body.nav-drawer-open .dash-bar { z-index: var(--z-nav-drawer); }
   /* Stacked in a drawer, every row should share one left edge and one
      width — otherwise pill-shaped buttons (which size to their content)
      drift to different widths and the row reads as uneven. */

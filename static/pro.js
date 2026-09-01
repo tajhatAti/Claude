@@ -11,6 +11,126 @@ let currentTab = "jobs";
 let editingSnippetId = null;
 let _livePreviewTimer = null;
 
+/* ─────────────────────────────────────────────────────────────────────
+   OFFLINE / STATIC UI DEMO  ("python -m http.server 8080")
+
+   The real product talks to a Python backend. When the same shell is served
+   by a plain static server (as on Termux), every /api call returns the
+   server's HTML 404 page, so the UI looks right but every menu action is
+   dead. This block detects that situation and switches the front-end into a
+   small self-contained demo: sample bots, store items, snippets and admin
+   numbers are served locally, while the real app keeps using the backend.
+
+   It is deliberately front-end only — no backend, no database, no inner
+   structure touched. Add ?demo=1 to force it even on the real site.
+   ───────────────────────────────────────────────────────────────────── */
+let _demo = {
+  on: false,
+  jobs: [
+    {
+      id: "demo-1", runner_job_id: "rn-1001", name: "Ping Bot", language: "python",
+      status: "running", restarts: 1, port: 8801,
+      web: true, web_url: "https://demo.example.com/ping", web_slug: "ping", web_public: true,
+      uptime_s: 18740, cpu_pct: 2.4, mem_mb: 42,
+      telegram_bot_detected: true, telegram_bot_username: "CodeNestPingBot",
+      telegram_bot_id: "7123456789", telegram_check_status: "verified",
+      telegram_bot_url: "https://t.me/CodeNestPingBot",
+      telegram_framework: "python-telegram-bot", telegram_update_mode: "polling",
+      env: { BOT_TOKEN: "••••••••", ADMIN_CLAIM_CODE: "DEMO" },
+      code: "from telegram.ext import Application\n\nasync def ping(update, ctx):\n    await update.message.reply_text(\"pong!\")\n\napp = Application.builder().token(BOT_TOKEN).build()\napp.run_polling()\n",
+      created_at: new Date(Date.now() - 2 * 864e5).toISOString()
+    },
+    {
+      id: "demo-2", runner_job_id: "rn-1002", name: "Daily Report Bot", language: "python",
+      status: "stopped", restarts: 0, port: null,
+      web: false, web_slug: null, web_public: true, uptime_s: 0, cpu_pct: 0, mem_mb: 0,
+      telegram_bot_detected: false, telegram_check_status: "unverified",
+      env: {}, code: "# schedule a daily report\nprint(\"hello from stoppen bot\")\n",
+      created_at: new Date(Date.now() - 6 * 864e5).toISOString()
+    },
+    {
+      id: "demo-3", runner_job_id: "rn-1003", name: "Scraper", language: "python",
+      status: "crashed", restarts: 3, port: null,
+      web: false, web_slug: null, web_public: true, uptime_s: 0, cpu_pct: 0, mem_mb: 0,
+      telegram_bot_detected: false, telegram_check_status: "unverified",
+      env: {}, code: "import requests\nraise RuntimeError(\"demo crash\")\n",
+      created_at: new Date(Date.now() - 1 * 864e5).toISOString()
+    },
+  ],
+  snippets: [
+    { id: 1, title: "Hello demo", language: "javascript",
+      content: "console.log('hello from CodeNest demo');",
+      share_token: "abc123", is_public: true },
+    { id: 2, title: "Flask starter", language: "python",
+      content: "from flask import Flask\napp = Flask(__name__)\n@app.get('/')\ndef home():\n    return 'hi'\n",
+      share_token: null, is_public: false },
+  ],
+  store: [
+    { slug: "echo-vault", title: "Echo Vault Bot", language: "python",
+      category: "Utilities", difficulty: "Beginner", featured: true, source: "official",
+      author: "CodeNest", summary: "A small bot that echoes anything you send.",
+      code_lines: 18, framework: "python-telegram-bot", rating: 4.9, rating_count: 12,
+      install_count: 248, version: "1.2.0", features: ["Handles /help", "Echo mode"],
+      code_full: true, code: "from telegram.ext import Application, CommandHandler, MessageHandler, filters\nasync def echo(update, ctx):\n    await update.message.reply_text(update.message.text or \"...\")\napp = Application.builder().token(BOT_TOKEN).build()\napp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))\napp.run_polling()\n",
+      env_fields: [], after_deploy: "" },
+    { slug: "daily-quote", title: "Daily Quote Bot", language: "python",
+      category: "Channels", difficulty: "Intermediate", featured: false, source: "community",
+      author: "demo", summary: "Posts a quote every morning.", code_lines: 41,
+      framework: "python-telegram-bot", rating: 4.2, rating_count: 3,
+      install_count: 87, version: "1.0.0", features: ["Daily timer", "Random quote"],
+      code_full: true, code: "print('daily quote bot demo')\n", env_fields: [], after_deploy: "" },
+    { slug: "support-ticket", title: "Support Ticket Bot", language: "python",
+      category: "Commerce", difficulty: "Advanced", featured: false, source: "community",
+      author: "demo", summary: "Turns messages into support tickets.", code_lines: 64,
+      framework: "python-telegram-bot", rating: 0, rating_count: 0,
+      install_count: 31, version: "0.9.0", features: ["Ticket IDs", "Open/close"],
+      code_full: true, code: "print('support ticket demo')\n", env_fields: [], after_deploy: "" },
+  ],
+  installed: [],
+  favorites: [],
+};
+let _demoInit = false;
+const _demoQuery = (function(){ try { return new URLSearchParams(window.location.search).has("demo"); } catch (e) { return false; } })();
+const _demoStaticHost = window.location.protocol === "file:" ||
+  ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port === "8080");
+if (_demoQuery || _demoStaticHost) {
+  _demo.on = true;
+  _demoInit = true;
+  if (!authToken) {
+    authToken = "demo-token";
+    try {
+      localStorage.setItem("ahad_token", authToken);
+      localStorage.setItem("ahad_user", "demo");
+    } catch (e) {}
+  }
+}
+function _demoFindJob(id) {
+  return (_demo.jobs || []).find(j => String(j.id) === String(id)) || null;
+}
+function _demoList(fn) { return new Promise(resolve => setTimeout(() => resolve(fn()), 60)); }
+function _demoClone(obj) { try { return JSON.parse(JSON.stringify(obj)); } catch (e) { return obj; } }
+function _enableDemo() {
+  if (_demoInit) return;
+  _demoInit = true;
+  _demo.on = true;
+  if (!authToken) {
+    authToken = "demo-token";
+    try {
+      localStorage.setItem("ahad_token", authToken);
+      localStorage.setItem("ahad_user", "demo");
+    } catch (e) {}
+  }
+  const dp = document.getElementById("demoPill");
+  if (dp) dp.hidden = false;
+  // Only take over the screen if the boot has already chosen the landing
+  // page (i.e. the static server was detected after initial paint).
+  try {
+    if (typeof showScreen === "function") showScreen("screen-dashboard");
+    if (typeof loadDashboard === "function") loadDashboard().catch(() => {});
+    if (currentTab === "jobs" && typeof startJobPolling === "function") startJobPolling();
+  } catch (e) {}
+}
+
 
 /* ---------------- SCREEN NAV ---------------- */
 /* Screens that DO NOT EXIST inside Telegram.
@@ -91,12 +211,14 @@ function openSideMenu() {
   const ov = document.getElementById("sideOverlay");
   if (tabs) tabs.classList.add("open");
   if (ov) ov.classList.remove("hidden");
+  document.body.classList.add("nav-drawer-open");
 }
 function closeSideMenu() {
   const tabs = document.querySelector(".dash-tabs");
   const ov = document.getElementById("sideOverlay");
   if (tabs) tabs.classList.remove("open");
   if (ov) ov.classList.add("hidden");
+  document.body.classList.remove("nav-drawer-open");
 }
 
 /* Smooth-scroll to an in-page section (used by the marketing nav links). */
@@ -380,8 +502,277 @@ function _tgReauthOnce() {
  * Telegram re-auth succeeds there is no retry left and the call fails anyway
  * — right after a login that worked. A cold-start retry and a
  * retry-with-a-new-token are different events and each gets one attempt. */
+async function _demoApi(path, method = "GET", body = null) {
+  await _demoList(() => {});  // small delay so spinners are visible, like a real request
+  const raw = String(path || "");
+  const qs = (raw.split("?")[1] || "");
+  const clean = raw.split("?")[0];
+  const parts = clean.split("/").filter(Boolean);
+
+  // ── profile / account ──────────────────────────────────────────────
+  if (clean === "/profile") return {
+    username: "demo", email: "demo@codenest.local", phone: "",
+    custom_code: "", is_admin: true, telegram_linked: true,
+  };
+  if (clean === "/profile/update") return { ok: true };
+  if (clean === "/profile/telegram") return { linked: true };
+  if (clean === "/profile/telegram/unlink") return { ok: true };
+  if (clean === "/profile/telegram/code") return { sent: true };
+  if (clean === "/stats") return {
+    jobs_total: _demo.jobs.length, jobs_deployed: _demo.jobs.filter(j => j.status === "running").length,
+    snippets: _demo.snippets.length, published: _demo.snippets.filter(s => s.is_public).length,
+  };
+  if (clean === "/activity-log" && method === "GET") {
+    const rows = _demo.activity || [];
+    return rows;
+  }
+  if (clean === "/activity-log" && method === "POST") {
+    const e = body || {};
+    (_demo.activity || (_demo.activity = [])).unshift({
+      action: `${e.action || "info:Event"}`, details: e.details || "", created_at: new Date().toISOString(),
+    });
+    (_demo.activity || []).length = Math.min((_demo.activity || []).length, 40);
+    return { ok: true };
+  }
+  if (clean === "/login-history") return { sessions: [] };
+  if (clean === "/sessions") return { sessions: [{ id: "demo", device: "This device", created_at: new Date().toISOString(), current: true }] };
+  if (clean === "/sessions/revoke") return { ok: true };
+  if (clean === "/search") return { results: (_demo.jobs || []).map(j => ({ type: "job", id: j.id, title: j.name, subtitle: "bot", href: "/bots" })) };
+
+  // ── bots / jobs ────────────────────────────────────────────────────
+  if (clean === "/api/jobs") {
+    if (method === "GET") return { jobs: _demoClone(_demo.jobs) };
+    if (method === "POST") {
+      const b = body || {};
+      const id = "demo-" + (Date.now().toString(36));
+      const lang = b.language || "python";
+      const job = {
+        id, runner_job_id: "rn-demo-" + id, name: b.name || "Demo Bot", language: lang,
+        status: "running", restarts: 0, port: null,
+        web: true, web_url: "https://demo.example.com/" + id, web_slug: id, web_public: true,
+        uptime_s: 0, cpu_pct: 0, mem_mb: 0,
+        telegram_bot_detected: !!b.telegram_verification_id,
+        telegram_bot_username: b.telegram_bot_username || null,
+        telegram_bot_id: b.telegram_verification_id || null,
+        telegram_check_status: b.telegram_verification_id ? "verified" : "unverified",
+        telegram_bot_url: b.telegram_bot_username ? "https://t.me/" + b.telegram_bot_username : null,
+        telegram_framework: "python-telegram-bot", telegram_update_mode: "polling",
+        env: { BOT_TOKEN: "••••••••" }, code: b.code || "",
+        created_at: new Date().toISOString(),
+      };
+      _demo.jobs.unshift(job);
+      return {
+        id: job.runner_job_id, job_db_id: id, name: job.name, language: job.language,
+        web: true, web_url: job.web_url, web_slug: id, web_public: true,
+        telegram_bot_detected: job.telegram_bot_detected, telegram_bot_username: job.telegram_bot_username,
+        telegram_bot_id: job.telegram_bot_id, telegram_check_status: job.telegram_check_status,
+        telegram_bot_url: job.telegram_bot_url, telegram_framework: job.telegram_framework,
+        telegram_update_mode: job.telegram_update_mode,
+      };
+    }
+  }
+  // /api/jobs/:id (and sub-actions)
+  const jobMatch = clean.match(/^\/api\/jobs\/([^/]+)(\/(.+))?$/);
+  if (jobMatch) {
+    const id = decodeURIComponent(jobMatch[1]);
+    const sub = jobMatch[3] || "";
+    const job = _demoFindJob(id);
+    if (clean.match(/^\/api\/jobs\/[^/]+\/(stop|restart|delete|start)$/)) {
+      const verb = clean.split("/").pop();
+      if (job) {
+        if (verb === "stop" || verb === "delete") job.status = verb === "stop" ? "stopped" : "stopped";
+        if (verb === "restart" || verb === "start") job.status = "starting";
+        if (verb === "delete") _demo.jobs = _demo.jobs.filter(j => String(j.id) !== String(id));
+      }
+      return { ok: true };
+    }
+    if ((sub === "files") || clean.endsWith("/files")) {
+      const f = [{ path: "main." + (job && job.language === "javascript" ? "js" : "py"), size: (job && job.code ? job.code.length : 42), text: true }];
+      return { files: f, entry: f[0].path, note: "" };
+    }
+    if (/\/api\/jobs\/[^/]+\/file$/.test(clean)) {
+      return { content: (job && job.code) || "# demo file\n" };
+    }
+    if (clean.endsWith("/entry")) return { entry: parts[parts.length - 1] };
+    if (sub === "snapshot") {
+      if (method === "GET") return { enabled: true, snapshot: { files: 3, bytes: 4096, updated_at: new Date(Date.now() - 60e5).toISOString() } };
+      if (clean.endsWith("/restore") || (body && body.files !== undefined)) return { restored: 3 };
+      return { files: 3 };
+    }
+    if (sub === "revisions") return {
+      revisions: job ? [{ id: "r1", version: 1, action: "deploy", language: job.language || "python", created_at: job.created_at || new Date().toISOString(), status: "healthy" }] : [],
+      current_revision: 1,
+    };
+    if (/\/revisions\/[^/]+\/rollback$/.test(clean)) return { ok: true };
+    if (sub === "telegram-health") return {
+      delivery_status: job && job.status === "running" ? "healthy" : "unknown",
+      process_status: job ? job.status : "stopped",
+    };
+    // PATCH on job writes env/code/name in place.
+    if (method === "PATCH") {
+      if (job) {
+        if (body.name !== undefined) job.name = body.name;
+        if (body.code !== undefined) job.code = body.code;
+        if (body.language !== undefined) { job.language = body.language; job.status = "starting"; }
+        if (body.env !== undefined) job.env = body.env;
+      }
+      return { job_db_id: id, id: id, ok: true, web: job ? job.web : true, web_url: job ? job.web_url : null, web_slug: job ? job.web_slug : null, web_public: job ? job.web_public !== false : true };
+    }
+    if (method === "GET" && !sub) return job || {};
+    if (method === "DELETE") {
+      _demo.jobs = _demo.jobs.filter(j => String(j.id) !== String(id));
+      return { ok: true };
+    }
+    return { ok: true };
+  }
+
+  // ── telegram wizard ────────────────────────────────────────────────
+  if (clean === "/api/telegram-bot/verify") return {
+    telegram_bot_username: "DemoDemoBot", telegram_bot_id: "999999999",
+    telegram_verification_id: "ver-demo", telegram_bot_url: "https://t.me/DemoDemoBot",
+  };
+  if (clean === "/api/telegram-bot/analyze") return { framework: "python-telegram-bot", update_mode: "polling" };
+  if (clean === "/api/telegram-bot/templates") return {
+    templates: [
+      { id: "t-echo", name: "Echo Bot", description: "Replies with exactly what you send.", language: "python", framework: "python-telegram-bot", category: "Starter", badge: "Popular", requires_setup: false },
+      { id: "t-reminder", name: "Reminder Bot", description: "Reminds you at a chosen time.", language: "python", framework: "python-telegram-bot", category: "Utility", badge: "Setup", requires_setup: true },
+    ],
+  };
+  const tplMatch = clean.match(/^\/api\/telegram-bot\/templates\/(.+)$/);
+  if (tplMatch) {
+    const id = decodeURIComponent(tplMatch[1]);
+    const code = id === "t-reminder"
+      ? "from datetime import datetime\nprint(\"reminder bot\")\n"
+      : "from telegram.ext import Application, MessageHandler, filters\nasync def echo(update, ctx):\n    await update.message.reply_text(update.message.text or \"...\")\napp = Application.builder().token(BOT_TOKEN).build()\napp.run_polling()\n";
+    return { id, name: id === "t-reminder" ? "Reminder Bot" : "Echo Bot", language: "python", code, env_fields: [], after_deploy: "" };
+  }
+
+  // ── code studio / snippets ─────────────────────────────────────────
+  if (clean === "/snippets") {
+    if (method === "GET") return { snippets: _demoClone(_demo.snippets) };
+    if (method === "POST") {
+      const b = body || {};
+      const id = Date.now();
+      _demo.snippets.unshift({ id, title: b.title || "Untitled", language: b.language || "text", content: b.content || "", share_token: null, is_public: false });
+      return { id, ok: true };
+    }
+    if (method === "DELETE") {
+      const id = body && body.id;
+      _demo.snippets = _demo.snippets.filter(s => String(s.id) !== String(id));
+      return { ok: true };
+    }
+  }
+  if (clean === "/snippets/share") {
+    const b = body || {};
+    const s = _demo.snippets.find(x => String(x.id) === String(b.id));
+    if (s) { s.is_public = !!b.share; if (b.share && !s.share_token) s.share_token = "pub-" + Date.now().toString(36); }
+    return { share: !!b.share, url: b.share ? "/@" + "demo" + "/" + encodeURIComponent((s && s.title) || "untitled") : null };
+  }
+  if (clean === "/api/execute") {
+    const lang = (body && body.language) || "python";
+    const code = (body && body.code) || "";
+    const first = code.split("\n")[0] || "(empty)";
+    return {
+      success: true, exit_code: 0, execution_time_ms: 12,
+      stdout: "demo run · " + lang + "\n" + first, stderr: "", error: null,
+    };
+  }
+
+  // ── analytics / store / admin ──────────────────────────────────────
+  if (clean === "/api/analytics/overview") {
+    const days = parseInt((new URLSearchParams(qs).get("days") || "14"), 10) || 14;
+    const series = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 864e5);
+      series.push({ date: d.toISOString().slice(0, 10), deploys: 1 + (i % 3), new_bots: i % 5 === 0 ? 1 : 0 });
+    }
+    const now = new Date();
+    return {
+      days,
+      range: { start: new Date(now - days * 864e5).toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) },
+      series,
+      kpis: [
+        { key: "deploys", label: "Deploys", value: _demo.jobs.length * 3, delta: 12, sub: "this period" },
+        { key: "bots", label: "Bots", value: _demo.jobs.length, delta: 1, sub: "total apps" },
+        { key: "new_bots", label: "New bots", value: _demo.jobs.length, delta: 0, sub: "created this period" },
+      ],
+      totals: { deploys: _demo.jobs.length * 3, new_bots: _demo.jobs.length },
+      top_bots: _demo.jobs.slice(0, 3).map(j => ({ name: j.name, username: j.telegram_bot_username || "", language: j.language, live: j.status === "running", actions: 8 })),
+      recent: _demo.jobs.slice(0, 4).map(j => ({ job_name: j.name, action: j.status, username: j.telegram_bot_username || "", created_at: j.created_at })),
+    };
+  }
+  if (clean === "/api/store" || clean === "/api/store/items") {
+    const params = new URLSearchParams(qs);
+    const q = (params.get("q") || "").toLowerCase();
+    const cat = params.get("category") || "All";
+    let items = _demo.store.filter(s => (cat === "All" || s.category === cat) && (!q || (s.title + " " + s.summary).toLowerCase().includes(q)));
+    if (clean === "/api/store/items" && method === "POST") return { ok: true };
+    return {
+      items: _demoClone(items),
+      facets: { listings: _demo.store.length, community: _demo.store.filter(s => s.source === "community").length, installs: _demo.store.reduce((n, s) => n + (s.install_count || 0), 0), categories: [...new Set(_demo.store.map(s => s.category))].map(name => ({ name, count: _demo.store.filter(s => s.category === name).length })), allowed: [] },
+      favorite_slugs: _demo.favorites,
+      installed_slugs: _demo.installed,
+    };
+  }
+  const storeMatch = clean.match(/^\/api\/store\/([^/]+)(\/(.+))?$/);
+  if (storeMatch) {
+    const slug = decodeURIComponent(storeMatch[1]);
+    const sub = storeMatch[3] || "";
+    const item = _demo.store.find(s => s.slug === slug);
+    if (sub === "rate") {
+      const rating = body && body.rating;
+      if (item) { item.rating_count = (item.rating_count || 0) + 1; item.rating = rating || item.rating || 5; }
+      return { rating_average: item ? item.rating : 5, rating_count: item ? item.rating_count : 1, reviews: [] };
+    }
+    if (sub === "favorite") {
+      if (method === "DELETE") _demo.favorites = _demo.favorites.filter(s => s !== slug);
+      else if (!_demo.favorites.includes(slug)) _demo.favorites.push(slug);
+      return { ok: true };
+    }
+    if (sub === "install") {
+      if (!_demo.installed.includes(slug)) _demo.installed.push(slug);
+      item.install_count = (item.install_count || 0) + 1;
+      return { item: _demoClone(item), ok: true };
+    }
+    return item || { slug, title: slug, summary: "Demo listing" };
+  }
+  if (clean === "/api/store/mine/library") {
+    return {
+      favorites: _demo.store.filter(s => _demo.favorites.includes(s.slug)),
+      installs: _demo.store.filter(s => _demo.installed.includes(s.slug)).map(s => ({ title: s.title, item_slug: s.slug, version: s.version, created_at: new Date().toISOString() })),
+      submissions: [],
+    };
+  }
+
+  // ── admin (owner-only) ─────────────────────────────────────────────
+  if (clean.startsWith("/admin/")) {
+    const ov = {
+      users: 128, verified: 111, suspended: 2, jobs_deployed: _demo.jobs.length,
+      telegram_linked: 12, bot_secrets_encrypted: true, runner_isolation: "embedded",
+      mem_safe_mb: 512, mem_used_mb: 37, mem_pct: 8, mem_total_mb: 512, runner_running: _demo.jobs.filter(j => j.status === "running").length,
+      signups_daily: [], workers: [], workers_online: 0,
+    };
+    if (clean === "/admin/overview") return ov;
+    if (clean === "/admin/users") return { users: _demo.jobs.slice(0, 2).map(j => ({ id: "u" + j.id, username: "demo", email: "demo@codenest.local", jobs: 2, suspended: false, created_at: j.created_at })) };
+    if (clean === "/admin/jobs") return { jobs: _demo.jobs.map(j => ({ id: j.id, name: j.name, owner: "demo", live_status: j.status, mem_mb: j.mem_mb || 0, uptime_s: j.uptime_s || 0, restarts: j.restarts || 0, language: j.language })) };
+    if (clean === "/admin/abuse-reports") return { reports: [] };
+    if (clean === "/admin/audit-log") return { audit: [{ id: "a1", actor: "demo", action: "own", target: "demo", created_at: new Date().toISOString() }] };
+    if (clean === "/admin/libraries") return { libraries: [], mem_attributed: false, jobs_sampled: 0 };
+    if (clean === "/admin/bot-usage") return { days: 14, events: [], bots: [] };
+    if (clean === "/admin/telegram-jobs") return { detected: 1, running: _demo.jobs.filter(j => j.status === "running").length, events: [], bots: _demo.jobs.filter(j => j.telegram_bot_detected).map(j => ({ id: j.id, owner: "demo", name: j.name, telegram_bot_username: j.telegram_bot_username, status: j.status, telegram_framework: j.telegram_framework, telegram_update_mode: j.telegram_update_mode, telegram_check_status: j.telegram_check_status, uptime_s: j.uptime_s })) };
+    if (clean === "/admin/runners") return { total_enabled: 1, environment_runners: [], runners: [], embedded: { online: true, jobs: _demo.jobs.filter(j => j.status === "running").length, capacity: 4, mem_mb: 24 } };
+    if (clean === "/admin/ip-clusters" || clean === "/admin/fingerprint-clusters" || clean === "/admin/signup-flags" || clean === "/admin/blocks") return { rows: [], clusters: [], flags: [] };
+    if (clean === "/admin/bot-usage?") return { events: [], bots: [] };
+  }
+  return { ok: true };
+}
+
 async function api(path, method = "POST", body = null, auth = false,
                    _retried = false, _reauthed = false) {
+  // Offline / static preview: every /api call is answered locally so the
+  // UI can be reviewed without the Python backend.
+  if (_demo.on) return _demoApi(path, method, body);
+
   const headers = { "Content-Type": "application/json" };
   // Remember WHICH token this request went out with. A 401 only means "the
   // session is dead" if the token is still the current one — see below.
@@ -409,6 +800,14 @@ async function api(path, method = "POST", body = null, auth = false,
     throw e;
   }
 
+  const ct = (res.headers && res.headers.get && res.headers.get("content-type")) || "";
+  // Static file server (Termux: python -m http.server) returns its HTML 404
+  // page for every /api path. Detect that, switch to the local demo, and
+  // answer the request from _demoApi — no backend, no inner structure.
+  if (res.status === 404 && /text\/html/i.test(ct)) {
+    _enableDemo();
+    return _demoApi(path, method, body);
+  }
   const data = await res.json().catch(() => ({}));
 
   if (res.status === 401 && auth) {
@@ -2990,6 +3389,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // Boot accomplished — a fatal error from here gets a toast, not the overlay.
   _bootOk = true;
 
+  // Static UI preview badge (Termux "python -m http.server").
+  if (_demo.on) {
+    const dp = document.getElementById("demoPill");
+    if (dp) dp.hidden = false;
+    // Route "/" keeps currentTab="jobs" without calling switchTab(), so the
+    // jobs poller never starts. In the local demo, start it once so the
+    // sample bots actually appear on load.
+    if (currentTab === "jobs" && typeof startJobPolling === "function") startJobPolling();
+  }
+
   // Drop the boot splash now that a screen has been chosen.
   document.documentElement.classList.remove("booting");
   const splash = document.getElementById("bootSplash");
@@ -4331,19 +4740,25 @@ function _scheduleStatusRecheck(id, attempt) {
 async function fetchJobDetail(id, opts) {
   opts = opts || {};
   try {
-    const token = localStorage.getItem("ahad_token") || "";
-    const r = await fetch("/api/jobs/" + id, {
-      headers: token ? {"Authorization": "Bearer " + token} : {}
-    });
-    if (!r.ok) {
-      // The caller owns the progress bar bracket; do not release it here.
-      // A failed refresh must not blank an open editor or leave its loading
-      // veil stuck over cached content.
-      _setJobSwitching(false);
-      if (!_selectedJobId) _showEmpty(false);
-      return;
+    let job;
+    if (_demo.on) {
+      // Local static preview: answer the detail fetch from the demo store.
+      job = await _demoApi("/api/jobs/" + id, "GET");
+    } else {
+      const token = localStorage.getItem("ahad_token") || "";
+      const r = await fetch("/api/jobs/" + id, {
+        headers: token ? {"Authorization": "Bearer " + token} : {}
+      });
+      if (!r.ok) {
+        // The caller owns the progress bar bracket; do not release it here.
+        // A failed refresh must not blank an open editor or leave its loading
+        // veil stuck over cached content.
+        _setJobSwitching(false);
+        if (!_selectedJobId) _showEmpty(false);
+        return;
+      }
+      job = await r.json();
     }
-    const job = await r.json();
     window._lastJobs = window._lastJobs || [];
     const idx = window._lastJobs.findIndex(x => String(x.id) === String(id));
     // The runner was unreachable, so the server could not determine the state.
@@ -4410,6 +4825,17 @@ function stopLogStream() {
 function restartLogStream(id) {
   stopLogStream();
   _renderLogs("");
+  if (_demo.on) {
+    // Static UI preview: the backend log stream does not exist here. Show a
+    // short sample buffer instead, so the logs pane is never blank.
+    const job = _demoFindJob(id);
+    const running = job && (job.status === "running" || job.status === "starting" || job.status === "installing");
+    const logs = running
+      ? "[INFO] bot process started\n[INFO] polling Telegram…\n[INFO] demo log stream (local UI preview)\n"
+      : "[INFO] process stopped\n";
+    setTimeout(() => _renderLogs(logs), 140);
+    return;
+  }
   const token = localStorage.getItem("ahad_token") || "";
   fetch("/api/jobs/" + id + "/logs", {
     headers: token ? {"Authorization": "Bearer " + token} : {}
@@ -5501,6 +5927,13 @@ async function _jdDownload(kind) {
   const original = label ? label.textContent : "";
   if (btn) { btn.disabled = true; btn.classList.add("loading"); }
   if (label) label.textContent = "Preparing…";
+  if (_demo.on) {
+    // Static UI preview: there is no runner to pack files from.
+    toast("Nothing to download yet — this is a local UI preview with sample data.", "error");
+    if (btn) { btn.disabled = false; btn.classList.remove("loading"); }
+    if (label) label.textContent = original;
+    return;
+  }
   try {
     const dl = await fetch("/api/jobs/" + job.id + "/download",
                            {headers: token ? {Authorization: "Bearer " + token} : {}});
@@ -7491,6 +7924,14 @@ window.onTelegramAuth = async function (user) {
     try {
       const r = await fetch("/api/public-config");
       if (r.ok) cfg = await r.json();
+      else {
+        // python -m http.server returns its HTML 404 page for every path.
+        // Recognise the purely static host here too, so a Termux user can
+        // open the preview from a LAN address (not only localhost) and the
+        // app still switches to the local demo UI.
+        const ct = (r.headers && r.headers.get && r.headers.get("content-type")) || "";
+        if (r.status === 404 && /text\/html/i.test(ct)) _enableDemo();
+      }
     } catch (e) { /* older backend / offline */ }
 
     const username = (cfg.telegram_bot_username || "").trim();
