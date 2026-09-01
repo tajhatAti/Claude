@@ -606,6 +606,30 @@
         <h1>Hello, <span id="dashUsername2">User</span></h1>
         <p>Everything is synced — pick a tool and go.</p>
       </div>
+
+      <!-- The first thing a person sees is an ACTION, not a chart. When the
+           dashboard opens on "Performance" it tells a new user about numbers
+           from a product they have not used yet; this row tells them what
+           this place is FOR. -->
+      <div class="section-label">What do you want to do?</div>
+      <div class="feat-cards">
+        <button class="feat-card acc" onclick="openAddBot()">
+          <span class="fc-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
+          <span class="fc-body"><b>Add a bot <i>the fastest route</i></b><small>Verify a BotFather token and deploy a Telegram bot, scraper or API — public URL, auto restarts, libraries install themselves.</small></span>
+          <span class="fc-go">→</span>
+        </button>
+        <button class="feat-card" onclick="_openRunSpaceTemplates()">
+          <span class="fc-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16l-1 10.5H5z"/><path d="M8.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></svg></span>
+          <span class="fc-body"><b>Use a template</b><small>Start from a complete, tested bot — no code needed to get the first one live.</small></span>
+          <span class="fc-go">→</span>
+        </button>
+        <button class="feat-card" onclick="switchTab('code')">
+          <span class="fc-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8l-4.5 4L9 16M15 8l4.5 4L15 16"/></svg></span>
+          <span class="fc-body"><b>Write code</b><small>Use Code Studio to write &amp; run in the browser, and publish live pages with one tap.</small></span>
+          <span class="fc-go">→</span>
+        </button>
+      </div>
+
       <!-- ══════════ ANALYTICS ══════════
            Modelled on the reference dashboard: a metric, its change against
            the previous period, and the shape of the recent days. Every number
@@ -649,19 +673,6 @@
         </section>
       </div>
 
-      <div class="section-label">Start something</div>
-      <div class="feat-cards">
-        <button class="feat-card" onclick="switchTab('code')">
-          <span class="fc-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8l-4.5 4L9 16M15 8l4.5 4L15 16"/></svg></span>
-          <span class="fc-body"><b>Code Studio</b><small>Write &amp; run code in the browser — publish live pages with one tap.</small></span>
-          <span class="fc-go">→</span>
-        </button>
-        <button class="feat-card acc" onclick="switchTab('jobs')">
-          <span class="fc-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
-          <span class="fc-body"><b>Bots <i>free hosting · 24/7</i></b><small>Deploy a Telegram bot, scraper or API — public URL, auto restarts, libraries install themselves.</small></span>
-          <span class="fc-go">→</span>
-        </button>
-      </div>
       <!-- The stats had no label of any kind, so four bordered tiles simply
            appeared under the two action cards with nothing saying what they
            were or that they belong together. A small section heading turns
@@ -1066,13 +1077,18 @@
           <!-- Empty state (no job selected OR zero jobs — copy set by JS) -->
           <div class="rs-empty" id="wbEmpty" style="display:none">
             <div class="rs-empty-ic">
-              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="#30363d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M9.5 12h5"/><path d="M12 2.5v2M12 19.5v2"/></svg>
             </div>
             <div class="rs-empty-title">Loading your bots…</div>
             <div class="rs-empty-sub">Fetching your saved bots &amp; services.</div>
+            <ol class="rs-empty-steps">
+              <li><b>1</b> Verify a BotFather token</li>
+              <li><b>2</b> Paste your bot code</li>
+              <li><b>3</b> Deploy &amp; it runs 24/7</li>
+            </ol>
             <button class="rs-empty-btn" id="btnNewEmpty" style="display:none">
               <svg viewBox="0 0 24 24" class="rs-ic-sm" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-              Add Bot 🤖
+              Add your first bot
             </button>
           </div>
 
@@ -1244,7 +1260,8 @@
 
               <!-- 2 · TAB ROW (new component — pill tabs, single accent) -->
               <nav class="jd-tabs" id="jdTabs" role="tablist" aria-label="Job sections">
-                <button class="jd-tab is-active" role="tab" data-jdtab="code"     id="jdTabCode"     aria-selected="true"  aria-controls="jdPanelCode">Code</button>
+                <button class="jd-tab is-active" role="tab" data-jdtab="overview" id="jdTabOverview" aria-selected="true"  aria-controls="jdPanelOverview">Overview</button>
+                <button class="jd-tab"           role="tab" data-jdtab="code"     id="jdTabCode"     aria-selected="false" aria-controls="jdPanelCode">Code</button>
                 <button class="jd-tab"           role="tab" data-jdtab="logs"     id="jdTabLogs"     aria-selected="false" aria-controls="jdPanelLogs">Logs</button>
                 <button class="jd-tab"           role="tab" data-jdtab="env"      id="jdTabEnv"      aria-selected="false" aria-controls="jdPanelEnv">Env</button>
                 <button class="jd-tab"           role="tab" data-jdtab="files"    id="jdTabFiles"    aria-selected="false" aria-controls="jdPanelFiles">Files</button>
@@ -1256,8 +1273,42 @@
               <!-- 3 · CONTENT AREA — exactly one panel visible -->
               <div class="jd-body" id="jdScroll">
 
+                <!-- OVERVIEW -- the "what is this bot doing right now" view -->
+                <div class="jd-panel jd-overview-panel is-active" id="jdPanelOverview" role="tabpanel" aria-labelledby="jdTabOverview">
+                  <div class="jd-overview-head">
+                    <div>
+                      <div class="jd-pane-title">At a glance</div>
+                      <p class="jd-sub">The one place to see whether this bot is live and how to reach it.</p>
+                    </div>
+                    <button class="jd-btn sm" id="jdOvRefresh" type="button"><span>Refresh</span></button>
+                  </div>
+
+                  <div class="jd-ov-grid">
+                    <div class="jd-ov-card"><span class="jd-k">State</span><span class="jd-v jd-ov-state" id="jdOvState">—</span></div>
+                    <div class="jd-ov-card"><span class="jd-k">Uptime</span><span class="jd-v" id="jdOvUptime">—</span></div>
+                    <div class="jd-ov-card"><span class="jd-k">Restarts</span><span class="jd-v" id="jdOvRestarts">—</span></div>
+                    <div class="jd-ov-card"><span class="jd-k">Telegram bot</span><span class="jd-v" id="jdOvBot">—</span></div>
+                  </div>
+
+                  <div class="jd-ov-url" id="jdOvUrlCard" hidden>
+                    <span class="jd-k">Public URL</span>
+                    <a class="jd-ov-url-link mono" id="jdOvUrl" href="#" target="_blank" rel="noopener">—</a>
+                    <button class="jd-icon-btn sm" id="jdOvUrlCopy" type="button" title="Copy URL" aria-label="Copy URL">
+                      <svg viewBox="0 0 16 16" class="jd-i" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M2.5 10.5V3a1 1 0 0 1 1-1h7"/></svg>
+                    </button>
+                    <button class="jd-icon-btn sm" id="jdOvUrlOpen" type="button" title="Open URL" aria-label="Open URL">
+                      <svg viewBox="0 0 16 16" class="jd-i" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M9 2.5h4.5V7"/><path d="M13.5 2.5 7 9"/><path d="M12.5 9.5v3a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3"/></svg>
+                    </button>
+                  </div>
+
+                  <div class="jd-ov-actions">
+                    <button class="jd-btn jd-primary" id="jdOvOpenBot" type="button"><span>Open bot</span></button>
+                    <button class="jd-btn" id="jdOvEdit" type="button"><span>Open in editor</span></button>
+                  </div>
+                </div>
+
                 <!-- CODE -->
-                <div class="jd-panel is-active" id="jdPanelCode" role="tabpanel" aria-labelledby="jdTabCode">
+                <div class="jd-panel" id="jdPanelCode" role="tabpanel" aria-labelledby="jdTabCode" hidden>
                   <div class="jd-split">
                     <div class="jd-code-pane">
                       <div class="jd-pane-head">

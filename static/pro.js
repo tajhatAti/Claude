@@ -4121,6 +4121,10 @@ async function _loadRunSpaceBotTemplates() {
 }
 
 async function _openRunSpaceTemplates() {
+  // This is the product's own screen, so bring it up before the picker —
+  // otherwise "Use a template" from Overview would open a modal over the
+  // analytics page and the wizard would be in an invisible tab behind it.
+  switchTab("jobs");
   await _loadRunSpaceBotTemplates();
   _rsTemplateCategory="All";
   const search=document.getElementById("rsTemplateSearch");if(search)search.value="";
@@ -4932,6 +4936,12 @@ function _renderJobList(jobs) {
       dot.classList.toggle("running", sk === "running" || sk === "starting" || sk === "installing");
       dot.classList.toggle("crashed", sk === "crashed" || sk === "install_failed");
     }
+    const label = row.querySelector(".jstatus");
+    if (label) {
+      const st = _fmtStatus(j.status);
+      const txt = st.label || (sk || "stopped").toUpperCase();
+      label.textContent = txt.charAt(0) + txt.slice(1).toLowerCase();
+    }
   });
   const menu=document.getElementById("rsMoreMenu");if(menu&&!menu.hidden)_rsJobsPopRender();
 }
@@ -4966,6 +4976,8 @@ function renderJobs(jobs) {
     item.innerHTML =
       '<span class="jlang-icon" title="' + _escapeHtml(j.language || "") + '">' + _escapeHtml(li) + '</span>' +
       '<span class="jname">' + _escapeHtml(j.name || "untitled") + '</span>' +
+      '<span class="jstatus' + (stKey === "running" || stKey === "starting" || stKey === "installing" ? " running" : "") +
+        (stKey === "crashed" || stKey === "install_failed" ? " crashed" : "") + '">' + _escapeHtml(st.label) + '</span>' +
       '<span class="jstatus-dot' +
         (stKey === "running" || stKey === "starting" || stKey === "installing" ? " running" : "") +
         (stKey === "crashed" || stKey === "install_failed" ? " crashed" : "") +
@@ -5620,10 +5632,10 @@ function openJobDetails(id, opts) {
   panel.setAttribute("aria-hidden", "false");
   document.body.classList.add("rs-detail-open", "rs-drawer-open");
 
-  // Always land on Code. Reopening on whatever tab was last used means the
+  // Always land on Overview. Reopening on whatever tab was last used means the
   // page shows something different each time for no reason the user chose.
   _initJdTabs();
-  jdSwitchTab("code");
+  jdSwitchTab("overview");
   renderJobDetails();
   _jdEnvLoad();
   _jdRefreshBackupRow();
@@ -5729,6 +5741,30 @@ function renderJobDetails() {
   _jdText("jdPort", job.port || "—");
   _jdText("jdCpu", job.cpu_pct != null ? job.cpu_pct + "%" : "—");
   _jdText("jdMem", job.mem_mb != null ? job.mem_mb + " MB" : "—");
+
+  // Overview tab: the "at a glance" answer. Kept in renderJobDetails so it
+  // never drifts from the metrics pane — same job object, same state.
+  _jdText("jdOvState", st.label || stKey);
+  _jdText("jdOvUptime", live ? _fmtUptime(job.uptime_s || 0) : "—");
+  _jdText("jdOvRestarts", String(job.restarts || 0));
+  _jdText("jdOvBot", job.telegram_bot_username ? "@" + job.telegram_bot_username
+        : (job.telegram_bot_detected ? "Telegram bot detected" : "Not a Telegram bot"));
+  const ovUrlCard = document.getElementById("jdOvUrlCard");
+  const ovUrl = job.web_url || job.url || "";
+  if (ovUrlCard) {
+    ovUrlCard.hidden = !(live && ovUrl);
+    const ovLink = document.getElementById("jdOvUrl");
+    if (ovLink && ovLink.textContent !== ovUrl) { ovLink.href = ovUrl; ovLink.textContent = ovUrl; }
+    const ovOpen = document.getElementById("jdOvUrlOpen");
+    if (ovOpen) ovOpen.href = ovUrl;
+  }
+  const ovState = document.getElementById("jdOvState");
+  if (ovState) {
+    const cls = stKey === "running" ? "running"
+      : (stKey === "crashed" || stKey === "install_failed") ? "crashed"
+      : (stKey === "starting" || stKey === "installing") ? "starting" : "";
+    ovState.className = "jd-v jd-ov-state" + (cls ? " is-" + cls : "");
+  }
 
   // ---- 2 controls: reflect what is actually possible right now -------
   const start = document.getElementById("jdStart");
@@ -6182,6 +6218,27 @@ function _initDetailWiring() {
     const u = a ? a.textContent : "";
     if (!u || !navigator.clipboard) { toast("Nothing to copy", "error"); return; }
     navigator.clipboard.writeText(u).then(() => toast("URL copied", "success"));
+  });
+
+  // Overview tab actions — same role as the header's primary/URL controls,
+  // but directly on the "at a glance" view.
+  on("jdOvRefresh", () => { loadJobs(); renderJobDetails(); toast("Refreshed", "info"); });
+  on("jdOvOpenBot", () => {
+    const job = _jdCurrentJob();
+    const url = job && (job.web_url || job.url || job.telegram_bot_url);
+    if (url) { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; a.click(); }
+    else toast("No public URL yet — deploy the bot to get one.", "info");
+  });
+  on("jdOvEdit", () => { closeJobDetails(); setTimeout(_jobCmFocus, 220); });
+  on("jdOvUrlCopy", () => {
+    const a = document.getElementById("jdOvUrl");
+    const u = a ? a.textContent : "";
+    if (!u || !navigator.clipboard) { toast("Nothing to copy", "error"); return; }
+    navigator.clipboard.writeText(u).then(() => toast("URL copied", "success"));
+  });
+  on("jdOvUrlOpen", () => {
+    const a = document.getElementById("jdOvUrl");
+    if (a && a.href && a.href !== "about:blank") { const w = window.open(a.href, "_blank", "noopener"); }
   });
 
   on("jdCopy", () => {
