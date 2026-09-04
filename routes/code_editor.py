@@ -1,5 +1,6 @@
 """Code Studio: snippet CRUD, publish/unpublish, the standalone
-/s/{token} page, and the legacy /code/s/{token} redirect."""
+/s/{token} page, and the legacy /code/s/{token} redirect.
+"""
 from typing import Optional, List
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -80,7 +81,7 @@ def update_snippet(payload: SnippetUpdate, authorization: Optional[str] = Header
         title = payload.title if payload.title is not None else row["title"]
         language = payload.language if payload.language is not None else row["language"]
         content = payload.content if payload.content is not None else row["content"]
-        conn.execute("UPDATE snippets SET title=?, language=?, content=?, updated_at=? WHERE id=?",
+        conn.execute("UPDATE snippets SET title=?, language=?, content=?, updated_at=? WHERE id= ?",
                      (title, language, content, now_utc_str(), payload.id))
         conn.commit()
         return {"message": "Snippet updated."}
@@ -116,10 +117,10 @@ def toggle_snippet_share(payload: SnippetShare, authorization: Optional[str] = H
         if payload.share:
             if not token:
                 token = secrets.token_urlsafe(12)
-                conn.execute("UPDATE snippets SET share_token=?, is_public=1 WHERE id=?", (token, payload.id))
+                conn.execute("UPDATE snippets SET share_token=?, is_public=1 WHERE id= ?", (token, payload.id))
                 conn.commit()
         else:
-            conn.execute("UPDATE snippets SET share_token=NULL, is_public=0 WHERE id=?", (payload.id,))
+            conn.execute("UPDATE snippets SET share_token=NULL, is_public=0 WHERE id= ?", (payload.id,))
             conn.commit()
             token = None
         return {"share": payload.share, "token": token,
@@ -179,7 +180,75 @@ def _serve_shared(token: str):
     return HTMLResponse(content=html)
 
 
+# New: Detect imports endpoint — returns a best-effort list of packages inferred from the snippet source.
+from pydantic import BaseModel
+import re
 
+
+class DetectImportsRequest(BaseModel):
+    content: str
+    language: Optional[str] = None
+
+
+@router.post("/snippets/detect_imports")
+def detect_imports(payload: DetectImportsRequest):
+    """Analyze snippet content and return a list of likely packages to install.
+
+    - Python: parses `import` and `from` lines and any `# requirements:` comment.
+    - JavaScript/Node: parses `require(...)` and `import ... from '...'` lines.
+
+    This is intentionally conservative: it returns top-level module names and
+    any explicit requirements comments found in the file.
+    """
+    src = payload.content or ""
+    lang = (payload.language or "").lower()
+
+    packages = []
+    seen = set()
+
+    # Helper: add a package name if new
+    def add(pkg, reason=None):
+        if not pkg: return
+        key = pkg.strip()
+        if not key or key in seen: return
+        seen.add(key)
+        packages.append({"name": key, "reason": reason or "detected"})
+
+    # 1) Explicit requirements header: lines like "# requirements: requests, aiohttp"
+    for m in re.finditer(r"(?i)^\s*[#;\/]{0,2}\s*requirements?:\s*(.+)$", src, re.M):
+        vals = m.group(1)
+        for part in re.split(r"[,\s]+", vals):
+            p = part.strip().strip('"\'')
+            if p:
+                add(p, reason="requirements header")
+
+    # 2) Python imports
+    if not lang or lang.startswith("py") or lang == "python":
+        for m in re.finditer(r"^\s*from\s+([\w\.]+)\s+import\b", src, re.M):
+            mod = m.group(1).split('.')[0]
+            add(mod, reason="from import")
+        for m in re.finditer(r"^\s*import\s+([\w\.]+)\b", src, re.M):
+            for part in m.group(1).split(','):
+                mod = part.strip().split('.')[0]
+                add(mod, reason="import")
+
+    # 3) JavaScript / Node imports
+    if not lang or lang.startswith("js") or lang.startswith("node") or lang == 'javascript' or lang == 'typescript':
+        # import ... from 'pkg' or import 'pkg'
+        for m in re.finditer(r"import\s+(?:.+?from\s+)?['\"]([^'\"]+)['\"]", src):
+            pkg = m.group(1).split('/')[0]
+            # skip relative imports
+            if pkg.startswith('.') or pkg.startswith('/'): continue
+            add(pkg, reason="import")
+        # require('pkg')
+        for m in re.finditer(r"require\(\s*['\"]([^'\"]+)['\"]\s*\)", src):
+            pkg = m.group(1).split('/')[0]
+            if pkg.startswith('.') or pkg.startswith('/'): continue
+            add(pkg, reason="require")
+
+    # 4) simple heuristic: look for top-level bare words that look like package usages (rare)
+
+    return {"language_hint": lang or None, "packages": packages, "count": len(packages)}
 
 
 # ================================
