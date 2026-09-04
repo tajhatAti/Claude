@@ -57,8 +57,14 @@ check("ghost buttons use the same height token",
   /#tab-jobs \.rs-ghost-btn \{[^}]*height:\s*var\(--rs-ctl-h\)/.test(css));
 check("segmented group uses the same height token",
   /#tab-jobs \.rs-seg \{[^}]*height:\s*var\(--rs-ctl-h\)/.test(css));
-check("bigger tap targets on mobile",
-  /@media \(max-width: 760px\) \{[\s\S]{0,400}?--rs-ctl-h:\s*(3[0-9])px/.test(css));
+/* "Bigger" was written as 3x px when the desktop size was 28px, so 30-39
+   counted as an improvement. The floor that actually matters is 44px (Apple
+   HIG and Material both put a touch target there), and the controls now
+   reach it — a rule that only accepted 3x px would REJECT the correct value
+   and lock in the too-small one. Assert the guideline, not the old range. */
+const mobileCtl = /@media \(max-width: 760px\)[\s\S]*?--rs-ctl-h:\s*(\d+)px/.exec(css);
+check("tap targets reach the 44px guideline on mobile",
+  !!mobileCtl && +mobileCtl[1] >= 44, mobileCtl ? mobileCtl[1] + 'px' : 'no rule');
 // The old bar WRAPPED, which is exactly why it looked disorganised: at 412px
 // it broke into ~3 rows and changed height between renders. The replacement
 // must scroll, never rearrange.
@@ -67,9 +73,11 @@ check("meta strip never wraps",
 check("meta strip scrolls when tight",
   /#tab-jobs \.rs-meta \{[^}]*overflow-x:\s*auto/.test(css));
 
-// ---- 4. clean full-screen ----------------------------------------------
-check("bottom nav hidden on RunSpace",
-  /body\.rs-active \.bottom-nav \{ display: none !important; \}/.test(css));
+// ---- 4. global navigation remains available ----------------------------
+check("bottom nav remains visible on mobile RunSpace",
+  /body\.rs-active:not\(\.rs-detail-open\) \.bottom-nav \{ display:flex !important; \}/.test(css));
+check("RunSpace reserves the bottom-nav height",
+  /body\.rs-active:not\(\.rs-detail-open\) \.dash-main \{[^}]*padding-bottom:calc\(var\(--bottom-nav-h\)/.test(css));
 check("bottom nav hidden on the Details page",
   /body\.rs-detail-open[\s\S]{0,240}?\.bottom-nav[\s\S]{0,240}?display:\s*none/.test(css));
 

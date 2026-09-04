@@ -22,6 +22,7 @@ BOT_TOKEN = (os.getenv("BOT_TOKEN", "").strip()
 from services import telegram_link  # noqa: E402
 from services import bot_ops  # noqa: E402
 from services import runner_client  # noqa: E402
+from services import bot_analytics  # noqa: E402
 
 import logging
 logger = logging.getLogger("codenest-app")
@@ -45,7 +46,45 @@ logger = logging.getLogger("codenest-app")
 #     _pending{} with a 5-minute expiry so a stale "waiting for code" state
 #     can never quietly capture an unrelated later message.
 RUNNER_SECRET = os.getenv("RUNNER_SERVICE_SECRET", "")
-SITE_BASE = os.getenv("SITE_BASE_URL", "https://ahadorg.onrender.com").rstrip("/")
+
+
+def _site_base() -> str:
+    """The URL the Mini App button opens — THIS deployment's own URL.
+
+    THE HARDCODED DEFAULT WAS A TRAP, and it is the single most likely reason
+    a working deployment still shows "nothing happens" on tap.
+
+    It used to be:
+
+        SITE_BASE = os.getenv("SITE_BASE_URL", "https://ahadorg.onrender.com")
+
+    SITE_BASE_URL is `sync: false` in render.yaml, i.e. it is NOT set for you
+    — a fresh deploy has to add it by hand. Miss that one step and the button
+    is still built, still rendered, and still tappable, but it opens somebody
+    else's host. What happens then depends on what lives there:
+
+      * host gone / renamed  -> Telegram opens a webview on a dead URL and
+                                closes it. Tap, flicker, nothing.
+      * host alive           -> a DIFFERENT server verifies the initData with
+                                a DIFFERENT bot token, so sign-in fails with
+                                bad_hash and the phone shows an error naming
+                                a bot the user has never heard of.
+
+    Neither says "your SITE_BASE_URL is wrong", and the deploy is green
+    throughout. Render sets RENDER_EXTERNAL_URL to the service's own public
+    URL automatically, so the right default is knowable without asking: use
+    it, and treat an explicit SITE_BASE_URL as an override for a custom
+    domain. Falling back to a literal host that belongs to one particular
+    deployment can only ever be right for that one deployment.
+    """
+    for name in ("SITE_BASE_URL", "PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL"):
+        val = os.getenv(name, "").strip().rstrip("/")
+        if val:
+            return val
+    return ""
+
+
+SITE_BASE = _site_base()
 
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 TG_FILE_API = f"https://api.telegram.org/file/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -169,7 +208,7 @@ def handle_link(chat_id, text, display_name=""):
         # A button back, because the user arrived here FROM the dashboard and
         # the dashboard is where the connection now shows up. Telling them to
         # "go back" without a link is how a two-tap flow becomes a hunt again.
-        rows = [[{"text": "📦 Open dashboard", "url": f"{SITE_BASE}/dashboard"}]] \
+        rows = [[{"text": "📦 Open dashboard", "url": f"{SITE_BASE}/bots"}]] \
             if SITE_BASE else []
         _send(chat_id,
               f"✅ Connected to *{res['username']}*.\n\n" +
@@ -227,8 +266,8 @@ def _open_button(label="🚀 Open CodeNest"):
     if not SITE_BASE:
         return None
     if _miniapp_ok():
-        return {"text": label, "web_app": {"url": f"{SITE_BASE}/dashboard"}}
-    return {"text": label, "url": f"{SITE_BASE}/dashboard"}
+        return {"text": label, "web_app": {"url": f"{SITE_BASE}/bots"}}
+    return {"text": label, "url": f"{SITE_BASE}/bots"}
 
 
 def _open_kb(label="🚀 Open CodeNest"):
@@ -248,12 +287,24 @@ def set_menu_button():
     This is the always-available entry point — it does not depend on the user
     finding an old message with an inline button in it.
     """
-    if not BOT_TOKEN or not _miniapp_ok():
+    if not BOT_TOKEN:
+        return False
+    if not _miniapp_ok():
+        # SAY WHY THE BUTTON IS MISSING. This returned False in silence, so a
+        # deployment with no SITE_BASE_URL (or an http:// one, which Telegram
+        # refuses for web_app) produced a bot with no Open button and no
+        # explanation anywhere — indistinguishable from a broken Mini App.
+        logger.error(
+            "TELEGRAM: no 'Open CodeNest' button — the Mini App URL is %s. "
+            "Telegram only accepts an https:// URL for a web_app button. Set "
+            "SITE_BASE_URL to this service's public https URL and redeploy.",
+            f"'{SITE_BASE}'" if SITE_BASE else "not configured (SITE_BASE_URL "
+            "and RENDER_EXTERNAL_URL are both unset)")
         return False
     res = _tg("setChatMenuButton", menu_button={
         "type": "web_app",
         "text": "Open CodeNest",
-        "web_app": {"url": f"{SITE_BASE}/dashboard"},
+        "web_app": {"url": f"{SITE_BASE}/bots"},
     })
     ok = bool((res or {}).get("ok"))
     if not ok:
@@ -320,11 +371,24 @@ def handle_start(chat_id, first_name, payload=""):
     # the account straight after. So the button IS the connect step, and a
     # printed URL would only offer a worse route to the same place (a browser,
     # where the user would have to log in by hand).
+    kb = _open_kb()
+    if not kb:
+        # A MESSAGE THAT SAYS "TAP BELOW" WITH NOTHING BELOW IT IS THE BUG,
+        # NOT A COSMETIC ISSUE. _open_kb() returns None whenever the Mini App
+        # URL is unusable, and the old code sent the invitation anyway — so
+        # the very first thing a new user saw was an instruction pointing at
+        # a button that was not there. Reproduced with SITE_BASE_URL unset.
+        _send(chat_id,
+              f"👋 Hi {first_name}!\n\n"
+              "⚠️ CodeNest is not finished setting up: the owner still has to "
+              "set `SITE_BASE_URL` to this site's public https address. "
+              "Until then I cannot open the app for you.")
+        return
     _send(chat_id,
           f"👋 Hi {first_name}!\n\n"
           "Tap below to open CodeNest — writing, editing and deploying all "
           "happen there, and you are signed in automatically.",
-          reply_markup=_open_kb())
+          reply_markup=kb)
 
 
 def handle_unlink(chat_id):
@@ -408,7 +472,7 @@ def _fmt_uptime(sec):
 
 
 _ICON = {"running": "🟢", "crashed": "🔴", "installing": "🟡",
-         "starting": "🟡", "restarting": "🟡", "stopped": "⚪", "offline": "⚪"}
+         "starting": "🟡", "restarting": "🟡", "recovering": "🟡", "stopped": "⚪", "offline": "⚪"}
 
 
 def cmd_apps(chat_id, user):
@@ -745,6 +809,123 @@ def _send_job_data(chat_id, user, ref):
                    caption=f"📥 {os.path.basename(best)} ({best_size} bytes)")
 
 
+# ==================== UPDATE DISPATCH ====================
+def _command_parts(text):
+    """Return Telegram command + argument; accept /cmd@BotName in groups."""
+    text = (text or "").strip()
+    if not text.startswith("/"):
+        return "", ""
+    head, _, arg = text.partition(" ")
+    command = head.split("@", 1)[0].lower()
+    return command, arg.strip()
+
+
+def _row_id(row):
+    try:
+        return row["id"] if row else None
+    except (KeyError, TypeError):
+        return None
+
+
+def handle_update(upd):
+    """Dispatch one Telegram update and always leave an analytics record."""
+    event = {"chat_id": "", "event_type": "unknown", "command": "",
+             "payload": "", "outcome": "ok", "error": "",
+             "display_name": "", "telegram_user_id": None, "user_id": None}
+    try:
+        if "message" in upd:
+            msg = upd["message"]
+            chat_id = msg["chat"]["id"]
+            text = msg.get("text", "") or ""
+            command, arg = _command_parts(text)
+            event.update(chat_id=chat_id,
+                         event_type="command" if command else
+                                    ("document" if "document" in msg else "message"),
+                         command=command, payload=arg if command else "",
+                         display_name=_tg_display(msg),
+                         telegram_user_id=msg.get("from", {}).get("id"))
+            linked = telegram_link.user_for_chat(chat_id)
+            event["user_id"] = _row_id(linked)
+
+            # A pending upload/text is claimed before normal non-command input.
+            if not command:
+                pending = _get_pending(chat_id)
+                if pending:
+                    event["event_type"] = "code_upload"
+                    event["payload"] = str(pending.get("name") or pending.get("ref") or "")
+                    handle_pending_code(chat_id, msg, pending)
+                    return
+                if "document" in msg:
+                    _send(chat_id, "I wasn't expecting a file — send "
+                                   "`/code <new app name>` or `/update <app name>` first, "
+                                   "then the file.")
+                else:
+                    _send(chat_id, UNKNOWN_REPLY, reply_markup=_open_kb())
+                return
+
+            def gated(fn):
+                user = _require_link(chat_id)
+                if user:
+                    event["user_id"] = _row_id(user)
+                    fn(user)
+                else:
+                    event["outcome"] = "refused"
+
+            handlers = {
+                "/start": lambda: handle_start(chat_id, _tg_display(msg) or
+                                                 msg.get("from", {}).get("first_name", "user"), arg),
+                "/link": lambda: handle_link(chat_id, text, _tg_display(msg)),
+                "/unlink": lambda: handle_unlink(chat_id),
+                "/ping": lambda: gated(lambda _u: handle_ping(chat_id, text)),
+                "/cancel": lambda: cmd_cancel_pending(chat_id),
+                "/apps": lambda: gated(lambda u: cmd_apps(chat_id, u)),
+                "/jobs": lambda: gated(lambda u: cmd_apps(chat_id, u)),
+                "/status": lambda: gated(lambda u: cmd_status(chat_id, u, arg)),
+                "/logs": lambda: gated(lambda u: cmd_logs(chat_id, u, arg)),
+                "/restart": lambda: gated(lambda u: cmd_restart(chat_id, u, arg)),
+                "/stop": lambda: gated(lambda u: cmd_stop(chat_id, u, arg)),
+                "/delete": lambda: gated(lambda u: cmd_delete(chat_id, u, arg)),
+                "/rename": lambda: gated(lambda u: cmd_rename(chat_id, u, arg)),
+                "/code": lambda: gated(lambda u: cmd_code_start(chat_id, u, arg)),
+                "/update": lambda: gated(lambda u: cmd_update_start(chat_id, u, arg)),
+                "/help": lambda: handle_start(chat_id, _tg_display(msg) or
+                                                msg.get("from", {}).get("first_name", "user")),
+            }
+            handler = handlers.get(command)
+            if handler:
+                handler()
+            else:
+                event["outcome"] = "unknown"
+                _send(chat_id, UNKNOWN_REPLY, reply_markup=_open_kb())
+
+        elif "callback_query" in upd:
+            cb = upd["callback_query"]
+            chat_id = cb["message"]["chat"]["id"]
+            data = str(cb.get("data") or "")
+            linked = telegram_link.user_for_chat(chat_id)
+            event.update(chat_id=chat_id, event_type="callback",
+                         command=data.partition(":")[0], payload=data.partition(":")[2],
+                         display_name=_tg_display(cb.get("message", {})),
+                         telegram_user_id=cb.get("from", {}).get("id"),
+                         user_id=_row_id(linked))
+            if linked:
+                handle_callback(chat_id, data)
+            else:
+                event["outcome"] = "refused"
+            _tg("answerCallbackQuery", callback_query_id=cb["id"])
+    except Exception as exc:
+        event["outcome"] = "error"
+        event["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        try:
+            if event["chat_id"] != "":
+                bot_analytics.record(**event)
+        except Exception:
+            # A monkeypatched/broken recorder still cannot replace the command result.
+            logger.exception("Bot analytics recorder failed")
+
+
 # ==================== MAIN LOOP ====================
 def poll_loop():
     if not BOT_TOKEN:
@@ -752,132 +933,80 @@ def poll_loop():
     print("🤖 Advanced Bot starting...")
     offset = 0
 
+    _fail_streak = 0
+    _webhook_cleared = False
+
     while True:
         try:
             updates = _tg("getUpdates", offset=offset, timeout=40)
+
+            # A REJECTED getUpdates USED TO BE INVISIBLE.
+            #
+            # This branch was `time.sleep(1); continue` with no logging at
+            # all, and it is the branch Telegram takes for the two failures
+            # that actually stop a bot dead:
+            #
+            #   409 "can't use getUpdates method while webhook is active"
+            #       — someone (often a hosting UI or an old deploy) left a
+            #         webhook registered on this token. Polling can NEVER
+            #         work until it is deleted.
+            #   409 "terminated by other getUpdates request"
+            #       — a second instance is polling the same token: a stale
+            #         Render service, or a local run left open. The two
+            #         steal each other's updates and both look broken.
+            #
+            # Reproduced against a fake Telegram API: in both cases the loop
+            # spun forever, wrote NOTHING to the log, and the bot answered no
+            # message. From the outside "the bot is dead" — with a healthy
+            # /health endpoint and a green deploy.
             if not updates or not updates.get("ok"):
-                time.sleep(1)
+                _fail_streak += 1
+                desc = str((updates or {}).get("description") or
+                           "no response from Telegram")
+
+                if "webhook is active" in desc.lower() and not _webhook_cleared:
+                    # Self-heal, once. This service polls; a webhook on the
+                    # same token is always wrong for it, and deleting it is
+                    # the documented remedy. Once only, so a genuine webhook
+                    # deployment is not fought over in a loop.
+                    _webhook_cleared = True
+                    logger.error(
+                        "TELEGRAM: a webhook is registered on this bot token, so "
+                        "getUpdates is refused and the bot receives NOTHING. "
+                        "Deleting it automatically (this service polls).")
+                    res = _tg("deleteWebhook", drop_pending_updates=False)
+                    if (res or {}).get("ok"):
+                        logger.warning("TELEGRAM: webhook deleted — polling resumes.")
+                        _fail_streak = 0
+                        continue
+                    logger.error("TELEGRAM: deleteWebhook failed: %s", res)
+
+                elif "terminated by other getupdates" in desc.lower():
+                    logger.error(
+                        "TELEGRAM: another instance is polling this same bot "
+                        "token — updates are being split between them and both "
+                        "look broken. Run ONE service per token, or give this "
+                        "deployment its own bot.")
+
+                # Never silent again, but never a flood either: the first few
+                # failures are logged, then one line a minute.
+                elif _fail_streak <= 3 or _fail_streak % 60 == 0:
+                    logger.error("TELEGRAM getUpdates failed (%d in a row): %s",
+                                 _fail_streak, desc)
+
+                # Back off so a hard failure is not a hot loop against
+                # Telegram's API — the old code retried every second forever.
+                time.sleep(min(2 * _fail_streak, 30))
                 continue
+
+            if _fail_streak:
+                logger.warning("TELEGRAM: polling recovered after %d failures.",
+                               _fail_streak)
+                _fail_streak = 0
 
             for upd in updates.get("result", []):
                 offset = upd["update_id"] + 1
-
-                if "message" in upd:
-                    msg = upd["message"]
-                    chat_id = msg["chat"]["id"]
-                    text = msg.get("text", "") or ""
-                    has_doc = "document" in msg
-                    first_name = msg.get("from", {}).get("first_name", "user")
-
-                    # A /code or /update waiting on this chat claims the next
-                    # non-command message (text OR file) before anything else
-                    # gets a look — but a fresh slash command (e.g. /cancel,
-                    # or just changing their mind and running /apps) always
-                    # takes priority over a stale pending slot.
-                    if not text.startswith("/"):
-                        pending = _get_pending(chat_id)
-                        if pending:
-                            handle_pending_code(chat_id, msg, pending)
-                            continue
-
-                    # /start and /link are the only commands an UNLINKED
-                    # chat may use. Everything else needs an account, because
-                    # everything else spends the platform's memory.
-                    if text.startswith("/start"):
-                        # "/start 482913" from a t.me deep link. split(None, 1)
-                        # so a payload is taken whole and extra spaces do not
-                        # produce a stray empty argument.
-                        _parts = text.split(None, 1)
-                        handle_start(chat_id, _tg_display(msg) or first_name,
-                                     _parts[1] if len(_parts) > 1 else "")
-
-                    elif text.startswith("/link"):
-                        handle_link(chat_id, text, _tg_display(msg))
-
-                    elif text.startswith("/unlink"):
-                        handle_unlink(chat_id)
-
-                    elif text.startswith("/ping"):
-                        if _require_link(chat_id):
-                            handle_ping(chat_id, text)
-
-                    elif text.startswith("/cancel"):
-                        cmd_cancel_pending(chat_id)
-
-                    # Every command below acts on real apps, so each one is
-                    # gated. _cmd_arg() splits off "/logs mybot" -> "mybot".
-                    elif text.startswith("/apps") or text.startswith("/jobs"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_apps(chat_id, _u)
-
-                    elif text.startswith("/status"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_status(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/logs"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_logs(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/restart"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_restart(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/stop"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_stop(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/delete"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_delete(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/rename"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_rename(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/code"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_code_start(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/update"):
-                        _u = _require_link(chat_id)
-                        if _u:
-                            cmd_update_start(chat_id, _u, _cmd_arg(text))
-
-                    elif text.startswith("/help"):
-                        handle_start(chat_id, _tg_display(msg) or first_name)
-
-                    # Not a command, and nothing was pending for this chat
-                    # (the pending check above already handled that case and
-                    # `continue`d). A stray file with no /code or /update
-                    # first is called out explicitly rather than silently
-                    # ignored, since "I sent a file and nothing happened" is
-                    # a confusing dead end otherwise.
-                    elif has_doc:
-                        _send(chat_id, "I wasn't expecting a file — send "
-                                       "`/code <new app name>` or "
-                                       "`/update <app name>` first, then "
-                                       "the file.")
-                    else:
-                        _send(chat_id, UNKNOWN_REPLY,
-                              reply_markup=_open_kb())
-
-                elif "callback_query" in upd:
-                    # Buttons are as powerful as commands — Restart and
-                    # Download DB both act on a real job — and callback_data
-                    # is attacker-supplied, so the same gate applies here.
-                    cb = upd["callback_query"]
-                    cb_chat = cb["message"]["chat"]["id"]
-                    if telegram_link.user_for_chat(cb_chat):
-                        handle_callback(cb_chat, cb["data"])
-                    _tg("answerCallbackQuery", callback_query_id=cb["id"])
+                handle_update(upd)
 
         except Exception as e:
             print("Poll error:", e)
@@ -898,12 +1027,49 @@ def start_bot():
     # before anyone tries to sign in.
     try:
         from services import miniapp_auth
+
+        # TWO TOKEN NAMES, ONE WINNER, AND NOTHING SAID WHICH. BOT_TOKEN
+        # silently outranks TELEGRAM_PING_BOT_TOKEN — but render.yaml only
+        # documents the latter, so an owner who replaced their bot by editing
+        # the documented name, while a stale BOT_TOKEN sat above it, kept
+        # running the OLD bot and had no way to see that. Reproduced.
+        src = miniapp_auth.token_sources()
+        if src.get("conflict"):
+            logger.error(
+                "TWO DIFFERENT BOT TOKENS ARE CONFIGURED: %s. Only %s is used "
+                "(it takes priority), so every Mini App sign-in is checked "
+                "against bot %s. If that is not the bot you are opening, "
+                "DELETE the unused variable and redeploy.",
+                ", ".join(f"{k}=bot {v}" for k, v in src["bot_ids"].items()),
+                src["used"], src["bot_ids"].get(src["used"]))
+
         who = miniapp_auth.whoami()
         if who.get("ok"):
+            # PRINT THE FINGERPRINT AT BOOT, so the value this process is
+            # actually running with can be compared against BotFather BEFORE
+            # anyone fails to sign in. Every diagnosis so far had to wait for
+            # a user to hit the error and then reason backwards; this puts the
+            # decisive fact in the deploy log. It is a one-way digest — the
+            # secret is never written anywhere.
+            fp = miniapp_auth.token_fingerprint()
             logger.warning(
-                "TELEGRAM BOT: this server is @%s (id %s). The Mini App must be "
-                "opened from THIS bot, or sign-in fails with bad_hash.",
-                who.get("username"), who.get("bot_id"))
+                "TELEGRAM BOT: this server is @%s (id %s), token sha256:%s "
+                "(secret %d chars). The Mini App must be opened from THIS bot. "
+                "To confirm the deployed token matches BotFather, run: "
+                "printf '%%s' '<token>' | sha256sum  — the first 12 characters "
+                "must equal %s.",
+                who.get("username"), who.get("bot_id"), fp.get("sha256_12"),
+                fp.get("secret_length", 0), fp.get("sha256_12"))
+            # A truncated or partially-selected paste is invisible in a
+            # dashboard field and produces exactly this failure, so measure it.
+            _sl = fp.get("secret_length")
+            if _sl and _sl != fp.get("secret_length_expected"):
+                logger.error(
+                    "TELEGRAM TOKEN LOOKS TRUNCATED: the secret half is %d "
+                    "characters, expected %d. A partial paste still passes "
+                    "getMe in some cases but can never verify a Mini App "
+                    "sign-in. Re-copy the whole token.",
+                    _sl, fp.get("secret_length_expected"))
             env_name = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
             if env_name and env_name.lower() != (who.get("username") or "").lower():
                 logger.error(

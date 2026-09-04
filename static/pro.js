@@ -7,9 +7,129 @@ const API = "";
 let signupUsername = "";
 let authToken = localStorage.getItem("ahad_token") || null;
 let resendTimerInterval = null;
-let currentTab = "overview";
+let currentTab = "jobs";
 let editingSnippetId = null;
 let _livePreviewTimer = null;
+
+/* ─────────────────────────────────────────────────────────────────────
+   OFFLINE / STATIC UI DEMO  ("python -m http.server 8080")
+
+   The real product talks to a Python backend. When the same shell is served
+   by a plain static server (as on Termux), every /api call returns the
+   server's HTML 404 page, so the UI looks right but every menu action is
+   dead. This block detects that situation and switches the front-end into a
+   small self-contained demo: sample bots, store items, snippets and admin
+   numbers are served locally, while the real app keeps using the backend.
+
+   It is deliberately front-end only — no backend, no database, no inner
+   structure touched. Add ?demo=1 to force it even on the real site.
+   ───────────────────────────────────────────────────────────────────── */
+let _demo = {
+  on: false,
+  jobs: [
+    {
+      id: "demo-1", runner_job_id: "rn-1001", name: "Ping Bot", language: "python",
+      status: "running", restarts: 1, port: 8801,
+      web: true, web_url: "https://demo.example.com/ping", web_slug: "ping", web_public: true,
+      uptime_s: 18740, cpu_pct: 2.4, mem_mb: 42,
+      telegram_bot_detected: true, telegram_bot_username: "CodeNestPingBot",
+      telegram_bot_id: "7123456789", telegram_check_status: "verified",
+      telegram_bot_url: "https://t.me/CodeNestPingBot",
+      telegram_framework: "python-telegram-bot", telegram_update_mode: "polling",
+      env: { BOT_TOKEN: "••••••••", ADMIN_CLAIM_CODE: "DEMO" },
+      code: "from telegram.ext import Application\n\nasync def ping(update, ctx):\n    await update.message.reply_text(\"pong!\")\n\napp = Application.builder().token(BOT_TOKEN).build()\napp.run_polling()\n",
+      created_at: new Date(Date.now() - 2 * 864e5).toISOString()
+    },
+    {
+      id: "demo-2", runner_job_id: "rn-1002", name: "Daily Report Bot", language: "python",
+      status: "stopped", restarts: 0, port: null,
+      web: false, web_slug: null, web_public: true, uptime_s: 0, cpu_pct: 0, mem_mb: 0,
+      telegram_bot_detected: false, telegram_check_status: "unverified",
+      env: {}, code: "# schedule a daily report\nprint(\"hello from stoppen bot\")\n",
+      created_at: new Date(Date.now() - 6 * 864e5).toISOString()
+    },
+    {
+      id: "demo-3", runner_job_id: "rn-1003", name: "Scraper", language: "python",
+      status: "crashed", restarts: 3, port: null,
+      web: false, web_slug: null, web_public: true, uptime_s: 0, cpu_pct: 0, mem_mb: 0,
+      telegram_bot_detected: false, telegram_check_status: "unverified",
+      env: {}, code: "import requests\nraise RuntimeError(\"demo crash\")\n",
+      created_at: new Date(Date.now() - 1 * 864e5).toISOString()
+    },
+  ],
+  snippets: [
+    { id: 1, title: "Hello demo", language: "javascript",
+      content: "console.log('hello from CodeNest demo');",
+      share_token: "abc123", is_public: true },
+    { id: 2, title: "Flask starter", language: "python",
+      content: "from flask import Flask\napp = Flask(__name__)\n@app.get('/')\ndef home():\n    return 'hi'\n",
+      share_token: null, is_public: false },
+  ],
+  store: [
+    { slug: "echo-vault", title: "Echo Vault Bot", language: "python",
+      category: "Utilities", difficulty: "Beginner", featured: true, source: "official",
+      author: "CodeNest", summary: "A small bot that echoes anything you send.",
+      code_lines: 18, framework: "python-telegram-bot", rating: 4.9, rating_count: 12,
+      install_count: 248, version: "1.2.0", features: ["Handles /help", "Echo mode"],
+      code_full: true, code: "from telegram.ext import Application, CommandHandler, MessageHandler, filters\nasync def echo(update, ctx):\n    await update.message.reply_text(update.message.text or \"...\")\napp = Application.builder().token(BOT_TOKEN).build()\napp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))\napp.run_polling()\n",
+      env_fields: [], after_deploy: "" },
+    { slug: "daily-quote", title: "Daily Quote Bot", language: "python",
+      category: "Channels", difficulty: "Intermediate", featured: false, source: "community",
+      author: "demo", summary: "Posts a quote every morning.", code_lines: 41,
+      framework: "python-telegram-bot", rating: 4.2, rating_count: 3,
+      install_count: 87, version: "1.0.0", features: ["Daily timer", "Random quote"],
+      code_full: true, code: "print('daily quote bot demo')\n", env_fields: [], after_deploy: "" },
+    { slug: "support-ticket", title: "Support Ticket Bot", language: "python",
+      category: "Commerce", difficulty: "Advanced", featured: false, source: "community",
+      author: "demo", summary: "Turns messages into support tickets.", code_lines: 64,
+      framework: "python-telegram-bot", rating: 0, rating_count: 0,
+      install_count: 31, version: "0.9.0", features: ["Ticket IDs", "Open/close"],
+      code_full: true, code: "print('support ticket demo')\n", env_fields: [], after_deploy: "" },
+  ],
+  installed: [],
+  favorites: [],
+};
+let _demoInit = false;
+const _demoQuery = (function(){ try { return new URLSearchParams(window.location.search).has("demo"); } catch (e) { return false; } })();
+const _demoStaticHost = window.location.protocol === "file:" ||
+  ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port === "8080");
+if (_demoQuery || _demoStaticHost) {
+  _demo.on = true;
+  _demoInit = true;
+  if (!authToken) {
+    authToken = "demo-token";
+    try {
+      localStorage.setItem("ahad_token", authToken);
+      localStorage.setItem("ahad_user", "demo");
+    } catch (e) {}
+  }
+}
+function _demoFindJob(id) {
+  return (_demo.jobs || []).find(j => String(j.id) === String(id)) || null;
+}
+function _demoList(fn) { return new Promise(resolve => setTimeout(() => resolve(fn()), 60)); }
+function _demoClone(obj) { try { return JSON.parse(JSON.stringify(obj)); } catch (e) { return obj; } }
+function _enableDemo() {
+  if (_demoInit) return;
+  _demoInit = true;
+  _demo.on = true;
+  if (!authToken) {
+    authToken = "demo-token";
+    try {
+      localStorage.setItem("ahad_token", authToken);
+      localStorage.setItem("ahad_user", "demo");
+    } catch (e) {}
+  }
+  const dp = document.getElementById("demoPill");
+  if (dp) dp.hidden = false;
+  // Only take over the screen if the boot has already chosen the landing
+  // page (i.e. the static server was detected after initial paint).
+  try {
+    if (typeof showScreen === "function") showScreen("screen-dashboard");
+    if (typeof loadDashboard === "function") loadDashboard().catch(() => {});
+    if (currentTab === "jobs" && typeof startJobPolling === "function") startJobPolling();
+  } catch (e) {}
+}
 
 
 /* ---------------- SCREEN NAV ---------------- */
@@ -25,6 +145,13 @@ let _livePreviewTimer = null;
 const _TG_FORBIDDEN_SCREENS = {
   "screen-signin": 1, "screen-signup": 1, "screen-otp": 1,
   "screen-forgot1": 1, "screen-forgot2": 1, "screen-forgot3": 1,
+  // The password-reset confirmation belongs here too. It was missed because
+  // nothing routes to it inside Telegram — but it did not need to be routed
+  // to: it is a plain .auth div with no `hidden` class, so until showScreen()
+  // ran for the very first time it was simply still visible from the initial
+  // markup, and "Password updated! Redirecting in 3…" sat on top of the
+  // dashboard during every slow boot.
+  "screen-forgot-success": 1,
   "screen-landing": 1,
 };
 
@@ -84,12 +211,14 @@ function openSideMenu() {
   const ov = document.getElementById("sideOverlay");
   if (tabs) tabs.classList.add("open");
   if (ov) ov.classList.remove("hidden");
+  document.body.classList.add("nav-drawer-open");
 }
 function closeSideMenu() {
   const tabs = document.querySelector(".dash-tabs");
   const ov = document.getElementById("sideOverlay");
   if (tabs) tabs.classList.remove("open");
   if (ov) ov.classList.add("hidden");
+  document.body.classList.remove("nav-drawer-open");
 }
 
 /* Smooth-scroll to an in-page section (used by the marketing nav links). */
@@ -109,10 +238,15 @@ function switchTab(tabId) {
   }
   if (tabId !== "jobs") {
     document.body.classList.remove("rs-detail-open", "rs-drawer-open");
+    if(typeof _hideBotLaunchPage==="function")_hideBotLaunchPage();
   }
   // Pseudo-tabs (e.g. the Activity launcher has no data-tab) must NOT
   // blank the dashboard — a missing/unknown tab target = no-op.
   if (!tabId || !document.getElementById(`tab-${tabId}`)) return;
+  // A real destination always closes the global drawer and its scrim. Before
+  // this, choosing RunSpace from Menu left sideOverlay over the page, which
+  // looked like a grey veil and made every other navigation control vanish.
+  closeSideMenu();
   currentTab = tabId;
   // Leaving the code studio while the editor is fullscreen would trap the
   // overlay over the next section — always collapse it first.
@@ -124,7 +258,7 @@ function switchTab(tabId) {
   const t = document.getElementById(`tab-${tabId}`);
   t.classList.add("active");
   // Sync mobile bottom-nav highlight (map extra tabs back to "more").
-  const map = { profile: "more", admin: "more" };
+  const map = { admin: "profile" };
   document.querySelectorAll(".bn-item").forEach(b => {
     b.classList.toggle("active", b.dataset.tab === (map[tabId] || tabId));
   });
@@ -135,12 +269,26 @@ function switchTab(tabId) {
   if (typeof _admSetPolling === "function") _admSetPolling(tabId === "admin");
   // ⚙️ Settings: keep the security panel truthful every time it opens.
   if (tabId === "profile") { refreshSecurityPanel(); loadSessionsList(); }
-  if (tabId === "code") { initCodeMirror(); if (cmEditor) cmEditor.refresh(); }
+  if (tabId === "code") { loadSnippets(); initCodeMirror(); if (cmEditor) cmEditor.refresh(); }
+  // 📈 Overview is the analytics dashboard: load on open, reuse after.
+  if (tabId === "overview" && typeof loadOverview === "function") { loadOverview(); }
+  // 🛍️ Store: fetch the shelf the first time it is opened, then reuse it.
+  if (tabId === "store" && typeof loadStore === "function") { loadStore(); }
   // 🔗 Every section is a REAL URL — back/forward + refresh + sharing work.
   if (!_routeNav) {
     const p = TAB_PATHS[tabId];
     if (p) { try { if (_clientPath() !== p) history.pushState({ tab: tabId }, "", p); } catch (e2) {} }
   }
+}
+
+/* The product has one primary action. Every visible Add Bot control uses
+   this helper so desktop, mobile and deep links enter the same wizard. */
+function openAddBot() {
+  if (currentTab !== "jobs") switchTab("jobs");
+  // switchTab starts the jobs load synchronously; the persistent rail button
+  // is already in the DOM and owns the one canonical new-bot implementation.
+  const button = document.getElementById("btnNew");
+  if (button) button.click();
 }
 
 /* ---------------- TOAST ---------------- */
@@ -354,8 +502,277 @@ function _tgReauthOnce() {
  * Telegram re-auth succeeds there is no retry left and the call fails anyway
  * — right after a login that worked. A cold-start retry and a
  * retry-with-a-new-token are different events and each gets one attempt. */
+async function _demoApi(path, method = "GET", body = null) {
+  await _demoList(() => {});  // small delay so spinners are visible, like a real request
+  const raw = String(path || "");
+  const qs = (raw.split("?")[1] || "");
+  const clean = raw.split("?")[0];
+  const parts = clean.split("/").filter(Boolean);
+
+  // ── profile / account ──────────────────────────────────────────────
+  if (clean === "/profile") return {
+    username: "demo", email: "demo@codenest.local", phone: "",
+    custom_code: "", is_admin: true, telegram_linked: true,
+  };
+  if (clean === "/profile/update") return { ok: true };
+  if (clean === "/profile/telegram") return { linked: true };
+  if (clean === "/profile/telegram/unlink") return { ok: true };
+  if (clean === "/profile/telegram/code") return { sent: true };
+  if (clean === "/stats") return {
+    jobs_total: _demo.jobs.length, jobs_deployed: _demo.jobs.filter(j => j.status === "running").length,
+    snippets: _demo.snippets.length, published: _demo.snippets.filter(s => s.is_public).length,
+  };
+  if (clean === "/activity-log" && method === "GET") {
+    const rows = _demo.activity || [];
+    return rows;
+  }
+  if (clean === "/activity-log" && method === "POST") {
+    const e = body || {};
+    (_demo.activity || (_demo.activity = [])).unshift({
+      action: `${e.action || "info:Event"}`, details: e.details || "", created_at: new Date().toISOString(),
+    });
+    (_demo.activity || []).length = Math.min((_demo.activity || []).length, 40);
+    return { ok: true };
+  }
+  if (clean === "/login-history") return { sessions: [] };
+  if (clean === "/sessions") return { sessions: [{ id: "demo", device: "This device", created_at: new Date().toISOString(), current: true }] };
+  if (clean === "/sessions/revoke") return { ok: true };
+  if (clean === "/search") return { results: (_demo.jobs || []).map(j => ({ type: "job", id: j.id, title: j.name, subtitle: "bot", href: "/bots" })) };
+
+  // ── bots / jobs ────────────────────────────────────────────────────
+  if (clean === "/api/jobs") {
+    if (method === "GET") return { jobs: _demoClone(_demo.jobs) };
+    if (method === "POST") {
+      const b = body || {};
+      const id = "demo-" + (Date.now().toString(36));
+      const lang = b.language || "python";
+      const job = {
+        id, runner_job_id: "rn-demo-" + id, name: b.name || "Demo Bot", language: lang,
+        status: "running", restarts: 0, port: null,
+        web: true, web_url: "https://demo.example.com/" + id, web_slug: id, web_public: true,
+        uptime_s: 0, cpu_pct: 0, mem_mb: 0,
+        telegram_bot_detected: !!b.telegram_verification_id,
+        telegram_bot_username: b.telegram_bot_username || null,
+        telegram_bot_id: b.telegram_verification_id || null,
+        telegram_check_status: b.telegram_verification_id ? "verified" : "unverified",
+        telegram_bot_url: b.telegram_bot_username ? "https://t.me/" + b.telegram_bot_username : null,
+        telegram_framework: "python-telegram-bot", telegram_update_mode: "polling",
+        env: { BOT_TOKEN: "••••••••" }, code: b.code || "",
+        created_at: new Date().toISOString(),
+      };
+      _demo.jobs.unshift(job);
+      return {
+        id: job.runner_job_id, job_db_id: id, name: job.name, language: job.language,
+        web: true, web_url: job.web_url, web_slug: id, web_public: true,
+        telegram_bot_detected: job.telegram_bot_detected, telegram_bot_username: job.telegram_bot_username,
+        telegram_bot_id: job.telegram_bot_id, telegram_check_status: job.telegram_check_status,
+        telegram_bot_url: job.telegram_bot_url, telegram_framework: job.telegram_framework,
+        telegram_update_mode: job.telegram_update_mode,
+      };
+    }
+  }
+  // /api/jobs/:id (and sub-actions)
+  const jobMatch = clean.match(/^\/api\/jobs\/([^/]+)(\/(.+))?$/);
+  if (jobMatch) {
+    const id = decodeURIComponent(jobMatch[1]);
+    const sub = jobMatch[3] || "";
+    const job = _demoFindJob(id);
+    if (clean.match(/^\/api\/jobs\/[^/]+\/(stop|restart|delete|start)$/)) {
+      const verb = clean.split("/").pop();
+      if (job) {
+        if (verb === "stop" || verb === "delete") job.status = verb === "stop" ? "stopped" : "stopped";
+        if (verb === "restart" || verb === "start") job.status = "starting";
+        if (verb === "delete") _demo.jobs = _demo.jobs.filter(j => String(j.id) !== String(id));
+      }
+      return { ok: true };
+    }
+    if ((sub === "files") || clean.endsWith("/files")) {
+      const f = [{ path: "main." + (job && job.language === "javascript" ? "js" : "py"), size: (job && job.code ? job.code.length : 42), text: true }];
+      return { files: f, entry: f[0].path, note: "" };
+    }
+    if (/\/api\/jobs\/[^/]+\/file$/.test(clean)) {
+      return { content: (job && job.code) || "# demo file\n" };
+    }
+    if (clean.endsWith("/entry")) return { entry: parts[parts.length - 1] };
+    if (sub === "snapshot") {
+      if (method === "GET") return { enabled: true, snapshot: { files: 3, bytes: 4096, updated_at: new Date(Date.now() - 60e5).toISOString() } };
+      if (clean.endsWith("/restore") || (body && body.files !== undefined)) return { restored: 3 };
+      return { files: 3 };
+    }
+    if (sub === "revisions") return {
+      revisions: job ? [{ id: "r1", version: 1, action: "deploy", language: job.language || "python", created_at: job.created_at || new Date().toISOString(), status: "healthy" }] : [],
+      current_revision: 1,
+    };
+    if (/\/revisions\/[^/]+\/rollback$/.test(clean)) return { ok: true };
+    if (sub === "telegram-health") return {
+      delivery_status: job && job.status === "running" ? "healthy" : "unknown",
+      process_status: job ? job.status : "stopped",
+    };
+    // PATCH on job writes env/code/name in place.
+    if (method === "PATCH") {
+      if (job) {
+        if (body.name !== undefined) job.name = body.name;
+        if (body.code !== undefined) job.code = body.code;
+        if (body.language !== undefined) { job.language = body.language; job.status = "starting"; }
+        if (body.env !== undefined) job.env = body.env;
+      }
+      return { job_db_id: id, id: id, ok: true, web: job ? job.web : true, web_url: job ? job.web_url : null, web_slug: job ? job.web_slug : null, web_public: job ? job.web_public !== false : true };
+    }
+    if (method === "GET" && !sub) return job || {};
+    if (method === "DELETE") {
+      _demo.jobs = _demo.jobs.filter(j => String(j.id) !== String(id));
+      return { ok: true };
+    }
+    return { ok: true };
+  }
+
+  // ── telegram wizard ────────────────────────────────────────────────
+  if (clean === "/api/telegram-bot/verify") return {
+    telegram_bot_username: "DemoDemoBot", telegram_bot_id: "999999999",
+    telegram_verification_id: "ver-demo", telegram_bot_url: "https://t.me/DemoDemoBot",
+  };
+  if (clean === "/api/telegram-bot/analyze") return { framework: "python-telegram-bot", update_mode: "polling" };
+  if (clean === "/api/telegram-bot/templates") return {
+    templates: [
+      { id: "t-echo", name: "Echo Bot", description: "Replies with exactly what you send.", language: "python", framework: "python-telegram-bot", category: "Starter", badge: "Popular", requires_setup: false },
+      { id: "t-reminder", name: "Reminder Bot", description: "Reminds you at a chosen time.", language: "python", framework: "python-telegram-bot", category: "Utility", badge: "Setup", requires_setup: true },
+    ],
+  };
+  const tplMatch = clean.match(/^\/api\/telegram-bot\/templates\/(.+)$/);
+  if (tplMatch) {
+    const id = decodeURIComponent(tplMatch[1]);
+    const code = id === "t-reminder"
+      ? "from datetime import datetime\nprint(\"reminder bot\")\n"
+      : "from telegram.ext import Application, MessageHandler, filters\nasync def echo(update, ctx):\n    await update.message.reply_text(update.message.text or \"...\")\napp = Application.builder().token(BOT_TOKEN).build()\napp.run_polling()\n";
+    return { id, name: id === "t-reminder" ? "Reminder Bot" : "Echo Bot", language: "python", code, env_fields: [], after_deploy: "" };
+  }
+
+  // ── code studio / snippets ─────────────────────────────────────────
+  if (clean === "/snippets") {
+    if (method === "GET") return { snippets: _demoClone(_demo.snippets) };
+    if (method === "POST") {
+      const b = body || {};
+      const id = Date.now();
+      _demo.snippets.unshift({ id, title: b.title || "Untitled", language: b.language || "text", content: b.content || "", share_token: null, is_public: false });
+      return { id, ok: true };
+    }
+    if (method === "DELETE") {
+      const id = body && body.id;
+      _demo.snippets = _demo.snippets.filter(s => String(s.id) !== String(id));
+      return { ok: true };
+    }
+  }
+  if (clean === "/snippets/share") {
+    const b = body || {};
+    const s = _demo.snippets.find(x => String(x.id) === String(b.id));
+    if (s) { s.is_public = !!b.share; if (b.share && !s.share_token) s.share_token = "pub-" + Date.now().toString(36); }
+    return { share: !!b.share, url: b.share ? "/@" + "demo" + "/" + encodeURIComponent((s && s.title) || "untitled") : null };
+  }
+  if (clean === "/api/execute") {
+    const lang = (body && body.language) || "python";
+    const code = (body && body.code) || "";
+    const first = code.split("\n")[0] || "(empty)";
+    return {
+      success: true, exit_code: 0, execution_time_ms: 12,
+      stdout: "demo run · " + lang + "\n" + first, stderr: "", error: null,
+    };
+  }
+
+  // ── analytics / store / admin ──────────────────────────────────────
+  if (clean === "/api/analytics/overview") {
+    const days = parseInt((new URLSearchParams(qs).get("days") || "14"), 10) || 14;
+    const series = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 864e5);
+      series.push({ date: d.toISOString().slice(0, 10), deploys: 1 + (i % 3), new_bots: i % 5 === 0 ? 1 : 0 });
+    }
+    const now = new Date();
+    return {
+      days,
+      range: { start: new Date(now - days * 864e5).toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) },
+      series,
+      kpis: [
+        { key: "deploys", label: "Deploys", value: _demo.jobs.length * 3, delta: 12, sub: "this period" },
+        { key: "bots", label: "Bots", value: _demo.jobs.length, delta: 1, sub: "total apps" },
+        { key: "new_bots", label: "New bots", value: _demo.jobs.length, delta: 0, sub: "created this period" },
+      ],
+      totals: { deploys: _demo.jobs.length * 3, new_bots: _demo.jobs.length },
+      top_bots: _demo.jobs.slice(0, 3).map(j => ({ name: j.name, username: j.telegram_bot_username || "", language: j.language, live: j.status === "running", actions: 8 })),
+      recent: _demo.jobs.slice(0, 4).map(j => ({ job_name: j.name, action: j.status, username: j.telegram_bot_username || "", created_at: j.created_at })),
+    };
+  }
+  if (clean === "/api/store" || clean === "/api/store/items") {
+    const params = new URLSearchParams(qs);
+    const q = (params.get("q") || "").toLowerCase();
+    const cat = params.get("category") || "All";
+    let items = _demo.store.filter(s => (cat === "All" || s.category === cat) && (!q || (s.title + " " + s.summary).toLowerCase().includes(q)));
+    if (clean === "/api/store/items" && method === "POST") return { ok: true };
+    return {
+      items: _demoClone(items),
+      facets: { listings: _demo.store.length, community: _demo.store.filter(s => s.source === "community").length, installs: _demo.store.reduce((n, s) => n + (s.install_count || 0), 0), categories: [...new Set(_demo.store.map(s => s.category))].map(name => ({ name, count: _demo.store.filter(s => s.category === name).length })), allowed: [] },
+      favorite_slugs: _demo.favorites,
+      installed_slugs: _demo.installed,
+    };
+  }
+  const storeMatch = clean.match(/^\/api\/store\/([^/]+)(\/(.+))?$/);
+  if (storeMatch) {
+    const slug = decodeURIComponent(storeMatch[1]);
+    const sub = storeMatch[3] || "";
+    const item = _demo.store.find(s => s.slug === slug);
+    if (sub === "rate") {
+      const rating = body && body.rating;
+      if (item) { item.rating_count = (item.rating_count || 0) + 1; item.rating = rating || item.rating || 5; }
+      return { rating_average: item ? item.rating : 5, rating_count: item ? item.rating_count : 1, reviews: [] };
+    }
+    if (sub === "favorite") {
+      if (method === "DELETE") _demo.favorites = _demo.favorites.filter(s => s !== slug);
+      else if (!_demo.favorites.includes(slug)) _demo.favorites.push(slug);
+      return { ok: true };
+    }
+    if (sub === "install") {
+      if (!_demo.installed.includes(slug)) _demo.installed.push(slug);
+      item.install_count = (item.install_count || 0) + 1;
+      return { item: _demoClone(item), ok: true };
+    }
+    return item || { slug, title: slug, summary: "Demo listing" };
+  }
+  if (clean === "/api/store/mine/library") {
+    return {
+      favorites: _demo.store.filter(s => _demo.favorites.includes(s.slug)),
+      installs: _demo.store.filter(s => _demo.installed.includes(s.slug)).map(s => ({ title: s.title, item_slug: s.slug, version: s.version, created_at: new Date().toISOString() })),
+      submissions: [],
+    };
+  }
+
+  // ── admin (owner-only) ─────────────────────────────────────────────
+  if (clean.startsWith("/admin/")) {
+    const ov = {
+      users: 128, verified: 111, suspended: 2, jobs_deployed: _demo.jobs.length,
+      telegram_linked: 12, bot_secrets_encrypted: true, runner_isolation: "embedded",
+      mem_safe_mb: 512, mem_used_mb: 37, mem_pct: 8, mem_total_mb: 512, runner_running: _demo.jobs.filter(j => j.status === "running").length,
+      signups_daily: [], workers: [], workers_online: 0,
+    };
+    if (clean === "/admin/overview") return ov;
+    if (clean === "/admin/users") return { users: _demo.jobs.slice(0, 2).map(j => ({ id: "u" + j.id, username: "demo", email: "demo@codenest.local", jobs: 2, suspended: false, created_at: j.created_at })) };
+    if (clean === "/admin/jobs") return { jobs: _demo.jobs.map(j => ({ id: j.id, name: j.name, owner: "demo", live_status: j.status, mem_mb: j.mem_mb || 0, uptime_s: j.uptime_s || 0, restarts: j.restarts || 0, language: j.language })) };
+    if (clean === "/admin/abuse-reports") return { reports: [] };
+    if (clean === "/admin/audit-log") return { audit: [{ id: "a1", actor: "demo", action: "own", target: "demo", created_at: new Date().toISOString() }] };
+    if (clean === "/admin/libraries") return { libraries: [], mem_attributed: false, jobs_sampled: 0 };
+    if (clean === "/admin/bot-usage") return { days: 14, events: [], bots: [] };
+    if (clean === "/admin/telegram-jobs") return { detected: 1, running: _demo.jobs.filter(j => j.status === "running").length, events: [], bots: _demo.jobs.filter(j => j.telegram_bot_detected).map(j => ({ id: j.id, owner: "demo", name: j.name, telegram_bot_username: j.telegram_bot_username, status: j.status, telegram_framework: j.telegram_framework, telegram_update_mode: j.telegram_update_mode, telegram_check_status: j.telegram_check_status, uptime_s: j.uptime_s })) };
+    if (clean === "/admin/runners") return { total_enabled: 1, environment_runners: [], runners: [], embedded: { online: true, jobs: _demo.jobs.filter(j => j.status === "running").length, capacity: 4, mem_mb: 24 } };
+    if (clean === "/admin/ip-clusters" || clean === "/admin/fingerprint-clusters" || clean === "/admin/signup-flags" || clean === "/admin/blocks") return { rows: [], clusters: [], flags: [] };
+    if (clean === "/admin/bot-usage?") return { events: [], bots: [] };
+  }
+  return { ok: true };
+}
+
 async function api(path, method = "POST", body = null, auth = false,
                    _retried = false, _reauthed = false) {
+  // Offline / static preview: every /api call is answered locally so the
+  // UI can be reviewed without the Python backend.
+  if (_demo.on) return _demoApi(path, method, body);
+
   const headers = { "Content-Type": "application/json" };
   // Remember WHICH token this request went out with. A 401 only means "the
   // session is dead" if the token is still the current one — see below.
@@ -378,11 +795,19 @@ async function api(path, method = "POST", body = null, auth = false,
     // a user error. Banner (not 11 racing toasts) + marked error kind so the
     // dashboard keeps the session and retries instead of logging you out.
     _serverDown();
-    const e = new Error("Waking up your RunSpace... this can take up to a minute on the free tier");
+    const e = new Error("Connecting to CodeNest…");
     e.kind = "infra";
     throw e;
   }
 
+  const ct = (res.headers && res.headers.get && res.headers.get("content-type")) || "";
+  // Static file server (Termux: python -m http.server) returns its HTML 404
+  // page for every /api path. Detect that, switch to the local demo, and
+  // answer the request from _demoApi — no backend, no inner structure.
+  if (res.status === 404 && /text\/html/i.test(ct)) {
+    _enableDemo();
+    return _demoApi(path, method, body);
+  }
   const data = await res.json().catch(() => ({}));
 
   if (res.status === 401 && auth) {
@@ -1157,15 +1582,17 @@ async function loadDashboard() {
     _dashRetries = 0;                     // healthy again — reset the backoff
     document.getElementById("dashUsername").textContent = profile.username;
     document.getElementById("dashUsername2").textContent = profile.username;
-    document.getElementById("profileUsername").value = profile.username;
-    document.getElementById("profileEmail").value = profile.email;
-    document.getElementById("profilePhone").value = profile.phone || "";
-    document.getElementById("profileCode").value = profile.custom_code || "";
+    const pu = document.getElementById("profileUsername");
+    const pe = document.getElementById("profileEmail");
+    const pp = document.getElementById("profilePhone");
+    const pc = document.getElementById("profileCode");
+    if (pu) pu.value = profile.username;
+    if (pe) pe.value = profile.email;
+    if (pp) pp.value = profile.phone || "";
+    if (pc) pc.value = profile.custom_code || "";
 
     _lastProfile = profile;
     applyAdminVisibility(profile);
-    refreshSecurityPanel();
-    loadSessionsList();
   } catch (err) {
     console.error("Dashboard auth error:", err);
     // Infra failure (server asleep / 502-504 / no network): the session is
@@ -1178,17 +1605,8 @@ async function loadDashboard() {
     return;
   }
 
-  // 2) Section loads are NON-FATAL. If one section fails (network glitch,
-  //    transient 500, etc.) the dashboard must still show so the user can
-  //    use the buttons and retry. Don't collapse the whole UI on a section
-  //    failure, and never clear the token here.
-  try {
-    await Promise.all([loadSnippets()]);
-  } catch (err) {
-    console.error("Section load error (non-fatal):", err);
-  }
-  await loadStats(); // updates the stat counters
-
+  // Bots is the product home. Code Studio and overview data are loaded only
+  // when explicitly opened; fetching them here delayed every bot visit.
   showScreen("screen-dashboard");
 }
 
@@ -1858,15 +2276,13 @@ function openSearchResult(i) {
 }
 
 /* ==================== THEME ==================== */
+/* Writes the attribute the inline boot script and app.css both read. The
+   icon swap it used to do is gone with the button; a stored "light" value
+   from before the toggle was removed is still honoured here rather than
+   ignored, so nothing changes under a returning user's feet. */
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  const slot = document.getElementById("themeIcon");
-  if (slot) slot.innerHTML = ic(theme === "light" ? "sun" : "moon");
   try { localStorage.setItem("ahad_theme", theme); } catch (e) {}
-}
-function toggleTheme() {
-  const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
-  applyTheme(cur === "light" ? "dark" : "light");
 }
 (function initTheme() {
   // Dark is the product's identity: the landing page, RunSpace and the code
@@ -1893,9 +2309,18 @@ function toggleTheme() {
 
 /* ==================== PROFILE ==================== */
 async function saveProfile() {
-  const phone = document.getElementById("profilePhone").value.trim();
-  const custom_code = document.getElementById("profileCode").value.trim();
-  try { await api("/profile/update", "POST", { phone, custom_code }, true); toast("Profile saved!", "success"); }
+  // The editable profile form was trimmed from the Account tab, but the
+  // helper is kept for any future inline edit. Never send empty strings for
+  // fields the UI no longer shows: the backend treats "" as "set to empty"
+  // (only null means "keep the existing value"), which would silently wipe a
+  // user's stored phone / custom code on the next save.
+  const phoneEl = document.getElementById("profilePhone");
+  const codeEl = document.getElementById("profileCode");
+  const body = {};
+  if (phoneEl) body.phone = phoneEl.value.trim();
+  if (codeEl) body.custom_code = codeEl.value.trim();
+  if (!Object.keys(body).length) { toast("Nothing to save.", "info"); return; }
+  try { await api("/profile/update", "POST", body, true); toast("Profile saved!", "success"); }
   catch (err) { toast(err.message, "error"); }
 }
 
@@ -2404,14 +2829,29 @@ async function loadStats() {
      • links can be bookmarked/shared; logged-out visits to protected paths
        bounce to /sign-in and RETURN after successful login. */
 const ROUTES = {
-  "/dashboard": "overview", "/code": "code",
-  "/runspace": "jobs", "/jobs": "jobs",
+  "/bots": "jobs", "/dashboard": "jobs", "/code": "code",
   "/terminal": "term", "/term": "term",
-  "/admin": "admin", "/profile": "profile",
+  "/admin": "admin", "/profile": "profile", "/store": "store",
 };
-// /runspace/{username}/{tabname}          -> editor
-// /runspace/{username}/{tabname}/page     -> Details page (§5)
-const _JOB_PATH_RE = /^\/runspace\/([^/]+)\/([^/]+?)(\/page)?\/?$/;
+// Canonical: /bots/{job}[/{logs|details|database|env|settings}].
+// Legacy /runspace links are redirected server-side and remain parseable.
+const JOB_SECTIONS = new Set(["logs", "details", "database", "env", "versions", "settings"]);
+function parseJobPath(path) {
+  const clean = String(path || "").split(/[?#]/, 1)[0].replace(/\/+$/, "");
+  const bits = clean.split("/").filter(Boolean);
+  if (!["bots","runspace"].includes(bits[0]) || bits.length < 2 || bits.length > 4) return null;
+  const dec = (v) => { try { return decodeURIComponent(v); } catch (e) { return v; } };
+  if (bits.length === 2) return {slug: dec(bits[1]), section: "editor", legacy: false};
+  if (bits.length === 3) {
+    if (JOB_SECTIONS.has(bits[2])) return {slug: dec(bits[1]), section: bits[2], legacy: false};
+    return {slug: dec(bits[2]), section: "editor", legacy: true};
+  }
+  if (bits.length === 4) {
+    const section = bits[3] === "page" ? "details" : bits[3];
+    if (JOB_SECTIONS.has(section)) return {slug: dec(bits[2]), section, legacy: true};
+  }
+  return {invalid: true};
+}
 const TAB_PATHS = {};
 Object.keys(ROUTES).forEach(p => { if (!TAB_PATHS[ROUTES[p]]) TAB_PATHS[ROUTES[p]] = p; });
 const AUTH_ROUTES = {
@@ -2440,11 +2880,12 @@ function routeFromUrl() {
       return "blocked";
     }
     showScreen("screen-dashboard");
-    if (currentTab !== "overview") _switch("overview");
+    if (currentTab !== "jobs") _switch("jobs");
     if (typeof openActivityPanel === "function") openActivityPanel();
     return "tab";
   }
   if (ROUTES[p]) {                                  // protected section URL
+    if (p==="/dashboard"&&hasToken) {try{history.replaceState({},"","/bots");}catch(e){}}
     if (!hasToken) {                                // standard "return after login"
       try { sessionStorage.setItem("ahad_return_to", p); } catch (e2) {}
       history.replaceState({}, "", "/sign-in");
@@ -2455,8 +2896,8 @@ function routeFromUrl() {
     if (ROUTES[p] !== currentTab) _switch(ROUTES[p]);
     return "tab";
   }
-  // Deep link: /runspace/{username}/{slug} → open RunSpace and select the matching job.
-  const _jd = p.match(_JOB_PATH_RE);
+  // Per-job deep link, canonical or legacy.
+  const _jd = parseJobPath(p);
   if (_jd) {
     if (!hasToken) {
       try { sessionStorage.setItem("ahad_return_to", p); } catch (e2) {}
@@ -2465,34 +2906,37 @@ function routeFromUrl() {
       return "blocked";
     }
     showScreen("screen-dashboard");
-    const _slug = decodeURIComponent(_jd[2] || "");
-    const _wantDetails = !!_jd[3];            // the "/page" suffix
-    // Back/Forward between the editor and its Details page: the job is already
-    // selected, so just toggle the view instead of reloading everything.
+    if (_jd.invalid) {
+      window.__rs_deep_invalid = true;
+      if (currentTab !== "jobs") _switch("jobs");
+      return "not-found";
+    }
+    const _slug = _slugify(_jd.slug);
+    const _section = _jd.section || "editor";
     const _cur = (window._lastJobs || []).find(x => String(x.id) === String(_selectedJobId));
     if (currentTab === "jobs" && _cur && _slugify(_cur.name) === _slug) {
-      if (_wantDetails && !_jdOpen) openJobDetails(null, {noUrl: true});
-      else if (!_wantDetails && _jdOpen) closeJobDetails({noUrl: true});
+      _openJobSection(_section, true);
       return "tab";
     }
     window.__rs_deep_slug = _slug;
-    window.__rs_deep_details = _wantDetails;
+    window.__rs_deep_section = _section;
     if (currentTab !== "jobs") _switch("jobs");
     else _deepSelectJobBySlug(window.__rs_deep_slug);
     return "tab";
   }
   if (AUTH_ROUTES[p]) {
     if (hasToken) {                                 // signed-in users skip auth screens
-      history.replaceState({}, "", "/dashboard");
+      history.replaceState({}, "", "/bots");
       showScreen("screen-dashboard");
-      if (currentTab !== "overview") _switch("overview");
+      if (currentTab !== "jobs") _switch("jobs");
       return "tab";
     }
     showScreen(AUTH_ROUTES[p]);
     return "auth";
   }
-  if (p === "/" && hasToken) {                      // SaaS convention: / → /dashboard
-    try { history.replaceState({}, "", "/dashboard"); } catch (e3) {}
+  if (p === "/" && hasToken) {
+    try { history.replaceState({}, "", "/bots"); } catch (e3) {}
+    if (currentTab !== "jobs") _switch("jobs");
     return "tab";
   }
   return null;
@@ -2514,8 +2958,8 @@ function _consumeReturnTo() {
     // section while the dashboard was still loading (e.g. quick-click on
     // RunSpace right after sign-in) — the URL is the user's truth.
     const cur = _clientPath();
-    if (!ROUTES[cur] && cur !== "/dashboard") {
-      try { history.replaceState({}, "", "/dashboard"); } catch (e4) {}
+    if (!ROUTES[cur] && cur !== "/bots" && cur !== "/dashboard") {
+      try { history.replaceState({}, "", "/bots"); } catch (e4) {}
     }
   }
 }
@@ -2594,7 +3038,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try { if (typeof _jdOpen !== "undefined" && _jdOpen) closeJobDetails({ noUrl: true }); } catch (e) {}
     document.body.classList.remove(
       "rs-active", "rs-detail-open", "rs-drawer-open",
-      "rs-side-open", "rs-logs-open", "code-active", "term-kbd-up"
+      "rs-side-open", "rs-logs-open", "rs-launch-complete", "code-active", "term-kbd-up"
     );
 
     // Fade out, then swap screens on the next frame so the transition is seen.
@@ -2690,9 +3134,18 @@ document.addEventListener("DOMContentLoaded", () => {
     tab.addEventListener("click", () => switchTab(tab.dataset.tab));
   });
 
-  // Mobile bottom-nav items
-  document.querySelectorAll(".bn-item").forEach(b => {
+  // Mobile bottom-nav destinations. Add Bot is an action, not a fake tab.
+  document.querySelectorAll(".bn-item[data-tab]").forEach(b => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
+  const bnAddBot = document.getElementById("bnAddBot");
+  if (bnAddBot) bnAddBot.addEventListener("click", openAddBot);
+  const mobileFab = document.getElementById("mobileFabAdd");
+  if (mobileFab) mobileFab.addEventListener("click", openAddBot);
+  const rsAccountMenu = document.getElementById("rsAccountMenu");
+  if (rsAccountMenu) rsAccountMenu.addEventListener("click", () => {
+    if (typeof closeRsMoreMenu === "function") closeRsMoreMenu();
+    switchTab("profile");
   });
 
   // Password strength
@@ -2795,9 +3248,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Theme toggle wiring
-  const themeBtn = document.getElementById("themeBtn");
-  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+  // The theme toggle is gone from the markup — see the note in index.html.
+  // Both buttons only ever swapped their own icon: app.css maps light and
+  // dark to the same palette on purpose, so the control was inert.
 
   // Reveal-on-scroll (Stripe-style entrance animations)
   const revealEls = document.querySelectorAll(".reveal");
@@ -2832,6 +3285,44 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.__inTelegram) {
     document.documentElement.classList.add("booting");
 
+    /* KEEP THE SPLASH UP UNTIL SIGN-IN ACTUALLY FINISHES.
+     *
+     * index.html ends with a 4-second safety net that force-hides the splash
+     * "whatever went wrong". In a browser that is right — there is always a
+     * page underneath. Inside Telegram there is not: the dashboard cannot be
+     * drawn until a token exists, so at t=4s the net uncovered a dashboard
+     * with no data in it and the user was left looking at "Hello, User" with
+     * every panel empty. Measured on a cold-starting server, that state
+     * lasted 26 more seconds.
+     *
+     * The Mini App owns its own splash lifetime: it stays until done() or
+     * fail() runs, and _tgFatal() (which replaces it with a real message and
+     * a Try again button) is the backstop if neither ever does. */
+    window.__tgBootOwned = true;
+
+    /* Say what the wait IS. A spinner that never changes is indistinguishable
+     * from a frozen app, and "Securing your session…" is a lie once we are
+     * really waiting on a free-tier cold start. miniapp.js calls this. */
+    window.__tgBootNote = function (msg) {
+      const el = document.querySelector("#bootSplash .boot-text");
+      if (el) el.textContent = msg;
+    };
+
+    /* LAST RESORT, AND IT MUST NOT BE THE 4s ONE. If sign-in has neither
+     * succeeded nor failed after 70s, something is wrong in a way no retry
+     * inside miniapp.js has covered. Show a message with a button rather
+     * than an empty dashboard — the user can always act on a button. */
+    var _tgBootGuard = setTimeout(function () {
+      if (_bootOk) return;
+      document.documentElement.classList.remove("booting");
+      var sp = document.getElementById("bootSplash");
+      if (sp) sp.style.display = "none";
+      showScreen("screen-dashboard");
+      _tgFatal("The server is not responding. It may be waking up — tap Try "
+               + "again.");
+      _bootOk = true;
+    }, 70000);
+
     // NEVER an auth screen inside Telegram. A Mini App user has already
     // proven who they are by opening it; asking them to sign in is the exact
     // friction the Mini App exists to remove.
@@ -2843,6 +3334,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // who is already inside Telegram. Neither can now.
     const done = () => {
       _bootOk = true;
+      clearTimeout(_tgBootGuard);
       document.documentElement.classList.remove("booting");
       const sp = document.getElementById("bootSplash");
       if (sp) sp.style.display = "none";
@@ -2912,6 +3404,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // Boot accomplished — a fatal error from here gets a toast, not the overlay.
   _bootOk = true;
 
+  // Static UI preview badge (Termux "python -m http.server").
+  if (_demo.on) {
+    const dp = document.getElementById("demoPill");
+    if (dp) dp.hidden = false;
+    // Route "/" keeps currentTab="jobs" without calling switchTab(), so the
+    // jobs poller never starts. In the local demo, start it once so the
+    // sample bots actually appear on load.
+    if (currentTab === "jobs" && typeof startJobPolling === "function") startJobPolling();
+  }
+
   // Drop the boot splash now that a screen has been chosen.
   document.documentElement.classList.remove("booting");
   const splash = document.getElementById("bootSplash");
@@ -2921,7 +3423,7 @@ document.addEventListener("DOMContentLoaded", () => {
 /* The ONLY thing a Mini App user ever sees instead of the dashboard.
    Not a login form — an error with a retry, because a new Telegram id is
    supposed to create an account silently rather than fail. */
-function _tgFatal(message) {
+function _tgFatal(message, opts) {
   let el = document.getElementById("tgFatal");
   if (!el) {
     el = document.createElement("div");
@@ -2930,13 +3432,55 @@ function _tgFatal(message) {
     const p = document.createElement("p");
     p.id = "tgFatalMsg";
     const b = document.createElement("button");
+    b.id = "tgFatalBtn";
     b.className = "btn-primary";
     b.textContent = "Try again";
     b.onclick = () => location.reload();
-    el.append(p, b);
+    /* THE SECOND BUTTON EXISTS FOR ONE FAILURE THAT RELOADING CANNOT FIX.
+     *
+     * When the Mini App was opened from the WRONG bot — overwhelmingly, an
+     * old message from a bot that has since been replaced — the payload is
+     * signed with that bot's token and this server can never verify it.
+     * "Try again" re-runs the identical request from the identical button
+     * and fails identically, forever. The only exit is to open the CURRENT
+     * bot, and the server already knows which one that is, so the app can
+     * offer it as a link instead of describing it. */
+    const a = document.createElement("a");
+    a.id = "tgFatalGo";
+    a.className = "btn-primary";
+    a.hidden = true;
+    a.textContent = "Open the right bot";
+    el.append(p, b, a);
     document.body.appendChild(el);
   }
   document.getElementById("tgFatalMsg").textContent = message;
+
+  /* Pull the bot's @username out of the server's own wording rather than
+   * adding a second source of truth that could disagree with it. */
+  const go = document.getElementById("tgFatalGo");
+  const btn = document.getElementById("tgFatalBtn");
+  const at = (opts && opts.bot) || (String(message).match(/@([A-Za-z0-9_]{4,})/) || [])[1];
+  if (at) {
+    go.href = "https://t.me/" + at;
+    go.textContent = "Open @" + at;
+    go.hidden = false;
+    go.onclick = function (e) {
+      // Inside Telegram, openTelegramLink switches to the chat in-app; a
+      // plain navigation would try to load t.me INSIDE the webview.
+      const TG = window.Telegram && window.Telegram.WebApp;
+      if (TG && typeof TG.openTelegramLink === "function") {
+        e.preventDefault();
+        try { TG.openTelegramLink(go.href); } catch (err) {}
+        try { if (typeof TG.close === "function") TG.close(); } catch (err) {}
+      }
+    };
+    // Reloading is the WRONG default here, so it stops looking like the
+    // primary action.
+    btn.className = "btn-ghost";
+  } else {
+    go.hidden = true;
+    btn.className = "btn-primary";
+  }
   el.hidden = false;
 }
 
@@ -3034,6 +3578,10 @@ function initJobCodeMirror() {
         if (_jobCmLoading) return;          // programmatic load, not a user edit
         const wasDirty = _jobDirty;
         _jobDirty = true;
+        if (_composingNew && _rsBotAnalysis) {
+          _rsBotAnalysis=null;
+          _setBotWizardStage("code");
+        }
         if (_chgRaf) return;
         _chgRaf = requestAnimationFrame(() => {
           _chgRaf = 0;
@@ -3105,25 +3653,40 @@ function _deepSelectJobBySlug(slug) {
   if (j) selectJob(j.id);
 }
 function _jobBasePath(job) {
-  const u = (window.__user && window.__user.username) ? window.__user.username : null;
-  if (!u || !job || !job.name) return null;
-  return "/runspace/" + encodeURIComponent(u) + "/" + _slugify(job.name);
+  if (!job || !job.name) return null;
+  return "/bots/" + _slugify(job.name);
 }
 
-/* Keep the address bar in sync with the job AND with which view is showing.
-   Editor  -> /runspace/{username}/{tabname}
-   Details -> /runspace/{username}/{tabname}/page          (§5) */
+function _sectionToTab(section) {
+  return ({logs:"logs", details:"metrics", database:"files", env:"env",
+           versions:"versions", settings:"settings"})[section] || "code";
+}
+function _openJobSection(section, noUrl) {
+  section = section || "editor";
+  if (section === "editor") {
+    if (_jdOpen) closeJobDetails({noUrl: !!noUrl});
+    return;
+  }
+  if (!_jdOpen) openJobDetails(null, {noUrl: true, section});
+  jdSwitchTab(_sectionToTab(section));
+}
+
+/* Keep the address bar in sync with the selected job and detail section. */
 function _updateJobUrl(job, opts) {
   try {
     const base = _jobBasePath(job);
     if (!base) return;
-    const wantDetails = opts && opts.details !== undefined ? opts.details : _jdOpen;
-    const path = base + (wantDetails ? "/page" : "");
+    let section = opts && opts.section;
+    if (!section && (opts && opts.details !== undefined ? opts.details : _jdOpen)) {
+      section = ({logs:"logs", metrics:"details", files:"database", env:"env", versions:"versions",
+                  settings:"settings"})[_jdTab] || "details";
+    }
+    const path = base + (section ? "/" + section : "");
     if (_clientPath() === path || _routeNav) return;
     // Editor <-> Details is a real navigation inside the job, so PUSH it:
     // the browser Back button then returns to the editor as users expect.
-    if (opts && opts.push) history.pushState({tab:"jobs", jobId:job.id, details:!!wantDetails}, "", path);
-    else history.replaceState({tab:"jobs", jobId:job.id, details:!!wantDetails}, "", path);
+    if (opts && opts.push) history.pushState({tab:"jobs", jobId:job.id, section:section || "editor"}, "", path);
+    else history.replaceState({tab:"jobs", jobId:job.id, section:section || "editor"}, "", path);
   } catch (e) {}
 }
 
@@ -3137,6 +3700,7 @@ function _updateJobUrl(job, opts) {
 // We never infer state from array length — an empty array while 'loading'
 // must NEVER flash the "no jobs" empty state.
 let _jobsStatus = "idle";
+let _jobsLoadBusy = false;
 
 function _setJobsStatus(status) {
   _jobsStatus = status;
@@ -3164,16 +3728,16 @@ function _setJobsStatus(status) {
       if (!list.querySelector(".job-item")) list.innerHTML = _skel(4);
     }
   } else if (status === "empty") {
-    // Confirmed: zero jobs exist. Show the "No RunSpace yet" panel.
+    // Confirmed: zero jobs exist. Show the "No bots yet" panel.
     ws.style.display = "none";
     if (boot) boot.style.display = "none";
     emp.style.display = "";
     if (btnNewEmpty) btnNewEmpty.style.display = "";
-    // Tweak copy from generic "No job selected" to first-run messaging
+    // Tweak copy from generic "No bot selected" to first-run messaging
     const t = emp.querySelector(".rs-empty-title");
     const s = emp.querySelector(".rs-empty-sub");
-    if (t) t.textContent = "No RunSpace yet";
-    if (s) s.textContent = "Create your first 24/7 bot or service — it goes live in seconds.";
+    if (t) t.textContent = "No bots yet";
+    if (s) s.textContent = "Verify a BotFather token, paste the bot code, then run it 24/7.";
     if (list) list.innerHTML = '<div class="rs-empty-sm" style="padding:16px 12px;text-align:center">No saved jobs yet.</div>';
   } else if (status === "error") {
     // NEVER hide the workspace here. A failed background refresh used to set
@@ -3194,7 +3758,7 @@ function _setJobsStatus(status) {
     }
     const t = emp.querySelector(".rs-empty-title");
     const s = emp.querySelector(".rs-empty-sub");
-    if (t) t.textContent = "Couldn’t load RunSpace";
+    if (t) t.textContent = "Couldn’t load your bots";
     if (s) s.textContent = "The server may be waking up. Tap Retry in a moment.";
     // Swap the new-job button handler for a retry handler
     if (btnNewEmpty && btnNewEmpty && !btnNewEmpty._errWired) {
@@ -3211,17 +3775,23 @@ function _setJobsStatus(status) {
   }
 }
 
+function _botCacheKey(){let h=2166136261;for(const ch of String(authToken||"")){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}return "codenest_bots_"+(h>>>0).toString(36);}
+function _readBotCache(){try{const x=JSON.parse(localStorage.getItem(_botCacheKey())||"null");return x&&Date.now()-x.at<86400000&&Array.isArray(x.jobs)?x.jobs:null;}catch(e){return null;}}
+function _saveBotCache(jobs){try{const safe=(jobs||[]).map(j=>({id:j.id,name:j.name,language:j.language,status:j.status,restarts:j.restarts||0,telegram_bot_detected:!!j.telegram_bot_detected,telegram_bot_username:j.telegram_bot_username||null,telegram_bot_url:j.telegram_bot_url||null}));localStorage.setItem(_botCacheKey(),JSON.stringify({at:Date.now(),jobs:safe}));}catch(e){}}
+
 async function loadJobs() {
   const list = document.getElementById("jobsList");
-  if (!list) return;
-  // Always enter 'loading' first. Stale-while-revalidate: if we already have
-  // job rows on screen from a previous successful load, leave them in place
-  // instead of swapping to skeleton (avoids flicker). Only show skeleton
-  // when there is no prior content.
+  if (!list || _jobsLoadBusy) return;
+  _jobsLoadBusy = true;
+  // Paint the last safe metadata immediately on refresh while the local DB
+  // request runs. The cache key is session-derived, so another account never
+  // sees this list.
+  if(!window._lastJobs){const cached=_readBotCache();if(cached&&cached.length){window._lastJobs=cached;_renderJobList(cached);}}
+  // Always enter 'loading' first. Stale-while-revalidate keeps cached/real rows.
   const hasPrior = !!(window._lastJobs && window._lastJobs.length) || !!list.querySelector(".job-item");
   // SECOND leak of the same class as the one below, and the one that actually
   // fires FIRST. _setJobsStatus("loading") does `ws.style.display = "none"`.
-  // On an account with zero saved jobs hasPrior is false, so every 7s poll
+  // On an account with zero saved jobs hasPrior is false, so every background poll
   // hid the workspace here — BEFORE the _composingNew guard further down ever
   // ran. An editor the user is typing into owns the main pane; a background
   // refresh may never take it away, so skip the visual state change entirely
@@ -3232,7 +3802,9 @@ async function loadJobs() {
   try {
     const data = await api("/api/jobs", "GET", null, true);
     const jobs = (data && data.jobs) || [];
-    const sig = jobs.map(j => [j.id, j.status, j.restarts, j.web ? 1 : 0, j.web_public === false ? 0 : 1].join(":")).join("|");
+    _saveBotCache(jobs);
+    const sig = jobs.map(j => [j.id, j.status, j.restarts, j.web ? 1 : 0, j.web_public === false ? 0 : 1,
+      j.telegram_bot_detected ? 1 : 0, j.telegram_bot_username || "", j.telegram_check_status || ""].join(":")).join("|");
     _lastJobsTs = Date.now();
 
     // The user is writing a brand-new job, or has unsaved edits in the open
@@ -3245,8 +3817,8 @@ async function loadJobs() {
       // above correctly avoids _showEmpty()/_showWorkspace() — but then
       // called _setJobsStatus("empty"), and THAT function does
       // `ws.style.display = "none"` on the workspace (see the "empty" branch).
-      // So on an account with zero saved jobs, every 7s poll hid the blank
-      // New editor and swapped in the "No RunSpace yet" panel. It looked
+      // So on an account with zero saved jobs, every background poll hid the blank
+      // New editor and swapped in the "No bots yet" panel. It looked
       // exactly like a spontaneous page reload, and it also explains the
       // stray word on screen: that panel's subtitle is the sentence
       // "...it goes live in seconds."
@@ -3270,11 +3842,20 @@ async function loadJobs() {
     else {
       // Sig matched (nothing changed) — still make sure the right main
       // pane is visible: if we had a selected job, show workspace; else
-      // show the "No job selected" empty panel (different copy from zero-jobs).
+      // show the "No bot selected" empty panel (different copy from zero-jobs).
       if (_selectedJobId) {
         const cur = jobs.find(x => String(x.id) === String(_selectedJobId));
-        if (cur) { _showWorkspace(cur); _updateJobUrl(cur); }
-        else { _selectedJobId = null; _showEmpty(false); }
+        if (cur) {
+          // A status poll must not remount/refresh CodeMirror. That scheduled
+          // editor work every seven seconds even when nothing changed.
+          window._lastJobs = jobs;
+          _reflectJobStatus(cur);
+          if(_launchSuccessJobId&&String(_launchSuccessJobId)===String(_selectedJobId))return;
+          _renderTelegramBot(cur);
+          const ws=document.getElementById("wbWorkspace");
+          if(ws&&ws.style.display==="none")_showWorkspace(cur,false);
+          if(document.body.classList.contains("rs-insp-open"))renderInspector();
+        } else { _selectedJobId = null; _showEmpty(false); }
       } else {
         _showEmpty(false);
       }
@@ -3295,6 +3876,8 @@ async function loadJobs() {
     _lastJobsSig = sig;
     _setJobsStatus("error");
     _loadErrorBox(list, "deployments", loadJobs, e);
+  } finally {
+    _jobsLoadBusy = false;
   }
 }
 
@@ -3309,10 +3892,12 @@ function _fmtUptime(s) {
 let _selectedJobId = null;
 let _logSSE = null;
 let _logFollow = true;
+let _streamChromeAt = 0;
+let _streamChromeState = "";
 let _jobDirty = false;          // code changed since last deploy (enables Run button)
 let _suppressAutoSelect = 0;   // ms epoch until which renderJobs() must NOT auto-select a job (New-flow race guard)
 // TRUE from the moment "New" is clicked until the job is actually deployed.
-// The old guard was a 1500ms timer, but the jobs list polls every 7s — so the
+// The old guard was a 1500ms timer, but the jobs list polls in the background — so the
 // first poll after that window auto-selected an existing job and wiped the
 // blank editor while the user was still typing (it looked like a page reload).
 let _composingNew = false;
@@ -3431,29 +4016,309 @@ function _renderLogs(text, force) {
  *  Removing + reflowing + re-adding is required: re-adding a class that is
  *  already present does not restart a CSS animation. */
 function _playSwap(el) {
-  if (!el) return;
+  if (!el || typeof el.animate !== "function") return;
   try {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    el.classList.remove("rs-swap");
-    void el.offsetWidth;                 // force reflow so the animation restarts
-    el.classList.add("rs-swap");
-    setTimeout(() => el.classList.remove("rs-swap"), 260);
+    // Compositor-only feedback. The old animation forced synchronous layout
+    // on every bot switch, so its decoration caused the perceived lag.
+    el.animate([{opacity:.88},{opacity:1}], {duration:120,easing:"ease-out"});
   } catch (e) {}
 }
 
+let _rsVerifiedBotToken = "";
+let _rsVerifiedBotMeta = null;
+let _rsTelegramVerificationId = "";
+let _rsBotAnalysis = null;
+
+function _rsWizardStep(step) {
+  const order=["connect","code"];
+  const at=Math.max(0,order.indexOf(step));
+  document.querySelectorAll("#rsTgSetup [data-rs-step]").forEach(el=>{
+    const i=order.indexOf(el.dataset.rsStep);
+    el.classList.toggle("is-active",i===at);
+    el.classList.toggle("is-done",i<at);
+  });
+}
+
+function _setBotWizardStage(stage) {
+  const source=stage==="code",connect=stage==="connect";
+  document.body.classList.toggle("rs-step-code",source);
+  document.body.classList.toggle("rs-step-connect",connect);
+  const codeStage=document.getElementById("rsTgCodeStage");if(codeStage)codeStage.hidden=!source;
+  const connectStage=document.getElementById("rsTgConnectStage");if(connectStage)connectStage.hidden=!connect;
+  const analysis=document.getElementById("rsTgAnalysis");if(analysis)analysis.hidden=true;
+  const config=document.getElementById("rsTemplateConfig");if(config)config.hidden=true;
+  _rsWizardStep(stage);
+  const main=document.querySelector("#tab-jobs .rs-main");if(main)main.scrollTop=0;
+}
+
+let _rsTemplates=[];
+let _rsTemplateCategory="All";
+let _rsTemplateEnvFields=[];
+let _rsTemplateEnvValues={};
+let _rsTemplateAfterDeploy="";
+let _rsTemplateDeploying=false;
+
+function _setRunSpaceSourceMode(mode) {
+  const map={own:"rsUseOwnCode",template:"rsBrowseTemplates",upload:"rsUploadCode"};
+  Object.entries(map).forEach(([key,id])=>document.getElementById(id)?.classList.toggle("is-active",key===mode));
+  document.body.classList.toggle("rs-own-code-editor",mode==="own");
+  const deploy=document.getElementById("rsTgAnalyze");if(deploy)deploy.hidden=!mode;
+  const change=document.getElementById("rsChangeSource");if(change)change.hidden=!mode;
+}
+
+function _newTemplateSecret() {
+  try{const bytes=new Uint8Array(8);crypto.getRandomValues(bytes);return [...bytes].map(v=>(v%36).toString(36)).join("").toUpperCase();}
+  catch(e){return Math.random().toString(36).slice(2,10).toUpperCase();}
+}
+
+function _renderTemplateConfig(fields,afterDeploy) {
+  _rsTemplateEnvFields=Array.isArray(fields)?fields:[];
+  _rsTemplateEnvValues={};
+  _rsTemplateAfterDeploy=afterDeploy||"";
+  const box=document.getElementById("rsTemplateConfig"),host=document.getElementById("rsTemplateConfigFields");
+  if(!box||!host)return;
+  host.textContent="";box.hidden=true;
+  _rsTemplateEnvFields.forEach(field=>{
+    const label=document.createElement("label");label.className="field";
+    const title=document.createElement("span");title.textContent=field.label+(field.required?" · required":"");
+    const input=document.createElement("input");input.className="input-text";input.type=field.type==="generated"?"text":field.type||"text";input.placeholder=field.placeholder||"";input.dataset.envKey=field.key;input.required=!!field.required;
+    if(field.type==="generated"){input.value=_newTemplateSecret();input.readOnly=true;}
+    label.appendChild(title);
+    if(field.type==="generated"){
+      const row=document.createElement("div");row.className="rs-config-input-row";const copy=document.createElement("button");copy.type="button";copy.className="btn-ghost";copy.textContent="Copy";copy.onclick=async()=>{input.select();try{await navigator.clipboard.writeText(input.value);toast("Claim code copied","success");}catch(e){toast("Select and copy the claim code","info");}};row.append(input,copy);label.appendChild(row);
+    }else label.appendChild(input);
+    if(field.help){const help=document.createElement("small");help.textContent=field.help;label.appendChild(help);}
+    host.appendChild(label);
+  });
+  if(_rsTemplateAfterDeploy){const note=document.createElement("div");note.className="rs-template-after";const b=document.createElement("b");b.textContent="After deploy";const span=document.createElement("span");span.textContent=_rsTemplateAfterDeploy;note.append(b,span);host.appendChild(note);}
+}
+
+function _collectTemplateEnv(showError) {
+  // Template deploy is one tap: values are pre-filled silently (generated
+  // claim codes, defaults). Optional API keys can be added later in bot
+  // settings, so nothing here ever blocks the run.
+  const values={..._rsTemplateEnvValues};
+  _rsTemplateEnvFields.forEach(field=>{
+    const input=document.querySelector(`#rsTemplateConfigFields [data-env-key="${field.key}"]`);
+    const value=(input?.value||"").trim();
+    if(value)values[field.key]=value;
+  });
+  return values;
+}
+
+function _renderRunSpaceTemplates() {
+  const grid=document.getElementById("rsTemplateGrid"),cats=document.getElementById("rsTemplateCategories");
+  if(!grid||!cats)return;
+  const search=(document.getElementById("rsTemplateSearch")?.value||"").trim().toLowerCase();
+  const categories=["All",...new Set(_rsTemplates.map(t=>t.category).filter(Boolean))];
+  cats.textContent="";
+  categories.forEach(category=>{const b=document.createElement("button");b.type="button";b.className="rs-template-chip"+(category===_rsTemplateCategory?" is-active":"");b.textContent=category;b.onclick=()=>{_rsTemplateCategory=category;_renderRunSpaceTemplates();};cats.appendChild(b);});
+  grid.textContent="";
+  const shown=_rsTemplates.filter(t=>(_rsTemplateCategory==="All"||t.category===_rsTemplateCategory)&&(!search||`${t.name} ${t.description} ${t.framework}`.toLowerCase().includes(search)));
+  shown.forEach(t=>{
+    const card=document.createElement("button");card.type="button";card.className="rs-template-card";
+    const top=document.createElement("span");top.className="rs-template-card-top";
+    const icon=document.createElement("span");icon.className="rs-template-card-icon";icon.textContent=t.language==="javascript"?"JS":"PY";
+    const title=document.createElement("b");title.textContent=t.name;top.append(icon,title);
+    if(t.badge||t.requires_setup){const badge=document.createElement("em");badge.textContent=t.badge||(t.requires_setup?"Setup":"");top.appendChild(badge);}
+    const desc=document.createElement("span");desc.className="rs-template-card-desc";desc.textContent=t.description;
+    const meta=document.createElement("small");meta.textContent=`${t.framework} · ${t.category}`;
+    card.append(top,desc,meta);card.onclick=()=>_applyRunSpaceBotTemplate(t.id,t.name);grid.appendChild(card);
+  });
+  if(!shown.length){const empty=document.createElement("div");empty.className="adm-empty";empty.textContent="No matching templates.";grid.appendChild(empty);}
+}
+
+async function _loadRunSpaceBotTemplates() {
+  if(_rsTemplates.length)return;
+  try{const data=await api("/api/telegram-bot/templates","GET",null,true);_rsTemplates=data.templates||[];_renderRunSpaceTemplates();}
+  catch(e){toast("Could not load templates","error");}
+}
+
+async function _openRunSpaceTemplates() {
+  // This is the product's own screen, so bring it up before the picker —
+  // otherwise "Use a template" from Overview would open a modal over the
+  // analytics page and the wizard would be in an invisible tab behind it.
+  switchTab("jobs");
+  await _loadRunSpaceBotTemplates();
+  _rsTemplateCategory="All";
+  const search=document.getElementById("rsTemplateSearch");if(search)search.value="";
+  _renderRunSpaceTemplates();openModal("rsTemplateModal");setTimeout(()=>search?.focus(),60);
+}
+
+async function _applyRunSpaceBotTemplate(templateId,templateName) {
+  if(!templateId)return;
+  if(_rsTemplateDeploying)return;
+  if((_jobCmGetValue()||"").trim()&&!confirm("Replace the current code with this template?"))return;
+  _rsTemplateDeploying=true;
+  try{
+    const item=await api(`/api/telegram-bot/templates/${encodeURIComponent(templateId)}`,"GET",null,true);
+    _jobCmSetValue(item.code||"");
+    const lang=document.getElementById("jobLang");if(lang){lang.value=item.language;_jobCmSetMode(item.language);}
+    const name=document.getElementById("jobName");if(name&&!name.value.trim())name.value=item.name.replace(/ bot$/i,"");
+    _renderTemplateConfig(item.env_fields||[],item.after_deploy||"");
+    _rsTemplateEnvValues=_collectTemplateEnv(false)||{};
+    _setRunSpaceSourceMode("template");
+    const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${templateName||item.name} selected`;
+    closeModal("rsTemplateModal");_rsBotAnalysis=null;_setBotWizardStage("code");
+    toast(`Deploying ${item.name}…`,"info");
+    await _analyzeRunSpaceBot();
+  }catch(e){toast(e.message,"error");}
+  finally{_rsTemplateDeploying=false;}
+}
+
+async function _analyzeRunSpaceBot() {
+  const code=_jobCmGetValue();
+  const language=(document.getElementById("jobLang")||{}).value||"python";
+  const btn=document.getElementById("rsTgAnalyze");
+  if(!_rsVerifiedBotToken){_setBotWizardStage("connect");toast("Verify the BotFather token first","info");return;}
+  if(!code.trim()){toast("Paste or upload the bot code first","error");_jobCmFocus();return;}
+  const setupValues=_collectTemplateEnv(false)||{};
+  try {
+    if(btn){btn.disabled=true;btn.classList.add("is-loading");btn.textContent="Deploying…";}
+    _rsBotAnalysis=await api("/api/telegram-bot/analyze","POST",{code,language},true);
+    let launchUrl=(_rsVerifiedBotMeta&&(_rsVerifiedBotMeta.telegram_bot_url||_rsVerifiedBotMeta.url))||"";
+    if(setupValues.ADMIN_CLAIM_CODE&&launchUrl)launchUrl+=(launchUrl.includes("?")?"&":"?")+"start=claim_"+encodeURIComponent(setupValues.ADMIN_CLAIM_CODE);
+    await startJob({launchAfterDeploy:true,launchUrl});
+    if(!document.body.classList.contains("rs-launch-complete"))toast("Deployment did not finish. Tap Deploy bot to retry.","error");
+    else if(_rsTemplateAfterDeploy)toast("Deployed. "+_rsTemplateAfterDeploy,"success");
+  } catch(e){toast(e.message,"error");}
+  finally{if(btn){btn.disabled=false;btn.classList.remove("is-loading");btn.textContent="Deploy bot";}}
+}
+
+async function _verifyRunSpaceTelegramBot() {
+  const input=document.getElementById("rsTgToken");
+  const btn=document.getElementById("rsTgVerify");
+  const state=document.getElementById("rsTgVerifyState");
+  const token=(input&&input.value||"").trim();
+  if(!token){if(state){state.textContent="Paste the token from @BotFather first.";state.className="rs-tg-verify-state err";}return;}
+  try{
+    if(btn){btn.disabled=true;btn.classList.add("is-loading");btn.textContent="Verifying…";}
+    if(state){state.textContent="Verifying bot…";state.className="rs-tg-verify-state";}
+    const meta=await api("/api/telegram-bot/verify","POST",{token},true);
+    _rsVerifiedBotToken=token;_rsVerifiedBotMeta=meta;
+    _rsTelegramVerificationId=meta.telegram_verification_id||"";
+    const name=document.getElementById("jobName");
+    if(name){const username=(meta.telegram_bot_username||meta.username||"").replace(/^@/,"");name.value=(username.replace(/bot$/i,"")||"telegram")+"-"+(meta.telegram_bot_id||Date.now().toString().slice(-5));}
+    if(state){state.textContent="Verified. Choose how to build your bot.";state.className="rs-tg-verify-state ok";}
+    _setBotWizardStage("code");
+  }catch(e){
+    _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";
+    if(state){state.textContent=e.message;state.className="rs-tg-verify-state err";}
+  }finally{if(btn){btn.disabled=false;btn.classList.remove("is-loading");btn.textContent="Verify bot";}}
+}
+
+function _resetRunSpaceTelegramDraft(){
+  _rsVerifiedBotToken="";_rsVerifiedBotMeta=null;_rsTelegramVerificationId="";_rsBotAnalysis=null;
+  const input=document.getElementById("rsTgToken");if(input)input.value="";
+  const state=document.getElementById("rsTgVerifyState");if(state){state.textContent="";state.className="rs-tg-verify-state";}
+  const analysis=document.getElementById("rsTgAnalysis");if(analysis){analysis.hidden=true;analysis.textContent="";}
+  const analyze=document.getElementById("rsTgAnalyze");if(analyze){analyze.textContent="Deploy bot";analyze.hidden=true;analyze.classList.remove("is-loading");}
+  const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||7} complete bot products`;
+  _renderTemplateConfig([]);
+  _setRunSpaceSourceMode(null);
+  _setBotWizardStage("connect");
+}
+
+const _botHealthCache = new Map();
+let _botHealthTimer = null;
+
+function _botHealthLabel(h) {
+  const labels={healthy:"Webhook healthy",running_unconfirmed:"Process running · delivery not yet confirmed",duplicate_poller:"Another server is polling this token",webhook_conflict:"Polling blocked by an active webhook",webhook_missing:"Webhook is not configured",webhook_error:"Telegram reports a webhook error",invalid_token:"Token rejected by Telegram",telegram_ready:"Telegram verified",unknown:"Health unknown"};
+  return labels[(h&&h.delivery_status)||"unknown"]||h.delivery_status;
+}
+
+function _applyRunSpaceBotHealth(h) {
+  const label=_botHealthLabel(h);
+  const state=document.getElementById("rsBotState");if(state)state.textContent=label;
+  const menuState=document.getElementById("rsMenuBotState");if(menuState)menuState.textContent=label;
+  const bad=["duplicate_poller","webhook_conflict","webhook_missing","webhook_error","invalid_token"].includes(h.delivery_status);
+  const live=h.process_status==="running"&&!bad;
+  const box=document.getElementById("rsBotCallout");if(box){box.classList.toggle("is-bad",bad);box.classList.toggle("is-live",live);}
+  const dot=document.getElementById("rsMenuStatusDot");if(dot)dot.className="rs-menu-status-dot"+(bad?" problem":live?" running":h.process_status==="starting"?" starting":"");
+}
+
+async function _checkRunSpaceBotHealth(options) {
+  options=options||{};
+  const id=String(options.id||_selectedJobId||"");
+  const btn=document.getElementById("rsBotHealth");
+  if(!id)return;
+  const cached=_botHealthCache.get(id);
+  if(!options.force&&cached&&Date.now()-cached.at<45000){if(String(_selectedJobId)===id)_applyRunSpaceBotHealth(cached.data);return;}
+  try{
+    if(btn&&String(_selectedJobId)===id){btn.disabled=true;btn.textContent="Checking…";}
+    const h=await api(`/api/jobs/${id}/telegram-health`,"GET",null,true);
+    _botHealthCache.set(id,{at:Date.now(),data:h});
+    if(String(_selectedJobId)===id)_applyRunSpaceBotHealth(h);
+  }catch(e){
+    if(!options.silent&&String(_selectedJobId)===id){const state=document.getElementById("rsBotState");if(state)state.textContent=e.message;}
+  }finally{if(btn&&String(_selectedJobId)===id){btn.disabled=false;btn.textContent="Check health";}}
+}
+
+function _startBotHealthPolling(){
+  if(_botHealthTimer)clearInterval(_botHealthTimer);
+  setTimeout(()=>_checkRunSpaceBotHealth({silent:true}),300);
+  _botHealthTimer=setInterval(()=>{if(!document.hidden&&_selectedJobId)_checkRunSpaceBotHealth({silent:true});},60000);
+}
+function _stopBotHealthPolling(){if(_botHealthTimer){clearInterval(_botHealthTimer);_botHealthTimer=null;}}
+
+function _renderTelegramBot(job) {
+  const box=document.getElementById("rsBotCallout");
+  if(!box)return;
+  const detected=!!(job && job.telegram_bot_detected);
+  box.hidden=!detected;
+  if(!detected)return;
+  const username=job.telegram_bot_username || "";
+  const status=String(job.status || "unknown").toLowerCase();
+  const check=job.telegram_check_status || "unverified";
+  const running=["running","starting","installing","restarting"].includes(status);
+  const name=document.getElementById("rsBotName");
+  if(name)name.textContent=username ? `@${username}` : "Telegram bot detected";
+  const state=document.getElementById("rsBotState");
+  if(state){
+    if(check === "invalid_token") state.textContent="Token was rejected by Telegram";
+    else if(running && check === "verified") state.textContent="Running · Telegram identity verified";
+    else if(running) state.textContent="Job is running · Telegram check unavailable";
+    else state.textContent=`Detected · job is ${status || "not running"}`;
+  }
+  box.classList.toggle("is-live", running && check !== "invalid_token");
+  box.classList.toggle("is-bad", check === "invalid_token" || status === "crashed");
+  const link=document.getElementById("rsBotGo");
+  if(link){
+    const url=job.telegram_bot_url || (username ? `https://t.me/${username}` : "");
+    link.hidden=!url;
+    if(url)link.href=url; else link.removeAttribute("href");
+  }
+}
+
+let _launchSuccessJobId=null;
+function _hideBotLaunchPage(){_launchSuccessJobId=null;document.body.classList.remove("rs-launch-complete");const page=document.getElementById("rsLaunchSuccess");if(page)page.hidden=true;}
+function _showBotLaunchPage(job,url){
+  _launchSuccessJobId=String(job.id||job.job_db_id||"");document.body.classList.add("rs-launch-complete");
+  const page=document.getElementById("rsLaunchSuccess"),go=document.getElementById("rsLaunchGo");
+  const ws=document.getElementById("wbWorkspace"),emp=document.getElementById("wbEmpty"),boot=document.getElementById("wbBootLoader");
+  if(ws)ws.style.display="none";if(emp)emp.style.display="none";if(boot)boot.style.display="none";
+  if(go){go.href=url||job.telegram_bot_url||"#";go.textContent="Go to bot";}
+  if(page)page.hidden=false;
+}
+
 function _showWorkspace(job, animate) {
+  _hideBotLaunchPage();
   const emp = document.getElementById("wbEmpty");
   const ws = document.getElementById("wbWorkspace");
   const boot = document.getElementById("wbBootLoader");
+  const wasHidden = !ws || ws.style.display === "none";
   if (emp) emp.style.display = "none";
   if (ws)  ws.style.display = "flex";
   if (boot) boot.style.display = "none";
   if (animate) _playSwap(ws);
   _reflectJobStatus(job);
-  _jobCmRefresh();
+  _renderTelegramBot(job);
+  if (wasHidden) _jobCmRefresh();
 }
 
 function _clearWorkspaceChrome() {
+  _renderTelegramBot(null);
   const body = document.getElementById("jobLogBody");
   if (body) body.innerHTML = '<span class="rs-log-empty">// Logs will appear here when you run the job.</span>';
   const dot = document.getElementById("jobLogTitle");
@@ -3467,7 +4332,21 @@ function _clearWorkspaceChrome() {
   if (btnStop) btnStop.style.display = "none";
   if (btnRest) btnRest.style.display = "none";
 }
+function _showMissingJob(slug) {
+  const emp = document.getElementById("wbEmpty");
+  const ws = document.getElementById("wbWorkspace");
+  const boot = document.getElementById("wbBootLoader");
+  if (emp) emp.style.display = "";
+  if (ws) ws.style.display = "none";
+  if (boot) boot.style.display = "none";
+  const title = emp && emp.querySelector(".rs-empty-title");
+  const sub = emp && emp.querySelector(".rs-empty-sub");
+  if (title) title.textContent = "Job not found";
+  if (sub) sub.textContent = `The shared job “${slug}” was deleted or you do not have access.`;
+}
+
 function _showEmpty(zeroJobs) {
+  _hideBotLaunchPage();
   const emp = document.getElementById("wbEmpty");
   const ws  = document.getElementById("wbWorkspace");
   const boot = document.getElementById("wbBootLoader");
@@ -3487,10 +4366,10 @@ function _showEmpty(zeroJobs) {
   if (btnNewEmpty) btnNewEmpty.style.display = "";
   const t = emp && emp.querySelector(".rs-empty-title");
   const s = emp && emp.querySelector(".rs-empty-sub");
-  if (t) t.textContent = zeroJobs ? "No RunSpace yet" : "No job selected";
+  if (t) t.textContent = zeroJobs ? "No bots yet" : "No bot selected";
   if (s) s.textContent = zeroJobs
-    ? "Create your first 24/7 bot or service — it goes live in seconds."
-    : "Create a new job or pick one from the left to start editing.";
+    ? "Verify a BotFather token, paste the bot code, then run it 24/7."
+    : "Add a bot or pick one from the list.";
   const n = document.getElementById("jobName"); if (n) n.value = "";
   const langEl = document.getElementById("jobLang");
   if (langEl) langEl.value = "python";
@@ -3499,10 +4378,10 @@ function _showEmpty(zeroJobs) {
   _clearWorkspaceChrome();
   _setHint("", "Ready");
   _updateStats();
-  // Reset URL to plain /runspace when nothing is selected
+  // Reset URL to plain /bots when nothing is selected
   try {
     if (currentTab === "jobs" && !_routeNav) {
-      history.replaceState({tab:"jobs"}, "", "/runspace");
+      history.replaceState({tab:"jobs"}, "", "/bots");
     }
   } catch (e) {}
 }
@@ -3539,6 +4418,23 @@ function _updateStats() {
   el.textContent = txt;
 }
 
+function _renderMenuBotStatus(job, stKey, st) {
+  const box=document.getElementById("rsMenuCurrent");
+  const del=document.getElementById("btnDeleteInMenu");
+  const has=!!job&&!_composingNew;
+  if(box)box.hidden=!has;
+  if(del)del.hidden=!has;
+  if(!has)return;
+  const name=document.getElementById("rsMenuBotName");if(name)name.textContent=job.name||"Selected bot";
+  const state=document.getElementById("rsMenuBotState");
+  const problem=stKey==="crashed"||stKey==="install_failed";
+  const starting=stKey==="starting"||stKey==="installing"||stKey==="restarting";
+  if(state)state.textContent=problem?"Needs attention — open Logs":stKey==="running"?"Process running · checking Telegram…":starting?"Starting…":"Stopped";
+  const dot=document.getElementById("rsMenuStatusDot");if(dot){dot.className="rs-menu-status-dot"+(problem?" problem":stKey==="running"?" running":starting?" starting":"");}
+  const cached=_botHealthCache.get(String(job.id));
+  if(cached&&Date.now()-cached.at<45000)_applyRunSpaceBotHealth(cached.data);
+}
+
 // Reflect current job status onto toolbar action buttons + sidebar dots + log dot.
 // Accepts a job object OR a job id (looked up from window._lastJobs).
 function _reflectJobStatus(jobOrId) {
@@ -3549,13 +4445,14 @@ function _reflectJobStatus(jobOrId) {
   }
   const stKey = (job && job.status) ? (job.status || "").toLowerCase() : "stopped";
   const st = _fmtStatus(job && job.status);
+  _renderTelegramBot(job);
+  _renderMenuBotStatus(job,stKey,st);
   // §3: brief cross-fade whenever the status text changes, never a hard flip.
   if (_reflectJobStatus._last !== st.label) {
     _reflectJobStatus._last = st.label;
     document.querySelectorAll("#tab-jobs .rs-badge, #tab-jobs .jd-badge").forEach(b => {
-      b.classList.remove("status-changed");
-      void b.offsetWidth;                  // reflow so the animation restarts
-      b.classList.add("status-changed");
+      if (typeof b.animate === "function")
+        b.animate([{opacity:.55},{opacity:1}], {duration:100,easing:"ease-out"});
     });
   }
   const isLive = (stKey === "running" || stKey === "starting" || stKey === "installing");
@@ -3579,12 +4476,12 @@ function _reflectJobStatus(jobOrId) {
     el.style.display = on ? "" : "none";
   };
   if (btnRun) {
-    _show(btnRun, !detailsPrimary);
+    _show(btnRun, !!isSelected && !detailsPrimary);
     // Visual "dirty" marker when code has been edited since last Run
     btnRun.classList.toggle("dirty", !!_jobDirty && !!isSelected);
     const lbl = btnRun.querySelector(".rs-seg-label") || btnRun.querySelector(".rs-btn-label");
     if (lbl && !btnRun.classList.contains("loading")) {
-      lbl.textContent = _jobDirty ? "Save & run" : "Run";
+      lbl.textContent = _jobDirty ? "Save changes & run" : "Start bot";
     }
   }
   _show(btnDet,  !!isSelected);
@@ -3605,7 +4502,7 @@ function _reflectJobStatus(jobOrId) {
   // The action group itself disappears when nothing is open, instead of
   // leaving an empty bordered shell in the header.
   const seg = document.getElementById("rsJobActions");
-  if (seg) seg.hidden = !(isSelected || !detailsPrimary);
+  if (seg) seg.hidden = !isSelected;
   const closeBtn = document.getElementById("btnDeselect");
   _show(closeBtn, !!isSelected || !!_composingNew);
 
@@ -3615,7 +4512,7 @@ function _reflectJobStatus(jobOrId) {
   const crumbSep = document.getElementById("rsCrumbSep");
   const crumbCur = document.getElementById("rsTitle");
   const headChip = document.getElementById("rsHeadState");
-  const openName = (job && job.name) || (_composingNew ? "new job" : "");
+  const openName = (job && job.name) || (_composingNew ? "new bot" : "");
   if (crumbCur && crumbSep) {
     crumbCur.textContent = openName;
     crumbCur.hidden = !openName;
@@ -3762,6 +4659,13 @@ function _setRunnerStat(text, cls) {
   if (text) s.title = text;
 }
 
+function _setJobSwitching(on) {
+  const ws=document.getElementById("wbWorkspace");
+  if(!ws)return;
+  ws.classList.toggle("rs-job-loading",!!on);
+  ws.setAttribute("aria-busy",on?"true":"false");
+}
+
 function selectJob(id) {
   if (id === null || id === undefined || id === "") { deselectJob(); return; }
   id = String(id);
@@ -3776,9 +4680,12 @@ function selectJob(id) {
   if (_jobDirty || (_composingNew && (_jobCmGetValue() || "").trim())) {
     if (!confirm("You have unsaved changes. Discard them and open this job?")) return;
   }
+  _resetRunSpaceTelegramDraft();
+  const wizard=document.getElementById("rsTgSetup");if(wizard)wizard.hidden=true;
   _selectedJobId = id;
   _jobDirty = false;
   _composingNew = false;      // an existing job was chosen; New-flow is over
+  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor");
   // 👉 Paint sidebar selection + swap to workspace IMMEDIATELY (don't wait for
   // fetch/SSE to round-trip — that's what makes tab switches feel laggy).
   // Data fills in behind the paint with a subtle fade.
@@ -3787,15 +4694,29 @@ function selectJob(id) {
   });
   const btn = document.getElementById("btnStartJob");
   if (btn) btn.dataset.editingId = _selectedJobId;
-  // §2: show the bar the instant the switch is initiated (not after the
-  // request resolves), so the wait never looks like a frozen UI.
+  // Paint cached identity/status in the click event itself. Previously the
+  // old bot stayed on screen until /api/jobs/{id} returned, so network time
+  // looked exactly like an ignored tap.
+  const cached=(window._lastJobs||[]).find(x=>String(x.id)===id);
+  if(cached){
+    _showWorkspace(cached,false);
+    const name=document.getElementById("jobName");if(name)name.value=cached.name||"";
+    const lang=document.getElementById("jobLang");if(lang&&cached.language){lang.value=cached.language;_jobCmSetMode(cached.language);}
+    if(Object.prototype.hasOwnProperty.call(cached,"code")){
+      if(_jobCmGetValue()!==(cached.code||""))_jobCmSetValue(cached.code||"");
+      _setJobSwitching(false);
+    } else _setJobSwitching(true);
+  }
+  // Show the slim progress bar immediately; detail data fills behind it.
   _progressStart();
   // Kick off data + log stream but DON'T await them. Instant visual response.
   fetchJobDetail(id).finally(() => _progressDone());
   restartLogStream(id);
+  setTimeout(()=>_checkRunSpaceBotHealth({id,silent:true}),250);
   requestAnimationFrame(() => { try { _jobCmRefresh(); } catch(e){} });
-  // Update URL once job detail loads (we need the name)
-  setTimeout(() => { const j = (window._lastJobs||[]).find(x => String(x.id) === _selectedJobId); if (j) _updateJobUrl(j); }, 120);
+  // The list already carries the name; update the address immediately instead
+  // of adding an artificial 120ms delay after every click.
+  if (cached) _updateJobUrl(cached);
   _closeJobsRail();
   const tab = document.getElementById("tab-jobs");
   if (tab) tab.classList.remove("side-open");
@@ -3803,6 +4724,8 @@ function selectJob(id) {
 
 function deselectJob() {
   _selectedJobId = null;
+  _composingNew = false;
+  document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor");
   stopLogStream();
   document.querySelectorAll("#jobsList .job-item.active").forEach(el => el.classList.remove("active"));
   const btn = document.getElementById("btnStartJob");
@@ -3836,17 +4759,25 @@ function _scheduleStatusRecheck(id, attempt) {
 async function fetchJobDetail(id, opts) {
   opts = opts || {};
   try {
-    const token = localStorage.getItem("ahad_token") || "";
-    const r = await fetch("/api/jobs/" + id, {
-      headers: token ? {"Authorization": "Bearer " + token} : {}
-    });
-    if (!r.ok) {
-      // The caller owns the progress bar bracket; do not release it here.
-      // A failed refresh must not blank an open editor.
-      if (!_selectedJobId) _showEmpty(false);
-      return;
+    let job;
+    if (_demo.on) {
+      // Local static preview: answer the detail fetch from the demo store.
+      job = await _demoApi("/api/jobs/" + id, "GET");
+    } else {
+      const token = localStorage.getItem("ahad_token") || "";
+      const r = await fetch("/api/jobs/" + id, {
+        headers: token ? {"Authorization": "Bearer " + token} : {}
+      });
+      if (!r.ok) {
+        // The caller owns the progress bar bracket; do not release it here.
+        // A failed refresh must not blank an open editor or leave its loading
+        // veil stuck over cached content.
+        _setJobSwitching(false);
+        if (!_selectedJobId) _showEmpty(false);
+        return;
+      }
+      job = await r.json();
     }
-    const job = await r.json();
     window._lastJobs = window._lastJobs || [];
     const idx = window._lastJobs.findIndex(x => String(x.id) === String(id));
     // The runner was unreachable, so the server could not determine the state.
@@ -3880,8 +4811,8 @@ async function fetchJobDetail(id, opts) {
       _jobDirty = false;
     }
     _updateStats();
-    _showWorkspace(job, true);   // animate: this is a job→job switch (§4)
-    _reflectJobStatus(job);
+    _setJobSwitching(false);
+    _showWorkspace(job, false);  // cached click already provided visual feedback
     _setHint("ok", "");
     // If the detail drawer is open, re-render it with the new job's data so
     // clicking a different job in the sidebar swaps the drawer content too.
@@ -3891,6 +4822,7 @@ async function fetchJobDetail(id, opts) {
     // header's status chip.
     if (document.body.classList.contains("rs-insp-open")) renderInspector();
   } catch (e) {
+    _setJobSwitching(false);
     if (!_selectedJobId) _showEmpty(false);
   }
 }
@@ -3905,11 +4837,24 @@ function stopLogStream() {
   }
   _lastLogText = null;
   _lastLogTarget = null;
+  _streamChromeAt = 0;
+  _streamChromeState = "";
 }
 
 function restartLogStream(id) {
   stopLogStream();
   _renderLogs("");
+  if (_demo.on) {
+    // Static UI preview: the backend log stream does not exist here. Show a
+    // short sample buffer instead, so the logs pane is never blank.
+    const job = _demoFindJob(id);
+    const running = job && (job.status === "running" || job.status === "starting" || job.status === "installing");
+    const logs = running
+      ? "[INFO] bot process started\n[INFO] polling Telegram…\n[INFO] demo log stream (local UI preview)\n"
+      : "[INFO] process stopped\n";
+    setTimeout(() => _renderLogs(logs), 140);
+    return;
+  }
   const token = localStorage.getItem("ahad_token") || "";
   fetch("/api/jobs/" + id + "/logs", {
     headers: token ? {"Authorization": "Bearer " + token} : {}
@@ -3938,9 +4883,15 @@ function restartLogStream(id) {
         window._lastJobs = window._lastJobs || [];
         const job = window._lastJobs.find(x => String(x.id) === String(id));
         if (job) { job.status = d.status; job.uptime_s = d.uptime_s; job.restarts = d.restarts; _reflectJobStatus(job); }
-        if (_jdOpen && String(_selectedJobId) === String(id)) renderJobDetails();
-        if (document.body.classList.contains("rs-insp-open")
-            && String(_selectedJobId) === String(id)) renderInspector();
+        const chromeState=`${d.status||""}:${d.restarts||0}`;
+        const now=Date.now();
+        const paintChrome=chromeState!==_streamChromeState||now-_streamChromeAt>=5000;
+        if(paintChrome){
+          _streamChromeState=chromeState;_streamChromeAt=now;
+          if (_jdOpen && String(_selectedJobId) === String(id)) renderJobDetails();
+          if (document.body.classList.contains("rs-insp-open")
+              && String(_selectedJobId) === String(id)) renderInspector();
+        }
         const it = document.querySelector('#jobsList .job-item[data-jid="' + String(id).replace(/"/g,'\\"') + '"]');
         if (it) {
           it.classList.remove("running","crashed");
@@ -4000,7 +4951,14 @@ function _renderJobList(jobs) {
       dot.classList.toggle("running", sk === "running" || sk === "starting" || sk === "installing");
       dot.classList.toggle("crashed", sk === "crashed" || sk === "install_failed");
     }
+    const label = row.querySelector(".jstatus");
+    if (label) {
+      const st = _fmtStatus(j.status);
+      const txt = st.label || (sk || "stopped").toUpperCase();
+      label.textContent = txt.charAt(0) + txt.slice(1).toLowerCase();
+    }
   });
+  const menu=document.getElementById("rsMoreMenu");if(menu&&!menu.hidden)_rsJobsPopRender();
 }
 
 function renderJobs(jobs) {
@@ -4009,12 +4967,9 @@ function renderJobs(jobs) {
   window._lastJobs = jobs || [];
   if (countEl) countEl.textContent = jobs.length;
   if (!list) return;
-  // Staggered fade-in for the list itself; skeleton is already visible.
+  // Replace only when the logical list changed. No forced reflow/stagger: on
+  // mobile those decorative animations delayed the visual response to taps.
   list.innerHTML = "";
-  list.classList.remove("rs-fade-in");
-  // eslint-disable-next-line no-unused-expressions
-  void list.offsetWidth; // reflow to restart animation
-  list.classList.add("rs-fade-in");
   if (!jobs.length) {
     // Confirmed zero jobs server-side
     _setJobsStatus("empty");
@@ -4027,8 +4982,7 @@ function renderJobs(jobs) {
     const st = _fmtStatus(j.status);
     const stKey = (j.status || "").toLowerCase();
     const item = document.createElement("div");
-    item.className = "job-item rs-slide-in";
-    item.style.animationDelay = (Math.min(i, 10) * 18) + "ms";
+    item.className = "job-item";
     if (_selectedJobId == j.id) item.classList.add("active");
     if (stKey === "running" || stKey === "starting" || stKey === "installing") item.classList.add("running");
     if (stKey === "crashed" || stKey === "install_failed") item.classList.add("crashed");
@@ -4037,6 +4991,8 @@ function renderJobs(jobs) {
     item.innerHTML =
       '<span class="jlang-icon" title="' + _escapeHtml(j.language || "") + '">' + _escapeHtml(li) + '</span>' +
       '<span class="jname">' + _escapeHtml(j.name || "untitled") + '</span>' +
+      '<span class="jstatus' + (stKey === "running" || stKey === "starting" || stKey === "installing" ? " running" : "") +
+        (stKey === "crashed" || stKey === "install_failed" ? " crashed" : "") + '">' + _escapeHtml(st.label) + '</span>' +
       '<span class="jstatus-dot' +
         (stKey === "running" || stKey === "starting" || stKey === "installing" ? " running" : "") +
         (stKey === "crashed" || stKey === "install_failed" ? " crashed" : "") +
@@ -4058,20 +5014,35 @@ function renderJobs(jobs) {
     }
     list.appendChild(item);
   });
-  // Deep-link: if URL says /runspace/u/slug, pick that job regardless of running state
+  const openMenu=document.getElementById("rsMoreMenu");if(openMenu&&!openMenu.hidden)_rsJobsPopRender();
+  if(_launchSuccessJobId&&String(_selectedJobId)===String(_launchSuccessJobId))return;
+  // Deep-link: pick the requested job regardless of running state.
+  if (window.__rs_deep_invalid) {
+    window.__rs_deep_invalid = false;
+    _selectedJobId = null;
+    _showMissingJob("that address");
+    return;
+  }
   let deepPick = null;
   if (window.__rs_deep_slug) deepPick = jobs.find(x => _slugify(x.name) === window.__rs_deep_slug);
   if (deepPick) {
     selectJob(deepPick.id);
     window.__rs_deep_slug = null;
     _suppressAutoSelect = 0;
-    // Landing directly on .../page must open Details, not the editor.
-    if (window.__rs_deep_details) {
-      window.__rs_deep_details = false;
-      openJobDetails(null, {noUrl: true});
-    } else if (_jdOpen) {
-      closeJobDetails({noUrl: true});
-    }
+    // Open the exact section encoded in the shared URL.
+    const section = window.__rs_deep_section || "editor";
+    window.__rs_deep_section = null;
+    _openJobSection(section, true);
+  }
+  else if (window.__rs_deep_slug) {
+    // Never silently replace a deleted shared job with the first job in the
+    // account while the address bar still claims the missing one.
+    const missing = window.__rs_deep_slug;
+    window.__rs_deep_slug = null;
+    window.__rs_deep_section = null;
+    _selectedJobId = null;
+    _showMissingJob(missing);
+    return;
   }
   else if (_composingNew || Date.now() < _suppressAutoSelect) {
     // A new job is being written — never auto-select, never repaint the
@@ -4117,9 +5088,28 @@ function _initWbWiring() {
   const menuBtn  = document.getElementById("wbMenuBtn");
   const backdrop = document.getElementById("wbBackdrop");
   const deselectBtn = document.getElementById("btnDeselect");
+  const deleteMenuBtn = document.getElementById("btnDeleteInMenu");
   const btnStart = document.getElementById("btnStartJob");
   const btnStop  = document.getElementById("btnStopJob");
   const btnRest  = document.getElementById("btnRestartJob");
+  const browseTemplates=document.getElementById("rsBrowseTemplates");
+  if(browseTemplates&&!browseTemplates.dataset.wired){browseTemplates.dataset.wired="1";browseTemplates.addEventListener("click",_openRunSpaceTemplates);}
+  const ownCode=document.getElementById("rsUseOwnCode");
+  if(ownCode&&!ownCode.dataset.wired){ownCode.dataset.wired="1";ownCode.addEventListener("click",()=>{_setRunSpaceSourceMode("own");_renderTemplateConfig([]);_rsBotAnalysis=null;const selected=document.getElementById("rsSelectedTemplate");if(selected)selected.textContent=`${_rsTemplates.length||7} complete bot products`;_jobCmFocus();toast("Paste your Python bot code below — no template required.","info");});}
+  const uploadCode=document.getElementById("rsUploadCode");
+  if(uploadCode&&!uploadCode.dataset.wired){uploadCode.dataset.wired="1";uploadCode.addEventListener("click",()=>document.getElementById("rsFileInput")?.click());}
+  const changeSource=document.getElementById("rsChangeSource");
+  if(changeSource&&!changeSource.dataset.wired){changeSource.dataset.wired="1";changeSource.addEventListener("click",()=>{_setRunSpaceSourceMode(null);_renderTemplateConfig([]);_setBotWizardStage("code");});}
+  const templateSearch=document.getElementById("rsTemplateSearch");
+  if(templateSearch&&!templateSearch.dataset.wired){templateSearch.dataset.wired="1";templateSearch.addEventListener("input",_renderRunSpaceTemplates);}
+  const tgAnalyze = document.getElementById("rsTgAnalyze");
+  if(tgAnalyze && !tgAnalyze.dataset.wired){tgAnalyze.dataset.wired="1";tgAnalyze.addEventListener("click",_analyzeRunSpaceBot);}
+  const backToCode=document.getElementById("rsTgBackToCode");
+  if(backToCode&&!backToCode.dataset.wired){backToCode.dataset.wired="1";backToCode.addEventListener("click",()=>_setBotWizardStage("code"));}
+  const tgVerify = document.getElementById("rsTgVerify");
+  if(tgVerify && !tgVerify.dataset.wired){tgVerify.dataset.wired="1";tgVerify.addEventListener("click",_verifyRunSpaceTelegramBot);}
+  const tgHealth = document.getElementById("rsBotHealth");
+  if(tgHealth && !tgHealth.dataset.wired){tgHealth.dataset.wired="1";tgHealth.addEventListener("click",()=>_checkRunSpaceBotHealth({force:true}));}
 
   const onNew = (ev) => {
     if (ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -4130,17 +5120,21 @@ function _initWbWiring() {
     // Stays true until this job is deployed or the user picks another job, so
     // background polling can never replace the blank editor mid-typing.
     _composingNew = true;
+    document.body.classList.add("rs-composing");
     document.querySelectorAll("#jobsList .job-item.active").forEach(el => el.classList.remove("active"));
     const btn = document.getElementById("btnStartJob");
     if (btn) delete btn.dataset.editingId;
     // Suppress auto-select for the next 1500ms so any in-flight poll/loadJobs
     // race cannot steal our blank editor and reload an old job.
     _suppressAutoSelect = Date.now() + 1500;
+    _hideBotLaunchPage();
     const ws = document.getElementById("wbWorkspace");
     const emp = document.getElementById("wbEmpty");
     if (ws) ws.style.display = "flex";
     if (emp) emp.style.display = "none";
     _clearWorkspaceChrome();
+    _resetRunSpaceTelegramDraft();
+    const wizard=document.getElementById("rsTgSetup");if(wizard)wizard.hidden=false;
     _renderLogs("");
     const n = document.getElementById("jobName"); if (n) { n.value = ""; n.classList.remove("rs-inp-err"); }
     const u = document.getElementById("jobRepoUrl"); if (u) u.value = "";
@@ -4150,11 +5144,11 @@ function _initWbWiring() {
     _jobCmSetMode("python");
     _setHint("", "Ready");
     _updateStats();
-    document.body.classList.remove("rs-side-open","rs-logs-open");
+    document.body.classList.remove("rs-side-open","rs-logs-open","rs-menu-open");
     const tab = document.getElementById("tab-jobs");
     if (tab) tab.classList.remove("side-open");
-    // Reset URL to /runspace
-    try { if (!_routeNav) history.replaceState({tab:"jobs"}, "", "/runspace"); } catch(e){}
+    // Reset URL to /bots
+    try { if (!_routeNav) history.replaceState({tab:"jobs"}, "", "/bots"); } catch(e){}
     setTimeout(() => {
       try { if (n) { n.focus(); } } catch(e){}
       _jobCmRefresh();
@@ -4215,6 +5209,10 @@ function _initWbWiring() {
       document.body.classList.remove("rs-menu-open");
     };
     const openMore = () => {
+      _closeJobsRail();
+      _rsJobsPopRender();
+      const current=(window._lastJobs||[]).find(j=>String(j.id)===String(_selectedJobId));
+      if(current){_reflectJobStatus(current);_checkRunSpaceBotHealth({id:current.id,silent:true});}else _renderMenuBotStatus(null,"stopped",{});
       moreMenu.hidden = false;
       moreBtn.setAttribute("aria-expanded", "true");
       document.body.classList.add("rs-menu-open");
@@ -4263,15 +5261,10 @@ function _initWbWiring() {
       // editor stays full-bleed, which is what the user asked for.
     });
 
-    const jobsInMenu = document.getElementById("btnJobsInMenu");
-    if (jobsInMenu) jobsInMenu.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeMore();
-      document.body.classList.add("rs-side-open");
-      document.body.classList.remove("rs-side-collapsed");
-      const mb = document.getElementById("wbMenuBtn");
-      if (mb) mb.setAttribute("aria-expanded", "true");
-    });
+    /* #btnJobsInMenu is gone from the markup: the header's hamburger already
+       does exactly this, with the same icon, a few centimetres away. Two
+       controls for one job is what made the toolbar look like it had two
+       menu buttons where one of them "did nothing". */
   }
   if (newBtn2) { newBtn2.addEventListener("click", onNew); newBtn2.type = "button"; newBtn2._w = 1; }
   if (newBtnE) { newBtnE.addEventListener("click", onNew); newBtnE.type = "button"; newBtnE._w = 1; }
@@ -4293,6 +5286,16 @@ function _initWbWiring() {
       if (document.body.classList.contains("rs-detail-open")) closeJobDetails();
     }
   });
+  if (deleteMenuBtn) {
+    deleteMenuBtn.addEventListener("click", async (e) => {
+      e.preventDefault();e.stopPropagation();
+      const id=_selectedJobId;
+      const job=(window._lastJobs||[]).find(j=>String(j.id)===String(id));
+      if(!id||!confirm(`Delete ${job&&job.name?job.name:"this bot"}? Its workspace and database will be removed.`))return;
+      const menu=document.getElementById("rsMoreMenu");if(menu)menu.hidden=true;document.body.classList.remove("rs-menu-open");
+      await deleteJobById(id,deleteMenuBtn);
+    });
+  }
   if (deselectBtn) {
     deselectBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); deselectJob(); });
     deselectBtn.type = "button";
@@ -4304,9 +5307,11 @@ function _initWbWiring() {
     // desktop collapses the rail, mobile slides the drawer over.
     const _isPhone = () => window.matchMedia("(max-width: 760px)").matches;
     const _syncMenuBtn = () => {
-      // Same truth the toggle uses: is the rail actually on screen?
-      const el = document.getElementById("wbSide");
-      const open = !!el && el.getBoundingClientRect().width > 4;
+      // Same source of truth as the toggle: the class, not the geometry.
+      // Measuring reported "open" in both states (a translateX-hidden element
+      // keeps its width), so this attribute was stuck on "true" and screen
+      // readers announced the drawer as permanently expanded.
+      const open = document.body.classList.contains("rs-side-open");
       menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
     };
     // ROOT CAUSE of "the job list bar will not hide": this used to pick the
@@ -4318,15 +5323,23 @@ function _initWbWiring() {
     // Derive the state from what is ACTUALLY on screen instead of from a
     // media query, and drive both classes together so the result is the same
     // whichever side of the breakpoint we are on.
-    const _sideVisible = () => {
-      const el = document.getElementById("wbSide");
-      if (!el) return false;
-      // A drawer parked off-screen has no width in the layout sense.
-      return el.getBoundingClientRect().width > 4;
-    };
+    /* MEASURING THE RAIL TO DECIDE WHETHER IT IS OPEN DOES NOT WORK, and it
+     * is why the button would open the panel but never close it again.
+     *
+     * The rail is hidden with `transform: translateX(-100%)`, and a
+     * transformed element still reports its FULL width from
+     * getBoundingClientRect() — the transform moves the box, it does not
+     * shrink it. So `_sideVisible()` answered "visible" in both states, the
+     * toggle computed `show = !visible`, and after the first tap it just kept
+     * setting the same pair of classes. Reproduced: clicking wbMenuBtn twice
+     * leaves body as "rs-active rs-side-open" both times.
+     *
+     * The class on <body> IS the state. Read that instead of trying to
+     * re-derive it from geometry that two different CSS mechanisms (width:0
+     * on desktop, translateX on mobile) express in two different ways. */
     menuBtn.addEventListener("click", (e) => {
       e.stopPropagation(); e.preventDefault();
-      const show = !_sideVisible();
+      const show = !document.body.classList.contains("rs-side-open");
       document.body.classList.toggle("rs-side-open", show);
       document.body.classList.toggle("rs-side-collapsed", !show);
       _syncMenuBtn();
@@ -4420,16 +5433,13 @@ function _initWbWiring() {
     _syncInsp();
   });
 
-  // Breadcrumb root returns to the job list (and, on a phone, opens it).
+  // The breadcrumb opens the same compact three-dot surface; it never sends
+  // the user into the old full-height bot-list drawer.
   const crumbRoot = document.getElementById("rsCrumbRoot");
   if (crumbRoot) {
     crumbRoot.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (window.matchMedia("(max-width: 760px)").matches) {
-        _openJobsRail();
-      } else {
-        document.body.classList.remove("rs-side-collapsed");
-      }
+      e.preventDefault();e.stopPropagation();
+      document.getElementById("rsMoreBtn")?.click();
     });
   }
 
@@ -4598,6 +5608,9 @@ function _initSplitDrag() {
   });
   // Touch support
   divider.addEventListener("touchstart", (e) => {
+    // In the mobile Add Bot document the divider participates in page scroll;
+    // resizing there hijacked a normal one-finger swipe.
+    if (_composingNew && window.innerWidth <= 760) return;
     const t = e.touches[0];
     dragging = true; startY = t.clientY;
     startCodeH = codePane.getBoundingClientRect().height;
@@ -4634,10 +5647,10 @@ function openJobDetails(id, opts) {
   panel.setAttribute("aria-hidden", "false");
   document.body.classList.add("rs-detail-open", "rs-drawer-open");
 
-  // Always land on Code. Reopening on whatever tab was last used means the
+  // Always land on Overview. Reopening on whatever tab was last used means the
   // page shows something different each time for no reason the user chose.
   _initJdTabs();
-  jdSwitchTab("code");
+  jdSwitchTab("overview");
   renderJobDetails();
   _jdEnvLoad();
   _jdRefreshBackupRow();
@@ -4743,6 +5756,30 @@ function renderJobDetails() {
   _jdText("jdPort", job.port || "—");
   _jdText("jdCpu", job.cpu_pct != null ? job.cpu_pct + "%" : "—");
   _jdText("jdMem", job.mem_mb != null ? job.mem_mb + " MB" : "—");
+
+  // Overview tab: the "at a glance" answer. Kept in renderJobDetails so it
+  // never drifts from the metrics pane — same job object, same state.
+  _jdText("jdOvState", st.label || stKey);
+  _jdText("jdOvUptime", live ? _fmtUptime(job.uptime_s || 0) : "—");
+  _jdText("jdOvRestarts", String(job.restarts || 0));
+  _jdText("jdOvBot", job.telegram_bot_username ? "@" + job.telegram_bot_username
+        : (job.telegram_bot_detected ? "Telegram bot detected" : "Not a Telegram bot"));
+  const ovUrlCard = document.getElementById("jdOvUrlCard");
+  const ovUrl = job.web_url || job.url || "";
+  if (ovUrlCard) {
+    ovUrlCard.hidden = !(live && ovUrl);
+    const ovLink = document.getElementById("jdOvUrl");
+    if (ovLink && ovLink.textContent !== ovUrl) { ovLink.href = ovUrl; ovLink.textContent = ovUrl; }
+    const ovOpen = document.getElementById("jdOvUrlOpen");
+    if (ovOpen) ovOpen.href = ovUrl;
+  }
+  const ovState = document.getElementById("jdOvState");
+  if (ovState) {
+    const cls = stKey === "running" ? "running"
+      : (stKey === "crashed" || stKey === "install_failed") ? "crashed"
+      : (stKey === "starting" || stKey === "installing") ? "starting" : "";
+    ovState.className = "jd-v jd-ov-state" + (cls ? " is-" + cls : "");
+  }
 
   // ---- 2 controls: reflect what is actually possible right now -------
   const start = document.getElementById("jdStart");
@@ -4941,6 +5978,13 @@ async function _jdDownload(kind) {
   const original = label ? label.textContent : "";
   if (btn) { btn.disabled = true; btn.classList.add("loading"); }
   if (label) label.textContent = "Preparing…";
+  if (_demo.on) {
+    // Static UI preview: there is no runner to pack files from.
+    toast("Nothing to download yet — this is a local UI preview with sample data.", "error");
+    if (btn) { btn.disabled = false; btn.classList.remove("loading"); }
+    if (label) label.textContent = original;
+    return;
+  }
   try {
     const dl = await fetch("/api/jobs/" + job.id + "/download",
                            {headers: token ? {Authorization: "Bearer " + token} : {}});
@@ -5030,6 +6074,37 @@ function _agoText(iso) {
    content area rather than scrolling to a different card.
    ============================================================ */
 let _jdTab = "code";
+let _jdVersionsBusy = false;
+
+async function _jdLoadVersions() {
+  const host=document.getElementById("jdVersions");
+  if(!host||!_selectedJobId||_jdVersionsBusy)return;
+  _jdVersionsBusy=true;host.textContent="Loading versions…";
+  try{
+    const data=await api(`/api/jobs/${_selectedJobId}/revisions`,"GET",null,true);
+    host.textContent="";
+    (data.revisions||[]).forEach(rev=>{
+      const row=document.createElement("div");row.className="jd-version";
+      const main=document.createElement("div");main.className="jd-version-main";
+      const title=document.createElement("b");title.textContent=`v${rev.version} · ${rev.action}`;
+      const meta=document.createElement("span");meta.textContent=`${rev.language} · ${(rev.created_at||"").slice(0,16)} · ${rev.status}`;
+      main.append(title,meta);
+      if(rev.error){const err=document.createElement("small");err.className="jd-version-error";err.textContent=rev.error;main.appendChild(err);}
+      row.appendChild(main);
+      if(rev.version===data.current_revision){const current=document.createElement("span");current.className="adm-pill ok";current.textContent="current";row.appendChild(current);}
+      else if(rev.status==="healthy") {const btn=document.createElement("button");btn.className="btn-ghost sm";btn.textContent="Restore";btn.onclick=()=>_jdRollback(rev.id,rev.version);row.appendChild(btn);}
+      host.appendChild(row);
+    });
+    if(!(data.revisions||[]).length)host.textContent="No deployment versions recorded yet.";
+  }catch(e){host.textContent=e.message;}
+  finally{_jdVersionsBusy=false;}
+}
+
+async function _jdRollback(revisionId,version){
+  if(!confirm(`Restore version ${version}? The current bot will restart.`))return;
+  try{await api(`/api/jobs/${_selectedJobId}/revisions/${revisionId}/rollback`,"POST",{},true);toast(`Restored version ${version}`,"success");await loadJobs();await _jdLoadVersions();}
+  catch(e){toast(e.message,"error");}
+}
 
 function jdSwitchTab(name) {
   const tabs = document.querySelectorAll("#jdTabs .jd-tab");
@@ -5052,8 +6127,16 @@ function jdSwitchTab(name) {
   // The Logs tab shows the same stream as the Code tab's Output pane, so
   // mirror the buffer instead of opening a second connection.
   if (name === "logs") _jdMirrorLogs();
+  if (name === "versions") _jdLoadVersions();
   // CodeMirror paints blank if it was sized while display:none.
   if (name === "code") { try { _jobCmRefresh(); } catch (e) {} }
+  // Detail tabs are bookmarkable too; Back returns to the previous section.
+  if (_jdOpen && !_routeNav) {
+    const job = _jdCurrentJob();
+    const section = ({logs:"logs", metrics:"details", files:"database", env:"env",
+                      settings:"settings"})[name] || "details";
+    if (job) _updateJobUrl(job, {section, push:false});
+  }
 }
 
 /* Keep the full-height Logs panel in step with the Output pane. */
@@ -5110,12 +6193,6 @@ function _initJdTabs() {
     });
   }
 
-  // Theme toggle in the detail header reuses the app-wide toggle.
-  const th = document.getElementById("jdThemeToggle");
-  if (th) th.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (typeof toggleTheme === "function") toggleTheme();
-  });
 }
 
 function _initDetailWiring() {
@@ -5158,6 +6235,27 @@ function _initDetailWiring() {
     navigator.clipboard.writeText(u).then(() => toast("URL copied", "success"));
   });
 
+  // Overview tab actions — same role as the header's primary/URL controls,
+  // but directly on the "at a glance" view.
+  on("jdOvRefresh", () => { loadJobs(); renderJobDetails(); toast("Refreshed", "info"); });
+  on("jdOvOpenBot", () => {
+    const job = _jdCurrentJob();
+    const url = job && (job.web_url || job.url || job.telegram_bot_url);
+    if (url) { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; a.click(); }
+    else toast("No public URL yet — deploy the bot to get one.", "info");
+  });
+  on("jdOvEdit", () => { closeJobDetails(); setTimeout(_jobCmFocus, 220); });
+  on("jdOvUrlCopy", () => {
+    const a = document.getElementById("jdOvUrl");
+    const u = a ? a.textContent : "";
+    if (!u || !navigator.clipboard) { toast("Nothing to copy", "error"); return; }
+    navigator.clipboard.writeText(u).then(() => toast("URL copied", "success"));
+  });
+  on("jdOvUrlOpen", () => {
+    const a = document.getElementById("jdOvUrl");
+    if (a && a.href && a.href !== "about:blank") { const w = window.open(a.href, "_blank", "noopener"); }
+  });
+
   on("jdCopy", () => {
     const b = document.getElementById("jdLogBody");
     const t = b ? b.textContent : "";
@@ -5185,6 +6283,7 @@ function _initDetailWiring() {
 
   on("jdBackupNow",     () => _jdBackupNow());
   on("jdRestoreBackup", () => _jdRestoreBackup());
+  on("jdVersionsRefresh", () => _jdLoadVersions());
 
   // Escape closes the page, like any full-screen view.
   document.addEventListener("keydown", e => {
@@ -5214,8 +6313,22 @@ async function toggleJobAccess(id, makePublic) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-async function startJob() {
+async function startJob(options) {
+  options=(options&&options.launchAfterDeploy)?options:{};
   const nameEl = document.getElementById("jobName");
+  const btn = document.getElementById("btnStartJob");
+  const editingId = btn && btn.dataset.editingId;
+  if (!editingId && !_rsBotAnalysis) {
+    toast("Analyze the bot code first", "error");
+    await _analyzeRunSpaceBot();
+    return;
+  }
+  if (!editingId && (!_rsVerifiedBotToken || !_rsTelegramVerificationId)) {
+    _setBotWizardStage("connect");
+    const token=document.getElementById("rsTgToken");if(token)token.focus();
+    toast("Connect the BotFather token before deploying", "error");
+    return;
+  }
   let name = (nameEl && nameEl.value || "").trim();
   const language = document.getElementById("jobLang").value;
   const code = _jobCmGetValue();
@@ -5227,12 +6340,10 @@ async function startJob() {
   }
   const finalName = (nameEl && nameEl.value || "").trim() || name;
   if (nameEl) nameEl.value = finalName;
-  if (!finalName) { toast("Name required", "error"); if (nameEl) nameEl.focus(); return; }
-  if (!code.trim() && !repoUrl) { toast("Write code or paste a GitHub URL", "error"); return; }
+  if (!finalName) { toast("Bot name required", "error"); if (nameEl) nameEl.focus(); return; }
+  if (!code.trim() && !repoUrl) { toast("Paste the bot code or a GitHub URL", "error"); return; }
   // Client-side duplicate name guard (server enforces authoritatively)
   if (window._lastJobs) {
-    const btn = document.getElementById("btnStartJob");
-    const editingId = btn && btn.dataset.editingId;
     const dup = window._lastJobs.find(j => (j.name||"").toLowerCase() === finalName.toLowerCase() && String(j.id) !== String(editingId||""));
     if (dup) {
       toast("You already have a job named \u201c"+finalName+"\u201d \u2014 choose a different name.", "error");
@@ -5241,18 +6352,25 @@ async function startJob() {
       return;
     }
   }
-  const btn = document.getElementById("btnStartJob");
-  const editingId = btn && btn.dataset.editingId;
   setLoading(btn, true);
   if (btn) {
     btn.classList.add("is-firing","loading");
-    const lbl = btn.querySelector(".rs-btn-label");
+    const lbl = btn.querySelector(".rs-btn-label") || btn.querySelector(".rs-seg-label");
     btn._origLabel = lbl ? lbl.textContent : null;
     if (lbl) lbl.textContent = editingId ? "Saving\u2026" : "Starting\u2026";
   }
+  /* Drive the header button the user actually pressed. Editing an existing
+     job writes first, so that leg starts in "saving"; a brand-new job goes
+     straight to "starting" because there is nothing to overwrite yet. */
+  if (typeof rsRunState === "function") rsRunState(editingId ? "saving" : "starting");
   _setHint("warn", "");
   try {
     const payload = { name: finalName, language, code };
+    if (_rsVerifiedBotToken) {
+      const current=(window._lastJobs||[]).find(j=>String(j.id)===String(editingId||""));
+      payload.env={...((current&&current.env)||{}),...(_collectTemplateEnv(false)||{}),BOT_TOKEN:_rsVerifiedBotToken};
+      payload.telegram_verification_id=_rsTelegramVerificationId;
+    }
     if (repoUrl) payload.repo_url = repoUrl;
     let info;
     if (editingId) {
@@ -5260,10 +6378,15 @@ async function startJob() {
     } else {
       info = await api("/api/jobs", "POST", payload, true);
     }
-    toast("Deployed \u2713", "success");
+    /* The write returned, so the code is safe; what remains is the process
+       coming up. Keep that state visible on the actual menu button. */
+    if(btn){const runLabel=btn.querySelector(".rs-seg-label");if(runLabel)runLabel.textContent="Starting…";}
+    if (typeof rsRunState === "function") rsRunState("starting");
+    if(!options.launchAfterDeploy)toast("Deployed \u2713", "success");
     _setHint("ok", "");
     _jobDirty = false;
     _composingNew = false;      // deployed — polling may take over again
+    document.body.classList.remove("rs-composing","rs-step-code","rs-step-connect","rs-step-review","rs-own-code-editor");
     // 👉 Optimistic UI update: insert the new job into _lastJobs immediately
     // with status="starting" so sidebar + stats reflect the launch right away
     // instead of waiting 7s for the next poll round. SSE will correct to
@@ -5280,6 +6403,16 @@ async function startJob() {
         web_url: info.web_url || null,
         web_slug: info.web_slug || null,
         web_public: info.web_public !== false,
+        telegram_bot_detected: !!info.telegram_bot_detected,
+        telegram_bot_username: info.telegram_bot_username || null,
+        telegram_bot_id: info.telegram_bot_id || null,
+        telegram_check_status: info.telegram_check_status || null,
+        telegram_verified_at: info.telegram_verified_at || null,
+        telegram_bot_url: info.telegram_bot_url || null,
+        telegram_framework: info.telegram_framework || (_rsBotAnalysis&&_rsBotAnalysis.framework) || null,
+        telegram_update_mode: info.telegram_update_mode || (_rsBotAnalysis&&_rsBotAnalysis.update_mode) || null,
+        telegram_token_source: "environment",
+        env: _rsVerifiedBotToken ? {BOT_TOKEN:"••••••••"} : {},
         code: code,
       };
       window._lastJobs = window._lastJobs || [];
@@ -5287,15 +6420,52 @@ async function startJob() {
       window._lastJobs = window._lastJobs.filter(x => String(x.id) !== String(info.job_db_id));
       window._lastJobs.unshift(stub);
       _lastJobsSig = "";  // force renderJobs to repaint
-      renderJobs(window._lastJobs);
-      selectJob(info.job_db_id);
-      if (info.web_url) setTimeout(() => toast("Live URL ready \u2014 tap Details to open", "info"), 800);
+      if(options.launchAfterDeploy){
+        _selectedJobId=String(info.job_db_id);_suppressAutoSelect=Date.now()+1200;
+        if(btn)btn.dataset.editingId=String(info.job_db_id);
+        renderJobs(window._lastJobs);
+        _updateJobUrl(stub);
+        _showBotLaunchPage(stub,options.launchUrl||info.telegram_bot_url);
+      }else{
+        renderJobs(window._lastJobs);selectJob(info.job_db_id);
+        if (info.web_url) setTimeout(() => toast("Live URL ready — tap Bot details to open", "info"), 800);
+      }
     } else {
       await loadJobs();
     }
-    // Always refresh the list in the background after 2.5s so the real status
-    // (running/installing/crashed) overtakes our optimistic stub.
-    setTimeout(() => { loadJobs().catch(()=>{}); }, 2500);
+    /* THE "NOTICEABLE LAG" AFTER Save & Run, MEASURED.
+     *
+     * The deploy itself is not slow. Profiled against the running server:
+     *
+     *     t+ 22 ms   POST /api/jobs returns, status "installing"
+     *     t+ 28 ms   the job is actually "running"
+     *     t+2500 ms  the UI finally looks, because of this one timer
+     *
+     * So the process was up in 28ms and the user stared at "Starting…" for
+     * another 2.4 seconds — the lag was entirely self-inflicted by a fixed
+     * delay, not by the network or the database. A single late poll also has
+     * to guess: too early and it catches "installing", too late and it wastes
+     * the user's time. It cannot be both.
+     *
+     * Replaced with a short backoff that stops as soon as the status settles.
+     * A job that boots instantly is reflected in ~250ms; one that really is
+     * installing keeps being checked, with the gap widening so a slow install
+     * does not turn into a request storm. Same number of requests in the bad
+     * case, roughly a tenth of the wait in the common one. */
+    (function _pollUntilSettled() {
+      const DELAYS = [250, 400, 700, 1200, 2000, 3000];
+      let i = 0;
+      const tick = async () => {
+        try { await loadJobs(); } catch (e) { /* poller keeps its own errors */ }
+        const j = (window._lastJobs || [])
+          .find(x => String(x.id) === String(info && info.job_db_id));
+        const st = j && j.status;
+        // Settled states need no further chasing; the background poll owns it now.
+        if (st === "running" || st === "crashed" || st === "stopped") return;
+        if (i < DELAYS.length) setTimeout(tick, DELAYS[i++]);
+      };
+      setTimeout(tick, DELAYS[i++]);
+    })();
   } catch (e) {
     toast(e.message, "error");
     _setHint("err", e.message);
@@ -5303,10 +6473,14 @@ async function startJob() {
     setLoading(btn, false);
     if (btn) {
       btn.classList.remove("is-firing","loading");
-      const lbl = btn.querySelector(".rs-btn-label");
+      const lbl = btn.querySelector(".rs-btn-label") || btn.querySelector(".rs-seg-label");
       if (lbl && btn._origLabel) lbl.textContent = btn._origLabel;
       setTimeout(() => btn.classList.remove("is-firing"), 700);
     }
+    /* Always return to idle — including after a failure, so the button can
+       be pressed again. The error itself is already reported by the toast in
+       the catch block; leaving the button disabled would strand the user. */
+    if (typeof rsRunState === "function") rsRunState("idle");
   }
 }
 
@@ -5348,15 +6522,17 @@ async function deleteJobById(id, btn) {
   try {
     await api("/api/jobs/" + id, "DELETE", null, true);
     if (String(_selectedJobId) === String(id)) deselectJob();
-    toast("Deleted", "info");
+    window._lastJobs=(window._lastJobs||[]).filter(j=>String(j.id)!==String(id));
+    _rsJobsPopRender();
+    toast("Bot deleted", "info");
     const row = btn && btn.closest && btn.closest(".job-item");
     if (row) { row.classList.add("row-leave"); await new Promise(r => setTimeout(r, 180)); }
     loadJobs();
   } catch (e) { toast(e.message, "error"); }
 }
 
-function startJobPolling()  { loadJobs(); if (_jobsTimer) clearInterval(_jobsTimer); _jobsTimer = setInterval(loadJobs, 7000); }
-function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobsTimer = null; } }
+function startJobPolling()  { loadJobs(); if (_jobsTimer) clearInterval(_jobsTimer); _jobsTimer = setInterval(loadJobs, 15000); _startBotHealthPolling(); }
+function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobsTimer = null; } _stopBotHealthPolling(); }
 
 // Refresh CM when switching TO the jobs tab (CM needs a refresh any time it
 // transitions from display:none to visible otherwise it paints blank).
@@ -5367,7 +6543,7 @@ function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobs
     if (tabId === "jobs") {
       // If we have no prior data at all, enter 'loading' immediately so the
       // boot skeleton is painted on top of the empty panel before loadJobs
-      // fires (prevents the premature "No job selected" flash). Stale cache
+      // fires (prevents the premature "No bot selected" flash). Stale cache
       // stays visible via stale-while-revalidate inside loadJobs.
       const hasPrior = !!(window._lastJobs && window._lastJobs.length);
       if (!hasPrior) _setJobsStatus("loading");
@@ -5390,22 +6566,68 @@ function stopJobPolling()   { if (_jobsTimer) { clearInterval(_jobsTimer); _jobs
 /* ==================== ADMIN CONSOLE (owner-only) ====================
    The sidebar button stays hidden until /profile says is_admin. The server
    answers 404 (not 403) for everybody else, so the panel's existence is
-   never leaked. Destructive actions re-ask the admin's OWN 2FA code. */
+   never leaked. Moderation actions are admin-only and written to the audit log. */
 /* ==================== ADMIN CONSOLE (owner-only) ====================
    The sidebar button stays hidden until /profile says is_admin. The server
    answers 404 (not 403) for everybody else, so the panel's existence is
-   never leaked. Destructive actions re-ask the admin's OWN 2FA code. */
+   never leaked. Moderation actions are admin-only and written to the audit log. */
 /* ==================== ADMIN CONSOLE (owner-only) ====================
    The sidebar button stays hidden until /profile says is_admin. The server
    answers 404 (not 403) for everybody else, so the panel's existence is
-   never leaked. Destructive actions re-ask the admin's OWN 2FA code. */
+   never leaked. Moderation actions are admin-only and written to the audit log. */
 let _admPending = null;   // { user_id, suspended } awaiting 2FA confirm
+
+/* Section nav: highlight the section the admin is looking at. This lives in
+   pro.js rather than only in the template because a plain <a> jump feels
+   abandoned without a visual response, and the active state must also work
+   after the panel's markup is fetched late. */
+function _admWireSectionNav() {
+  const nav = document.querySelector("#tab-admin .adm-section-nav");
+  if (!nav || nav.dataset.wired) return;
+  nav.dataset.wired = "1";
+  nav.addEventListener("click", e => {
+    const a = e.target.closest("a"); if (!a) return;
+    nav.querySelectorAll("a").forEach(x => x.classList.toggle("active", x === a));
+  });
+  const links = [...nav.querySelectorAll("a[href^='#']")];
+  const ids = links.map(a => a.getAttribute("href").slice(1));
+  if (!ids.some(id => document.getElementById(id))) return;
+  let busy = false;
+  const setActive = () => {
+    if (busy) return;
+    const y = window.scrollY + 92;                 // below the sticky header
+    let best = 0;
+    links.forEach((a, i) => {
+      const el = document.getElementById(ids[i]);
+      if (!el) return;
+      if (el.getBoundingClientRect().top + window.scrollY <= y) best = i;
+    });
+    links.forEach((a, i) => a.classList.toggle("active", i === best));
+  };
+  window.addEventListener("scroll", setActive, { passive: true });
+  setActive();
+}
 
 let _adminFetching = false;  // guard: one in-flight markup fetch at a time
 let _adminSectHtml = null;   // pristine copy so the panel can come BACK on
+let _adminProfile = null;    // needed when a failed first fetch is retried
+let _adminRequested = false; // direct /admin or a click while markup is loading
                              // this device when an actual admin signs in next
+function requestAdminPanel() {
+  _adminRequested = true;
+  const sect = document.getElementById("tab-admin");
+  if (sect) {
+    _adminRequested = false;
+    switchTab("admin");
+    return;
+  }
+  // The first request can fail during a cold start. A later click must make a
+  // NEW request rather than leaving a visible but permanently dead button.
+  if (_adminProfile) applyAdminVisibility(_adminProfile);
+}
 function applyAdminVisibility(profile) {
   const isAdm = !!(profile && profile.is_admin);
+  if (isAdm) _adminProfile = profile;
   let btn = document.getElementById("tabBtnAdmin");
   // The nav button is stripped from the shell too, for the same reason as the
   // section: a hidden button is still discoverable in the page source.
@@ -5421,14 +6643,17 @@ function applyAdminVisibility(profile) {
         '<path d="M9.2 11.8l2 2 3.6-4"/></svg>' +
         '<span class="tab-tx">Admin</span></button>');
       btn = document.getElementById("tabBtnAdmin");
-      if (btn && typeof _wireTabButton === "function") _wireTabButton(btn);
-      else if (btn) btn.addEventListener("click", () => switchTab("admin"));
+      if (btn) btn.addEventListener("click", requestAdminPanel);
     }
   }
   if (btn) btn.classList.toggle("hidden", !isAdm);
   let sect = document.getElementById("tab-admin");
 
   if (isAdm) {
+    if (sect) _admWireSectionNav();
+    // routeFromUrl runs before /profile has proved admin status. Remember a
+    // direct /admin navigation and complete it after protected markup arrives.
+    if (_clientPath() === "/admin") _adminRequested = true;
     // The shell no longer ships the console's markup — it was readable in the
     // page source by any anonymous visitor. Fetch it once, from an endpoint
     // behind the same 404 gate as the admin data.
@@ -5436,12 +6661,19 @@ function applyAdminVisibility(profile) {
       if (_adminSectHtml) {
         const host = document.querySelector(".dash-main");
         if (host) host.insertAdjacentHTML("beforeend", _adminSectHtml);
+        sect = document.getElementById("tab-admin");
+        _admWireSectionNav();
+        if (sect && _adminRequested) {
+          _adminRequested = false;
+          switchTab("admin");
+        }
       } else if (!_adminFetching) {
         _adminFetching = true;
         // Plain fetch, not api(): api() parses JSON and its 5th argument is a
         // retry flag, not options. This endpoint returns HTML.
+        const panelToken = authToken || localStorage.getItem("ahad_token") || "";
         fetch(API + "/admin/panel-html", {
-          headers: authToken ? {Authorization: "Bearer " + authToken} : {},
+          headers: panelToken ? {Authorization: "Bearer " + panelToken} : {},
         })
           .then(r => (r.ok ? r.text() : Promise.reject(r.status)))
           .then(html => {
@@ -5450,27 +6682,43 @@ function applyAdminVisibility(profile) {
             if (host && !document.getElementById("tab-admin")) {
               host.insertAdjacentHTML("beforeend", html);
             }
-            if (currentTab === "admin" && typeof loadAdminPanel === "function") {
+            _admWireSectionNav();
+            if (_adminRequested && document.getElementById("tab-admin")) {
+              _adminRequested = false;
+              switchTab("admin");
+            } else if (currentTab === "admin" && typeof loadAdminPanel === "function") {
               loadAdminPanel();
             }
           })
-          .catch(() => {})          // 404 => not an admin after all; stay quiet
+          .catch(status => {
+            // 404 remains intentionally ambiguous. Network/5xx failures are
+            // retryable by clicking the Admin button again.
+            if (status !== 404 && typeof toast === "function") {
+              toast("Admin panel could not load. Tap Admin to retry.", "error");
+            }
+          })
           .finally(() => { _adminFetching = false; });
       }
+    }
+    if (sect && _adminRequested) {
+      _adminRequested = false;
+      switchTab("admin");
     }
     return;
   }
 
+  _adminProfile = null;
+  _adminRequested = false;
   // STEALTH for everyone else — the panel must not merely hide its DATA, it
   // must not EXIST: non-admins get "this page isn't here", exactly like the
   // server's 404. Remove the section from the DOM (switchTab then no-ops on
   // it), bounce anyone sitting on it, and scrub the /admin URL + any saved
   // deep-link so the address bar never advertises it either.
   if (sect && !_adminSectHtml) _adminSectHtml = sect.outerHTML;
-  if (currentTab === "admin") switchTab("overview");
+  if (currentTab === "admin") switchTab("jobs");
   if (sect) sect.remove();
   try {
-    if (_clientPath() === "/admin") history.replaceState({}, "", "/dashboard");
+    if (_clientPath() === "/admin") history.replaceState({}, "", "/bots");
     if (sessionStorage.getItem("ahad_return_to") === "/admin") sessionStorage.removeItem("ahad_return_to");
   } catch (e) {}
 }
@@ -5541,10 +6789,23 @@ function _admPreserve(fn) {
 }
 
 let _admInFlight = false;
+let _admRiskCache = null;
+let _admRiskAt = 0;
+
+function _loadAdminRiskData() {
+  if (_admRiskCache && Date.now() - _admRiskAt < 60000) return Promise.resolve(_admRiskCache);
+  return Promise.all([
+    api("/admin/ip-clusters", "GET", null, true).catch(() => null),
+    api("/admin/fingerprint-clusters", "GET", null, true).catch(() => null),
+    api("/admin/signup-flags", "GET", null, true).catch(() => null),
+    api("/admin/blocks", "GET", null, true).catch(() => null),
+  ]).then(parts => { _admRiskCache = parts; _admRiskAt = Date.now(); return parts; });
+}
 
 async function loadAdminPanel(force) {
   const stats = document.getElementById("admStats");
   if (!stats) return;
+  if (typeof _admWireSectionNav === "function") _admWireSectionNav();
   // A slow poll must not stack on the previous one. Without this, a runner
   // taking longer than the interval to answer queues refreshes until the
   // whole pool is being hammered by the panel watching it.
@@ -5560,13 +6821,18 @@ async function loadAdminPanel(force) {
     stats.innerHTML = '<div class="adm-stat"><b>…</b><span>loading</span></div>';
   }
   try {
-    const [ov, usersR, jobsR, reportsR, auditR, libsR] = await Promise.all([
+    const botDays = document.getElementById("admBotDays")?.value || 30;
+    const [ov, usersR, jobsR, reportsR, auditR, libsR, botR, tgJobsR, runnerR, riskR] = await Promise.all([
       api("/admin/overview", "GET", null, true),
       api("/admin/users", "GET", null, true),
       api("/admin/jobs", "GET", null, true),
       api("/admin/abuse-reports", "GET", null, true),
       api("/admin/audit-log", "GET", null, true),
       api("/admin/libraries", "GET", null, true).catch(() => null),
+      api("/admin/bot-usage?days=" + encodeURIComponent(botDays), "GET", null, true).catch(() => null),
+      api("/admin/telegram-jobs", "GET", null, true).catch(() => null),
+      api("/admin/runners", "GET", null, true).catch(() => null),
+      _loadAdminRiskData(),
     ]);
     _admPreserve(() => {
       renderAdminStats(ov || {});
@@ -5576,7 +6842,15 @@ async function loadAdminPanel(force) {
       renderAdminReports((reportsR && reportsR.reports) || []);
       renderAdminAudit((auditR && auditR.audit) || []);
       renderAdminLibs(libsR || {});
+      renderAdminBotUsage(botR || {});
+      renderAdminTelegramJobs(tgJobsR || {});
+      renderAdminRunners(runnerR || {});
+      const risk = riskR || [];
+      renderAdminRisk(risk[0] || {}, risk[1] || {}, risk[2] || {}, risk[3] || {});
     });
+    _wireAdminBotUsage();
+    _wireAdminRisk();
+    _wireAdminRunners();
     _admMarkFresh();
     stats.dataset.loaded = "1";
   } catch (e) {
@@ -5695,6 +6969,221 @@ function renderAdminLibs(data) {
   });
 }
 
+function renderAdminRunners(data) {
+  const stats=document.getElementById("admRunnerStats");
+  const list=document.getElementById("admRunners");
+  if(!stats||!list)return;
+  const rows=data.runners||[], envRows=data.environment_runners||[], embedded=data.embedded;
+  stats.textContent="";
+  [["total engines",data.total_enabled||0],["managed remote",rows.length],["online",rows.filter(r=>r.online).length+(embedded&&embedded.online?1:0)],["jobs",rows.reduce((n,r)=>n+(r.jobs||0),0)+(embedded?embedded.jobs||0:0)]].forEach(([label,value])=>{const box=document.createElement("div");box.className="adm-stat";box.append(_botText("b",value),_botText("span",label));stats.appendChild(box);});
+  list.textContent="";
+  if(embedded){const card=document.createElement("article");card.className="adm-runner-card"+(embedded.online?" is-online":" is-offline");const main=document.createElement("div");main.className="adm-runner-main";main.append(_botText("b","Embedded engine"),_botText("span","Main website container · existing/local jobs"));const metrics=document.createElement("div");metrics.className="adm-runner-metrics";metrics.append(_botText("span",embedded.online?"online":"offline","adm-pill"+(embedded.online?" ok":" warn")),_botText("span",`${embedded.jobs||0}/${embedded.capacity||0} jobs`),_botText("span",`${Math.round(embedded.mem_mb||0)}MB used`));card.append(main,metrics,_botText("span","Add a remote runner to isolate new bot deployments.","adm-hint"));list.appendChild(card);}
+  rows.forEach(r=>{
+    const card=document.createElement("article");card.className="adm-runner-card"+(r.online?" is-online":" is-offline");
+    const main=document.createElement("div");main.className="adm-runner-main";main.append(_botText("b",r.label),_botText("span",r.url));
+    const metrics=document.createElement("div");metrics.className="adm-runner-metrics";metrics.append(_botText("span",r.online?"online":"offline","adm-pill"+(r.online?" ok":" warn")),_botText("span",`${r.jobs||0}/${r.capacity||0} jobs`),_botText("span",`${Math.round(r.mem_mb||0)}MB used`),_botText("span",`${r.assigned_jobs||0} assigned`));
+    const actions=document.createElement("div");actions.className="adm-runner-card-actions";
+    const toggle=document.createElement("button");toggle.className="btn-ghost sm";toggle.textContent=r.enabled?"Drain":"Enable";toggle.onclick=()=>_admToggleRunner(r.id,!r.enabled);actions.appendChild(toggle);
+    if(!r.assigned_jobs){const del=document.createElement("button");del.className="btn-ghost sm danger";del.textContent="Remove";del.onclick=()=>_admDeleteRunner(r.id);actions.appendChild(del);}
+    card.append(main,metrics,actions);list.appendChild(card);
+  });
+  envRows.forEach(url=>{const card=document.createElement("article");card.className="adm-runner-card";const main=document.createElement("div");main.className="adm-runner-main";main.append(_botText("b","Environment runner"),_botText("span",url));card.append(main,_botText("span","managed in Render environment","adm-hint"));list.appendChild(card);});
+  if(!rows.length&&!envRows.length&&!embedded)list.appendChild(_botText("div","No runner engine is available.","adm-empty"));
+}
+
+async function _admToggleRunner(id,enabled){try{await api(`/admin/runners/${id}/toggle`,"POST",{enabled},true);toast(enabled?"Runner enabled":"Runner drained","success");loadAdminPanel(true);}catch(e){toast(e.message,"error");}}
+async function _admDeleteRunner(id){if(!confirm("Remove this runner from the registry?"))return;try{await api(`/admin/runners/${id}`,"DELETE",null,true);toast("Runner removed","success");loadAdminPanel(true);}catch(e){toast(e.message,"error");}}
+
+function _wireAdminRunners(){
+  const setup=document.getElementById("admRunnerSetup");
+  const open=document.getElementById("admRunnerAddOpen");if(open&&!open.dataset.wired){open.dataset.wired="1";open.onclick=()=>{setup.hidden=false;document.getElementById("admRunnerLabel").focus();};}
+  const cancel=document.getElementById("admRunnerCancel");if(cancel&&!cancel.dataset.wired){cancel.dataset.wired="1";cancel.onclick=()=>{setup.hidden=true;};}
+  const generate=document.getElementById("admRunnerGenerate");if(generate&&!generate.dataset.wired){generate.dataset.wired="1";generate.onclick=async()=>{try{const d=await api("/admin/runners/generate-secret","POST",{},true);const input=document.getElementById("admRunnerSecret");input.value=d.secret;input.type="text";input.select();try{await navigator.clipboard.writeText(d.secret);toast("Secret generated and copied","success");}catch(e){toast("Secret generated — copy it now","info");}}catch(e){toast(e.message,"error");}};}
+  const save=document.getElementById("admRunnerSave");if(save&&!save.dataset.wired){save.dataset.wired="1";save.onclick=async()=>{const body={label:document.getElementById("admRunnerLabel").value.trim(),url:document.getElementById("admRunnerUrl").value.trim(),secret:document.getElementById("admRunnerSecret").value.trim()};try{save.disabled=true;save.textContent="Testing runner…";const d=await api("/admin/runners","POST",body,true);toast(d.message,"success");setup.hidden=true;document.getElementById("admRunnerSecret").value="";await loadAdminPanel(true);}catch(e){toast(e.message,"error");}finally{save.disabled=false;save.textContent="Test & add runner";}};}
+}
+
+function renderAdminTelegramJobs(data) {
+  const stats=document.getElementById("admTgJobStats");
+  if(!stats)return;
+  stats.textContent="";
+  [["bots detected",data.detected||0],["running",data.running||0],["run actions",(data.events||[]).length]].forEach(([label,value])=>{const box=document.createElement("div");box.className="adm-stat";box.append(_botText("b",value),_botText("span",label));stats.appendChild(box);});
+  const grid=document.getElementById("admTgJobs");
+  if(grid){
+    grid.textContent="";
+    (data.bots||[]).forEach(bot=>{
+      const card=document.createElement("article");card.className="adm-tg-job"+(bot.status==="running"?" is-live":"");
+      const head=document.createElement("div");head.className="adm-tg-job-head";
+      const identity=document.createElement("div");identity.append(_botText("b",bot.telegram_bot_username?`@${bot.telegram_bot_username}`:"Telegram bot"),_botText("span",`${bot.owner} · ${bot.name}`));
+      const state=_botText("span",bot.status||"offline","adm-pill"+(bot.status==="running"?" ok":""));head.append(identity,state);card.appendChild(head);
+      card.appendChild(_botText("div",`${bot.telegram_framework||"framework unknown"} · ${bot.telegram_update_mode||"mode unknown"} · token ${bot.telegram_check_status||"unverified"}${bot.uptime_s?` · uptime ${_fmtUptime(bot.uptime_s)}`:""}`,"adm-hint"));
+      const actions=document.createElement("div");actions.className="adm-tg-job-actions";
+      const inspect=document.createElement("button");inspect.className="btn-ghost sm";inspect.textContent="View job";inspect.onclick=()=>openAdminJob(bot.id);actions.appendChild(inspect);
+      if(bot.telegram_bot_url){const go=document.createElement("a");go.className="btn-ghost sm adm-go-bot";go.textContent="Go to bot";go.href=bot.telegram_bot_url;go.target="_blank";go.rel="noopener noreferrer";actions.appendChild(go);}
+      card.appendChild(actions);grid.appendChild(card);
+    });
+    if(!(data.bots||[]).length)grid.appendChild(_botText("div","No Telegram bot detected in deployed jobs yet.","adm-empty"));
+  }
+  const events=document.getElementById("admTgJobEvents");
+  if(events){events.textContent="";const h=document.createElement("tr");["When","Owner","Action","Job","Bot","Open"].forEach(x=>h.appendChild(_botText("th",x)));events.appendChild(h);(data.events||[]).slice(0,100).forEach(ev=>{const tr=document.createElement("tr");[_admAgo(ev.created_at),ev.owner,ev.action,ev.job_name,ev.telegram_bot_username?`@${ev.telegram_bot_username}`:(ev.telegram_bot_detected?"detected":"—")].forEach(x=>tr.appendChild(_botText("td",x)));const td=document.createElement("td");if(ev.telegram_bot_url){const a=document.createElement("a");a.className="adm-link";a.href=ev.telegram_bot_url;a.target="_blank";a.rel="noopener noreferrer";a.textContent="Go to bot";td.appendChild(a);}else td.textContent="—";tr.appendChild(td);events.appendChild(tr);});}
+}
+
+let _admBlockDraft = null;
+
+function _admRiskCard(kind, cluster) {
+  const card = document.createElement("article");
+  card.className = "adm-risk-card" + (cluster.over_limit || cluster.signup_burst ? " danger" : "");
+  const top = document.createElement("div"); top.className = "adm-risk-card-top";
+  const title = _botText("b", kind === "ip" ? cluster.ip : cluster.fingerprint, "adm-risk-key");
+  const badge = _botText("span", `${cluster.account_count || cluster.signups_in_window || 0} account${(cluster.account_count || cluster.signups_in_window) === 1 ? "" : "s"}`, "adm-pill" + (cluster.over_limit ? " warn" : ""));
+  top.append(title, badge); card.appendChild(top);
+  const details = document.createElement("div"); details.className = "adm-risk-meta";
+  if (kind === "ip") details.textContent = `${cluster.device_count || 0} devices · ${cluster.running_jobs || 0}/${cluster.job_limit || 0} jobs running`;
+  else if (kind === "fingerprint") details.textContent = `${cluster.running_jobs || 0}/${cluster.job_limit || 0} jobs running${cluster.signup_burst ? ` · ${cluster.recent_signups} recent signups` : ""}`;
+  else details.textContent = `${cluster.signups_in_window || 0} signups in ${Math.round((cluster.window_seconds || 0) / 60)} minutes`;
+  card.appendChild(details);
+
+  const accounts = document.createElement("div"); accounts.className = "adm-risk-accounts";
+  (cluster.accounts || []).forEach(u => {
+    const b = document.createElement("button"); b.type="button"; b.className="adm-risk-account";
+    b.textContent = `${u.username || "account"}${u.is_suspended ? " · suspended" : ""}`;
+    b.addEventListener("click", () => openAdminUser(u.id)); accounts.appendChild(b);
+  });
+  card.appendChild(accounts);
+
+  const actions = document.createElement("div"); actions.className="adm-risk-actions";
+  const review = document.createElement("span"); review.className="adm-hint";
+  review.textContent = kind === "ip" ? "IP alone is not identity." : "Review linked accounts first.";
+  actions.appendChild(review);
+  const raw = kind === "ip" ? cluster.ip : cluster.fingerprint_full;
+  if (kind !== "signup" && raw) {
+    const block = document.createElement("button"); block.type="button"; block.className="btn-ghost sm";
+    block.textContent = kind === "ip" ? "Restrict network" : "Restrict device";
+    block.addEventListener("click", () => _admOpenBlock(kind, raw)); actions.appendChild(block);
+  }
+  card.appendChild(actions);
+  return card;
+}
+
+function renderAdminRisk(ipData, fpData, flagData, blockData) {
+  const stats = document.getElementById("admRiskStats");
+  if (!stats) return;
+  const ips = (ipData.clusters || []).filter(c => c.account_count > 1 || c.over_limit);
+  const fps = (fpData.clusters || []).filter(c => c.account_count > 1 || c.over_limit || c.signup_burst);
+  const flags = flagData.flags || [];
+  stats.textContent="";
+  [["shared networks",ips.length],["shared devices",fps.length],["signup bursts",flags.length],["active restrictions",blockData.active || 0]].forEach(([label,value])=>{
+    const box=document.createElement("div"); box.className="adm-stat"+(value ? " warn" : ""); box.append(_botText("b",value),_botText("span",label)); stats.appendChild(box);
+  });
+  const fill=(id, rows, kind, empty)=>{ const el=document.getElementById(id); if(!el)return; el.textContent=""; rows.slice(0,20).forEach(r=>el.appendChild(_admRiskCard(kind,r))); if(!rows.length)el.appendChild(_botText("div",empty,"adm-empty")); };
+  fill("admIpClusters",ips,"ip","No shared networks detected.");
+  fill("admFpClusters",fps,"fingerprint","No shared devices detected.");
+  fill("admSignupFlags",flags,"signup","No signup bursts detected.");
+
+  const active=document.getElementById("admActiveBlocks");
+  if (active) {
+    active.textContent="";
+    const rows=(blockData.blocks || []).filter(b=>b.active);
+    rows.forEach(b=>{ const row=document.createElement("div"); row.className="adm-block-row"; const info=document.createElement("div"); info.append(_botText("b",`${b.scope}: ${b.value}`),_botText("span",`${b.reason || "No reason"} · ${b.expires_at ? "until "+b.expires_at+" UTC" : "permanent"}`)); const remove=document.createElement("button"); remove.className="btn-ghost sm"; remove.textContent="Remove"; remove.onclick=()=>_admRemoveBlock(b.id); row.append(info,remove); active.appendChild(row); });
+    if(!rows.length) active.appendChild(_botText("div","No active manual restrictions.","adm-empty"));
+  }
+}
+
+function _admOpenBlock(scope, value) {
+  _admBlockDraft={scope,value};
+  const target=document.getElementById("admBlockTarget"); if(target)target.textContent=`${scope === "ip" ? "Network" : "Device"}: ${value}`;
+  const reason=document.getElementById("admBlockReason"); if(reason)reason.value="";
+  openModal("admBlockModal");
+}
+
+async function _admConfirmBlock() {
+  if(!_admBlockDraft)return;
+  const btn=document.getElementById("admBlockConfirm");
+  const body={..._admBlockDraft,duration_hours:Number(document.getElementById("admBlockDuration")?.value || 24),reason:document.getElementById("admBlockReason")?.value.trim() || ""};
+  try { if(btn)btn.disabled=true; await api("/admin/blocks","POST",body,true); _admRiskAt=0; closeModal("admBlockModal"); toast("Restriction applied","success"); await loadAdminPanel(true); }
+  catch(e){ toast(e.message,"error"); }
+  finally{ if(btn)btn.disabled=false; }
+}
+
+async function _admRemoveBlock(id) {
+  if(!confirm("Remove this restriction?"))return;
+  try { await api(`/admin/blocks/${id}/remove`,"POST",{},true); _admRiskAt=0; toast("Restriction removed","success"); await loadAdminPanel(true); }
+  catch(e){ toast(e.message,"error"); }
+}
+
+function _wireAdminRisk() {
+  const refresh=document.getElementById("admRiskRefresh"); if(refresh&&!refresh.dataset.wired){refresh.dataset.wired="1";refresh.addEventListener("click",()=>{_admRiskAt=0;loadAdminPanel(true);});}
+  const confirm=document.getElementById("admBlockConfirm"); if(confirm&&!confirm.dataset.wired){confirm.dataset.wired="1";confirm.addEventListener("click",_admConfirmBlock);}
+}
+
+function _admAgo(value) {
+  if (!value) return "—";
+  // SQLite timestamps are UTC but have no suffix; offset-bearing values must
+  // not receive a second Z (Date.parse("+00:00Z") is NaN).
+  const raw = String(value);
+  const parsed = Date.parse(/[zZ]$|[+-]\d\d:\d\d$/.test(raw) ? raw : raw.replace(" ", "T") + "Z");
+  if (!Number.isFinite(parsed)) return raw;
+  const sec = Math.max(0, Math.round((Date.now() - parsed) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+  return `${Math.round(sec / 86400)}d ago`;
+}
+
+function _botText(tag, value, cls) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  el.textContent = value == null || value === "" ? "—" : String(value);
+  return el;
+}
+
+function renderAdminBotUsage(data) {
+  const stats = document.getElementById("admBotStats");
+  if (!stats) return;
+  stats.textContent = "";
+  [["people", data.people || 0], ["with account", data.linked_people || 0],
+   ["not signed up", data.unlinked_people || 0], ["actions", data.actions || 0],
+   ["today", data.today || 0], ["failed", data.failures || 0]].forEach(([label, val]) => {
+    const box = document.createElement("div"); box.className = "adm-stat" + (label === "failed" && val ? " warn" : "");
+    box.append(_botText("b", val), _botText("span", label)); stats.appendChild(box);
+  });
+
+  const spark = document.getElementById("admBotSpark");
+  if (spark) {
+    spark.textContent = "";
+    const rows = data.daily || [], max = Math.max(1, ...rows.map(r => r.count || 0));
+    rows.forEach(r => { const bar = document.createElement("i"); bar.style.height = Math.max(6, Math.round((r.count/max)*56)) + "px"; bar.title = `${r.day}: ${r.count}`; spark.appendChild(bar); });
+  }
+  const commands = document.getElementById("admBotCommands");
+  if (commands) {
+    commands.textContent = "";
+    (data.commands || []).slice(0, 12).forEach(r => { const row = document.createElement("div"); row.className="adm-bot-row"; row.append(_botText("b", r.command), _botText("span", `${r.count}${r.failures ? ` · ${r.failures} failed` : ""}`)); commands.appendChild(row); });
+    if (!(data.commands || []).length) commands.appendChild(_botText("div", "No activity yet.", "adm-empty"));
+  }
+  const people = document.getElementById("admBotPeople");
+  if (people) {
+    people.textContent = "";
+    (data.users || []).slice(0, 12).forEach(r => { const row=document.createElement("div"); row.className="adm-bot-row"; row.append(_botText("b", r.display_name || `Chat ${r.chat_id}`), _botText("span", `${r.actions} actions · ${r.user_id ? "account" : "not signed up"}`)); people.appendChild(row); });
+  }
+  const events = document.getElementById("admBotEvents");
+  if (events) {
+    events.textContent = "";
+    const head=document.createElement("tr"); ["When","Person","Action","Target","Result"].forEach(v=>head.appendChild(_botText("th",v))); events.appendChild(head);
+    (data.events || []).slice(0, 60).forEach(r => { const tr=document.createElement("tr"); [_admAgo(r.created_at), r.display_name || `Chat ${r.chat_id}`, r.command || r.event_type, r.payload, r.outcome].forEach(v=>tr.appendChild(_botText("td",v))); events.appendChild(tr); });
+  }
+}
+
+function _wireAdminBotUsage() {
+  const range = document.getElementById("admBotDays");
+  if (range && !range.dataset.wired) { range.dataset.wired="1"; range.addEventListener("change", () => loadAdminPanel(true)); }
+  const csv = document.getElementById("admBotCsv");
+  if (csv && !csv.dataset.wired) { csv.dataset.wired="1"; csv.addEventListener("click", async () => {
+    const days = range?.value || 30;
+    const res = await fetch(`/admin/bot-usage.csv?days=${encodeURIComponent(days)}`, {headers:{Authorization:`Bearer ${localStorage.getItem("ahad_token") || ""}`}});
+    if (!res.ok) return;
+    const a=document.createElement("a"); a.href=URL.createObjectURL(await res.blob()); a.download=`telegram-bot-usage-${days}d.csv`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }); }
+}
+
 function renderAdminStats(ov) {
   const el = document.getElementById("admStats");
   const chip = (label, val, cls) =>
@@ -5705,8 +7194,10 @@ function renderAdminStats(ov) {
     chip("suspended", ov.suspended ?? 0, ov.suspended ? "warn" : "") +
     chip("apps live", ov.jobs_deployed ?? 0) +
     chip("on telegram", ov.telegram_linked ?? 0) +
-    chip("memory", ov.mem_safe_mb != null
-        ? `${Math.round(ov.mem_used_mb ?? 0)}MB / ${ov.mem_safe_mb}MB`
+    chip("bot secrets", ov.bot_secrets_encrypted ? "encrypted" : "NOT ENCRYPTED", ov.bot_secrets_encrypted ? "" : "warn") +
+    chip("runner", ov.runner_isolation === "remote" ? "isolated service" : "embedded", ov.runner_isolation === "remote" ? "" : "warn") +
+    chip("runner memory used", ov.mem_safe_mb != null
+        ? `${Math.round(ov.mem_used_mb ?? 0)}MB used`
         : "—",
       (ov.mem_pct ?? 0) >= 90 ? "warn" : "");
   const cap = document.getElementById("admCap");
@@ -5715,8 +7206,8 @@ function renderAdminStats(ov) {
     // the same RAM, so a slot count never predicted whether the next job fits.
     if (ov.mem_safe_mb != null) {
       const jobs = ov.runner_running ?? 0;
-      let txt = `${Math.round(ov.mem_used_mb ?? 0)}MB / ${ov.mem_safe_mb}MB`
-              + ` (${ov.mem_pct ?? 0}%) — ${jobs} job${jobs === 1 ? "" : "s"} running`;
+      let txt = `${Math.round(ov.mem_used_mb ?? 0)}MB currently used · ${ov.mem_safe_mb}MB safe fleet capacity`
+              + ` (${ov.mem_pct ?? 0}%) — ${jobs} bot${jobs === 1 ? "" : "s"} running`;
       if (ov.mem_total_mb) txt += ` · ${ov.mem_total_mb}MB total`;
       if ((ov.workers || []).length > 1) {
         txt += ` · ${ov.workers_online ?? 0}/${ov.workers.length} workers online`;
@@ -5898,6 +7389,17 @@ function renderAdminJobDetail(d) {
     _admRow("Created", (j.created_at || "").slice(0, 16)),
   );
   if (j.web_slug) t.appendChild(_admRow("Public URL", "/live/" + j.web_slug + "/"));
+  if (j.telegram_bot_detected) {
+    t.appendChild(_admRow("Telegram bot", j.telegram_bot_username ? `@${j.telegram_bot_username}` : "detected"));
+    t.appendChild(_admRow("Telegram check", j.telegram_check_status || "unverified"));
+    t.appendChild(_admRow("Framework", j.telegram_framework || "unknown"));
+    t.appendChild(_admRow("Update delivery", j.telegram_update_mode || "unknown"));
+    t.appendChild(_admRow("Token source before fix", j.telegram_token_source || "unknown"));
+    if (j.telegram_bot_url) {
+      const go=document.createElement("a");go.className="adm-go-bot";go.href=j.telegram_bot_url;go.target="_blank";go.rel="noopener noreferrer";go.textContent="Go to bot";
+      t.appendChild(_admRow("Open",go));
+    }
+  }
   // KEYS only. The values are bot tokens and API secrets; the console has no
   // reason to display a credential to prove it exists.
   if ((j.env_keys || []).length) {
@@ -5905,6 +7407,12 @@ function renderAdminJobDetail(d) {
   }
   if ((j.libs || []).length) t.appendChild(_admRow("Packages", j.libs.join(", ")));
   body.appendChild(t);
+
+  body.appendChild(_admSubhead("Deployment versions", "healthy and failed candidates"));
+  const versions=document.createElement("div");versions.className="adm-version-list";
+  (j.revisions||[]).forEach(v=>{const row=document.createElement("div");row.className="adm-version-row";const main=document.createElement("div");main.append(_botText("b",`v${v.version} · ${v.action}`),_botText("span",`${v.status} · ${(v.created_at||"").slice(0,16)}`));if(v.error)main.appendChild(_botText("small",v.error,"err"));row.append(main,_botText("span",v.status,"adm-pill"+(v.status==="healthy"?" ok":v.status==="failed"?" warn":"")));versions.appendChild(row);});
+  if(!(j.revisions||[]).length)versions.appendChild(_admEmpty("No versions recorded yet."));
+  body.appendChild(versions);
 
   const logHead = document.createElement("div");
   logHead.className = "adm-panel-head";
@@ -5995,12 +7503,14 @@ function renderAdminUserDetail(d) {
   const t = document.createElement("table");
   t.className = "adm-table adm-jd-table";
   t.append(
+    _admRow("Account ID", u.id),
     _admRow("Email", u.email),
     // Inferred from which credential exists — there is no auth_method column,
     // and presenting a guess as a recorded fact is how a console starts lying.
     _admRow("Signed up via", u.auth_method
       ? u.auth_method + (u.auth_method_inferred ? " (inferred)" : "") : "—"),
     _admRow("Joined", (u.created_at || "").slice(0, 16)),
+    _admRow("Updated", (u.updated_at || "").slice(0, 16)),
     _admRow("Apps", `${(d.jobs || []).length} total · ${d.jobs_running || 0} running`),
     _admRow("Memory", `${Math.round(d.mem_used_mb || 0)}MB across their running apps`),
     _admRow("Devices seen", `${d.devices || 0} device${d.devices === 1 ? "" : "s"} · ${d.networks || 0} network${d.networks === 1 ? "" : "s"}`),
@@ -6008,6 +7518,7 @@ function renderAdminUserDetail(d) {
       ? `${u.telegram_name || "linked"} · ID ${u.telegram_id}`
       : "not connected"),
     _admRow("Last IP", u.last_ip),
+    _admRow("Device fingerprint", u.fingerprint || "not recorded"),
   );
   body.appendChild(t);
 
@@ -6103,11 +7614,11 @@ function renderAdminUserDetail(d) {
   } else {
     const stb = document.createElement("table");
     stb.className = "adm-table";
-    stb.innerHTML = "<tr><th>When</th><th>IP</th><th>Device</th></tr>";
+    stb.innerHTML = "<tr><th>Started</th><th>Last seen</th><th>IP</th><th>Device</th><th>Fingerprint</th></tr>";
     sessions.forEach(sv => {
       const tr = document.createElement("tr");
-      [(sv.created_at || "").slice(0, 16), sv.ip_address || "—",
-       sv.device_info || "—"].forEach(v => {
+      [(sv.created_at || "").slice(0, 16), (sv.last_seen || "").slice(0,16), sv.ip_address || "—",
+       sv.device_info || "—", sv.fingerprint || "—"].forEach(v => {
         const td = document.createElement("td");
         td.textContent = v;
         tr.appendChild(td);
@@ -6115,6 +7626,16 @@ function renderAdminUserDetail(d) {
       stb.appendChild(tr);
     });
     body.appendChild(stb);
+  }
+
+  body.appendChild(_admSubhead("Security activity", "latest account actions and source IP"));
+  const events=(d.events || []).slice(0,20);
+  if(!events.length) body.appendChild(_admEmpty("No account activity recorded."));
+  else {
+    const et=document.createElement("table"); et.className="adm-table";
+    et.innerHTML="<tr><th>When</th><th>Action</th><th>Details</th><th>IP</th></tr>";
+    events.forEach(ev=>{ const tr=document.createElement("tr"); [(ev.created_at||"").slice(0,16),ev.action||"—",ev.details||"—",ev.ip_address||"—"].forEach(v=>{const td=document.createElement("td");td.textContent=v;tr.appendChild(td);});et.appendChild(tr); });
+    body.appendChild(et);
   }
 }
 
@@ -6172,22 +7693,18 @@ function askSuspend(userId, suspend, btn) {
   _admPending = { user_id: userId, suspended: !!suspend };
   document.getElementById("adminModalTitle").textContent = suspend ? `Suspend ${uname}?` : `Reactivate ${uname}?`;
   document.getElementById("adminModalText").textContent = suspend
-    ? `${uname} will be signed out on every device and their RunSpace apps will stop. You can reactivate anytime. Confirm with YOUR authenticator code.`
-    : `${uname} gets their access back immediately. Confirm with YOUR authenticator code.`;
-  document.getElementById("adminTfaCode").value = "";
+    ? `${uname} will be signed out on every device and their RunSpace apps will stop. You can reactivate anytime.`
+    : `${uname} gets their access back immediately.`;
   openModal("adminModal");
-  setTimeout(() => { const i = document.getElementById("adminTfaCode"); if (i) i.focus(); }, 80);
 }
 
 async function confirmAdminAction() {
   if (!_admPending) { closeModal("adminModal"); return; }
   const btn = document.getElementById("adminModalGo");
-  const code = document.getElementById("adminTfaCode").value.trim();
-  if (!code) { toast("Enter your 6-digit authenticator code.", "error"); return; }
   setLoading(btn, true);
   try {
     const res = await api("/admin/users/set-suspended", "POST",
-      { user_id: _admPending.user_id, suspended: _admPending.suspended, code }, true);
+      { user_id: _admPending.user_id, suspended: _admPending.suspended }, true);
     _admPending = null;
     closeModal("adminModal");
     toast((res && res.message) || "Done.", "success");
@@ -6198,12 +7715,6 @@ async function confirmAdminAction() {
     setLoading(btn, false);
   }
 }
-
-// Enter inside the admin 2FA box = confirm. (Wired once at boot.)
-(function () {
-  const box = document.getElementById("adminTfaCode");
-  if (box) box.addEventListener("keydown", (e) => { if (e.key === "Enter") confirmAdminAction(); });
-})();
 
 // Code Studio full-bleed: toggle body class so CSS can strip dash-main padding
 (function(){
@@ -6520,6 +8031,14 @@ window.onTelegramAuth = async function (user) {
     try {
       const r = await fetch("/api/public-config");
       if (r.ok) cfg = await r.json();
+      else {
+        // python -m http.server returns its HTML 404 page for every path.
+        // Recognise the purely static host here too, so a Termux user can
+        // open the preview from a LAN address (not only localhost) and the
+        // app still switches to the local demo UI.
+        const ct = (r.headers && r.headers.get && r.headers.get("content-type")) || "";
+        if (r.status === 404 && /text\/html/i.test(ct)) _enableDemo();
+      }
     } catch (e) { /* older backend / offline */ }
 
     const username = (cfg.telegram_bot_username || "").trim();
@@ -7176,12 +8695,17 @@ async function _rsHandleUpload(file) {
   }
 
   _jobCmSetValue(text);
+  _renderTemplateConfig([]);
+  _setRunSpaceSourceMode("upload");
+  const selectedTemplate=document.getElementById("rsSelectedTemplate");if(selectedTemplate)selectedTemplate.textContent="7 complete bot products";
+  _rsBotAnalysis=null;
+  _setBotWizardStage("code");
   if (typeof _setHint === "function") _setHint("", "Loaded " + file.name);
 
   if (!lang) {
     toast("Opened " + file.name + " — pick a runtime before running it.", "info");
   } else {
-    toast("Opened " + file.name + " — press Run to deploy.", "success");
+    toast("Opened " + file.name + " — tap Continue when ready.", "success");
   }
 }
 
@@ -7227,19 +8751,78 @@ function _initRsHeaderActions() {
     if (real) real.click();
   });
 
+  /* ── SAVE & RUN: AN EXPLICIT STATE MACHINE ──────────────────────────────
+   *
+   * REPORTED: pressing Save & Run showed no animation and no loading state,
+   * so there was no way to tell whether the click had registered, whether it
+   * was saving, whether it was starting, or whether it had failed.
+   *
+   * CAUSE: startJob() does maintain a busy state — but on #btnStartJob, the
+   * Run row inside the ⋯ menu. The button the user actually presses is this
+   * one, #btnRunQuick in the header, and the only thing mirrored onto it was
+   * the `loading` class (opacity .6). No label change, no spinner. On a fast
+   * connection that is a flicker; on a slow one it is a dead button.
+   *
+   * The states below are the ones the work can really be in. Each is driven
+   * by rsRunState(), which startJob() calls at each transition, so there is
+   * one implementation of "what is this button doing right now".
+   *
+   *   idle     "Save & Run"   enabled
+   *   saving   "Saving…"      disabled + spinner   (writing the code)
+   *   starting "Starting…"    disabled + spinner   (process coming up)
+   *   done     back to idle; the header status badge shows Running
+   *   error    back to idle so the user can retry; the failure is surfaced
+   *            through the existing toast, not swallowed
+   */
+  const RS_RUN_LABEL = { idle: "Save & Run", saving: "Saving…", starting: "Starting…" };
+  window.rsRunState = function (state) {
+    const btn = document.getElementById("btnRunQuick");
+    if (!btn) return;
+    const busy = state === "saving" || state === "starting";
+    // A <span> label already exists for the responsive icon-only mode.
+    let label = btn.querySelector("span");
+    if (!label) { label = document.createElement("span"); btn.appendChild(label); }
+    label.textContent = RS_RUN_LABEL[state] || RS_RUN_LABEL.idle;
+
+    /* The state is compared BEFORE the toggle call, not inside it. A
+       coverage check that scans classList.toggle(...) for string literals
+       reads BOTH arguments as class names, so an inline comparison against
+       a state string gets reported as an unstyled class — a false positive
+       that costs someone a debugging session. Same behaviour, no ambiguity.
+       (The comment itself must avoid quoted single letters for the same
+       reason: the scanner does not know comments from code.) */
+    const isSaving = state === "saving";
+    const isStarting = state === "starting";
+    btn.classList.toggle("loading", busy);
+    btn.classList.toggle("is-saving", isSaving);
+    btn.classList.toggle("is-starting", isStarting);
+    btn.disabled = busy;
+    btn.setAttribute("aria-busy", busy ? "true" : "false");
+
+    // One spinner element, created once, shown only while busy. Adding and
+    // removing a node on every transition would restart the CSS animation
+    // mid-spin and read as a stutter.
+    let sp = btn.querySelector(".rs-run-spin");
+    if (busy && !sp) {
+      sp = document.createElement("i");
+      sp.className = "rs-run-spin";
+      sp.setAttribute("aria-hidden", "true");
+      btn.insertBefore(sp, btn.firstChild);
+    }
+    if (sp) sp.hidden = !busy;
+  };
+
   // Mirror the real button's visibility: Run only means something once a
   // job is open. #rsJobActions is what the app already toggles for that.
   const seg = document.getElementById("rsJobActions");
   const sync = () => {
     const on = !!seg && !seg.hasAttribute("hidden");
     run.hidden = !on;
-    const real = document.getElementById("btnStartJob");
-    if (real) {
-      const label = run.querySelector("span");
-      const txt = (real.textContent || "").trim();
-      if (label && txt) label.textContent = txt.includes("Run") ? "Save & Run" : txt;
-      run.classList.toggle("loading", real.classList.contains("loading"));
-    }
+    /* The label used to be copied from #btnStartJob's text on every sync,
+       which fought rsRunState() for control of it: a sync firing mid-deploy
+       would overwrite "Saving…" with "Save & Run" and the feedback vanished.
+       rsRunState() owns the label and the busy class now; this only decides
+       whether the button is on screen at all. */
   };
   if (seg) new MutationObserver(sync).observe(seg, { attributes: true, attributeFilter: ["hidden"] });
   const realBtn = document.getElementById("btnStartJob");
@@ -7280,90 +8863,56 @@ else setTimeout(_initRsHeaderActions, 70);
    there is no second fetch and no second source of truth.
    ══════════════════════════════════════════════════════════════════════════ */
 function _rsJobsPopRender() {
-  const list = document.getElementById("rsJobsPopList");
+  const list = document.getElementById("rsUnifiedBotList");
   if (!list) return;
   const jobs = window._lastJobs || [];
   if (!jobs.length) {
-    list.innerHTML = '<div class="rs-jp-empty">No jobs yet — create one below.</div>';
+    list.innerHTML = '<div class="rs-jp-empty">No bots yet.</div>';
     return;
   }
   const esc = (t) => String(t == null ? "" : t)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   list.innerHTML = jobs.map(j => {
-    const st = String(j.status || "").toLowerCase();
-    const cls = st === "running" ? "running" : (st === "crashed" ? "crashed" : "");
+    const st = String(j.status || "offline").toLowerCase();
+    const cls = st === "running" ? "running" : ((st === "crashed" || st === "install_failed") ? "crashed" : "");
     const active = String(j.id) === String(_selectedJobId) ? " is-active" : "";
-    return '<button type="button" class="rs-jp-item' + active + '" data-jid="' + esc(j.id) + '">' +
+    const label = st === "running" ? "Running" : ((st === "crashed" || st === "install_failed") ? "Problem" : (st === "starting" || st === "installing") ? "Starting" : "Stopped");
+    return '<div class="rs-jp-item' + active + '" role="button" tabindex="0" data-jid="' + esc(j.id) + '">' +
              '<span class="rs-jp-dot ' + cls + '"></span>' +
              '<span class="rs-jp-name">' + esc(j.name || "untitled") + "</span>" +
-             '<span class="rs-jp-meta">' + esc(j.language || "") + "</span>" +
-           "</button>";
+             '<span class="rs-jp-meta">' + label + "</span>" +
+             '<button type="button" class="rs-jp-delete" data-delete-jid="' + esc(j.id) + '" title="Delete bot" aria-label="Delete ' + esc(j.name || "bot") + '">×</button>' +
+           "</div>";
   }).join("");
 }
 
-function rsJobsPopOpen() {
-  const pop = document.getElementById("rsJobsPop");
-  if (!pop) return;
-  const menu = document.getElementById("rsMoreMenu");
-  if (menu) menu.hidden = true;          // only one panel at a time
-  _rsJobsPopRender();
-  pop.hidden = false;
-  document.body.classList.add("rs-menu-open");
-}
-function rsJobsPopClose() {
-  const pop = document.getElementById("rsJobsPop");
-  if (!pop) return;
-  pop.hidden = true;
-  const menu = document.getElementById("rsMoreMenu");
-  if (!menu || menu.hidden) document.body.classList.remove("rs-menu-open");
-}
-
 function _initRsJobsPop() {
-  const pop = document.getElementById("rsJobsPop");
-  if (!pop || pop.dataset.wired === "1") return;
-  pop.dataset.wired = "1";
-
-  // The menu row opens this instead of toggling the legacy rail classes.
-  const trigger = document.getElementById("btnJobsInMenu");
-  if (trigger) {
-    const fresh = trigger.cloneNode(true);   // drop the old rail handler
-    trigger.parentNode.replaceChild(fresh, trigger);
-    fresh.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const menu = document.getElementById("rsMoreMenu");
-      if (menu) menu.hidden = true;
-      rsJobsPopOpen();
-    });
-  }
-
-  pop.addEventListener("click", (e) => {
-    const row = e.target.closest(".rs-jp-item");
-    if (row) {
-      e.preventDefault(); e.stopPropagation();
-      rsJobsPopClose();
-      if (typeof selectJob === "function") selectJob(row.getAttribute("data-jid"));
+  const menu=document.getElementById("rsMoreMenu");
+  if(!menu||menu.dataset.botListWired==="1")return;
+  menu.dataset.botListWired="1";
+  menu.addEventListener("click",async(e)=>{
+    const del=e.target.closest("[data-delete-jid]");
+    if(del){
+      e.preventDefault();e.stopPropagation();
+      const id=del.getAttribute("data-delete-jid");
+      const job=(window._lastJobs||[]).find(j=>String(j.id)===String(id));
+      if(!confirm(`Delete ${job&&job.name?job.name:"this bot"}? Its workspace and database will be removed.`))return;
+      await deleteJobById(id,del);
+      _rsJobsPopRender();
       return;
     }
-    if (e.target.closest("#rsJobsPopNew")) {
-      e.preventDefault(); e.stopPropagation();
-      rsJobsPopClose();
-      const real = document.getElementById("btnNew");
-      if (real) real.click();
+    const row=e.target.closest(".rs-jp-item");
+    if(row){
+      e.preventDefault();e.stopPropagation();
+      menu.hidden=true;document.body.classList.remove("rs-menu-open");
+      document.getElementById("rsMoreBtn")?.setAttribute("aria-expanded","false");
+      selectJob(row.getAttribute("data-jid"));
     }
   });
-
-  document.addEventListener("click", (e) => {
-    if (pop.hidden) return;
-    if (pop.contains(e.target)) return;
-    if (e.target.closest("#btnJobsInMenu, #rsMoreBtn")) return;
-    rsJobsPopClose();
+  menu.addEventListener("keydown",e=>{
+    const row=e.target.closest(".rs-jp-item");
+    if(row&&(e.key==="Enter"||e.key===" ")){e.preventDefault();row.click();}
   });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !pop.hidden) { e.stopPropagation(); rsJobsPopClose(); }
-  });
-
-  const scrim = document.getElementById("rsMenuScrim");
-  if (scrim) scrim.addEventListener("click", rsJobsPopClose);
 }
 
 /* Tapping the inspector sheet itself dismisses it, as asked. */
@@ -7439,4 +8988,708 @@ async function _rsPullRepoEntry(jobId) {
     return r;
   };
   selectJob = window.selectJob;
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   BOT STORE — a shelf of complete bots, each one a single raw Python file.
+
+   The point of this screen is the opposite of a visual command builder:
+   there is nothing to assemble. A listing IS the program. So the UI shows
+   the whole file before you deploy it, and "Deploy this bot" hands that
+   exact file to the one Add Bot wizard the rest of the product uses.
+   ══════════════════════════════════════════════════════════════════════ */
+let _storeItems = [];
+let _storeFacets = null;
+let _storeCategory = "All";
+let _storeSort = "popular";
+let _storeQuery = "";
+let _storeLoaded = false;
+let _storeLoading = false;
+let _storeCurrent = null;      // listing open in the detail modal
+let _storeDeploying = false;
+let _storeFavs = new Set();
+let _storeTaken = new Set();
+let _storeSearchTimer = null;
+
+const _STORE_SORTS = { popular: "Popular", rating: "Top rated", newest: "Newest", name: "A–Z" };
+
+function _storeEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+async function loadStore(force) {
+  if (_storeLoading) return;
+  if (_storeLoaded && !force) return;
+  _storeLoading = true;
+  const facets = document.getElementById("storeFacets");
+  try {
+    const params = new URLSearchParams({ sort: _storeSort, limit: "48" });
+    if (_storeQuery) params.set("q", _storeQuery);
+    if (_storeCategory !== "All") params.set("category", _storeCategory);
+    const data = await api("/api/store?" + params.toString(), "GET", null, true);
+    _storeItems = data.items || [];
+    _storeFacets = data.facets || null;
+    _storeFavs = new Set(data.favorite_slugs || []);
+    _storeTaken = new Set(data.installed_slugs || []);
+    _storeLoaded = true;
+    renderStore();
+  } catch (e) {
+    if (facets) facets.textContent = "Could not load the store.";
+    toast("Could not load the store", "error");
+  } finally {
+    _storeLoading = false;
+  }
+}
+
+function _storeRenderCategories() {
+  const host = document.getElementById("storeCategories");
+  if (!host) return;
+  host.textContent = "";
+  const counts = {};
+  (_storeFacets && _storeFacets.categories || []).forEach(c => { counts[c.name] = c.count; });
+  const names = ["All", ...(_storeFacets ? _storeFacets.categories.map(c => c.name) : [])];
+  names.forEach(name => {
+    const btn = _storeEl("button", "store-cat" + (name === _storeCategory ? " is-active" : ""));
+    btn.type = "button";
+    btn.appendChild(document.createTextNode(name));
+    if (counts[name]) btn.appendChild(_storeEl("b", "", String(counts[name])));
+    btn.onclick = () => { _storeCategory = name; loadStore(true); };
+    host.appendChild(btn);
+  });
+}
+
+function renderStore() {
+  const grid = document.getElementById("storeGrid");
+  const empty = document.getElementById("storeEmpty");
+  const facets = document.getElementById("storeFacets");
+  if (!grid) return;
+  _storeRenderCategories();
+
+  if (facets && _storeFacets) {
+    const parts = [`${_storeFacets.listings} complete bots`,
+                   `${_storeFacets.community} from the community`,
+                   `${_storeFacets.installs} installs`];
+    facets.textContent = parts.join(" · ") + " · every listing is one Python file";
+  } else if (facets) {
+    facets.textContent = "";
+  }
+
+  grid.textContent = "";
+  _storeItems.forEach(item => grid.appendChild(_storeCard(item)));
+  if (empty) empty.classList.toggle("hidden", _storeItems.length > 0);
+}
+
+function _storeCard(item) {
+  const card = _storeEl("button", "store-card");
+  card.type = "button";
+
+  const top = _storeEl("span", "store-card-top");
+  top.appendChild(_storeEl("span", "store-card-lang", item.language === "javascript" ? "JS" : "PY"));
+  top.appendChild(_storeEl("b", "", item.title));
+  card.appendChild(top);
+
+  const badges = _storeEl("span", "store-card-badges");
+  badges.appendChild(_storeEl("span", "store-badge", item.category));
+  badges.appendChild(_storeEl("span", "store-badge", item.difficulty));
+  if (item.featured) badges.appendChild(_storeEl("span", "store-badge is-featured", "Featured"));
+  if (item.source === "community") badges.appendChild(_storeEl("span", "store-badge", "by " + item.author));
+  card.appendChild(badges);
+
+  card.appendChild(_storeEl("span", "store-card-desc", item.summary));
+
+  const meta = _storeEl("span", "store-card-meta");
+  const left = _storeEl("span", "", `${item.code_lines} lines · ${item.framework || "python"}`);
+  const right = _storeEl("span", "", item.rating_count
+    ? `★ ${item.rating} (${item.rating_count}) · ${item.install_count} installs`
+    : `${item.install_count} installs`);
+  meta.append(left, right);
+  if (_storeTaken.has(item.slug)) meta.appendChild(_storeEl("span", "store-taken", "Installed"));
+  card.appendChild(meta);
+
+  card.onclick = () => openStoreItem(item.slug);
+  return card;
+}
+
+async function openStoreItem(slug) {
+  try {
+    const item = await api("/api/store/" + encodeURIComponent(slug), "GET", null, true);
+    _storeCurrent = item;
+    _storeRenderDetail(item);
+    openModal("storeModal");
+  } catch (e) {
+    toast(e.message || "Could not open that listing", "error");
+  }
+}
+
+function _storeRenderDetail(item) {
+  document.getElementById("storeDetailTitle").textContent = item.title;
+  document.getElementById("storeDetailSummary").textContent = item.summary;
+
+  const meta = document.getElementById("storeDetailMeta");
+  meta.textContent = "";
+  const chips = [item.category, item.difficulty, item.framework || "python",
+                 `v${item.version}`, `${item.code_lines} lines`,
+                 `${item.install_count} installs`, "by " + item.author];
+  chips.forEach(text => meta.appendChild(_storeEl("span", "store-badge", text)));
+
+  const features = document.getElementById("storeDetailFeatures");
+  features.textContent = "";
+  (item.features || []).forEach(line => features.appendChild(_storeEl("span", "", line)));
+  features.hidden = !(item.features || []).length;
+
+  const code = document.getElementById("storeDetailCode");
+  const label = document.getElementById("storeCodeLabel");
+  if (item.code_full) {
+    code.textContent = item.code || "";
+    label.textContent = `One complete Python file · ${item.code_lines} lines`;
+  } else {
+    code.textContent = (item.code_preview || "") + "\n\n… sign in to read and deploy the whole file";
+    label.textContent = "Preview — the full file opens when you are signed in";
+  }
+
+  const fav = document.getElementById("storeFavBtn");
+  fav.textContent = _storeFavs.has(item.slug) ? "Saved ✓" : "Save";
+  const deploy = document.getElementById("storeDeployBtn");
+  deploy.textContent = _storeTaken.has(item.slug) ? "Deploy again" : "Deploy this bot";
+  deploy.disabled = !item.code_full;
+
+  _storeRenderRating(item);
+}
+
+function _storeRenderRating(item) {
+  const host = document.getElementById("storeRating");
+  const reviews = document.getElementById("storeReviews");
+  if (!host) return;
+  host.textContent = "";
+  const stars = _storeEl("span", "store-stars");
+  for (let i = 1; i <= 5; i++) {
+    const star = _storeEl("button", "store-star" + (i <= Math.round(item.rating || 0) ? " is-on" : ""), "★");
+    star.type = "button";
+    star.title = "Rate " + i + "/5";
+    star.onclick = () => _storeRate(item.slug, i);
+    stars.appendChild(star);
+  }
+  host.appendChild(stars);
+  host.appendChild(_storeEl("small", "", item.rating_count
+    ? `${item.rating} from ${item.rating_count} review${item.rating_count === 1 ? "" : "s"}`
+    : "No reviews yet — deploy it and tell people how it went"));
+
+  if (reviews) {
+    reviews.textContent = "";
+    (item.reviews || []).forEach(row => {
+      const box = _storeEl("div", "store-review");
+      box.appendChild(_storeEl("b", "", `${"★".repeat(row.rating)} `));
+      box.appendChild(document.createTextNode(row.comment || "(no comment)"));
+      box.appendChild(_storeEl("small", "", "  — " + (row.author || "member")));
+      reviews.appendChild(box);
+    });
+  }
+}
+
+async function _storeRate(slug, rating) {
+  const comment = window.prompt("Anything to add to that rating?", "") || "";
+  try {
+    const result = await api(`/api/store/${encodeURIComponent(slug)}/rate`, "POST",
+                             { rating, comment }, true);
+    toast("Thanks for the review", "success");
+    if (_storeCurrent && _storeCurrent.slug === slug) {
+      _storeCurrent.rating = result.rating_average;
+      _storeCurrent.rating_count = result.rating_count;
+      _storeCurrent.reviews = result.reviews || _storeCurrent.reviews;
+      _storeRenderRating(_storeCurrent);
+    }
+  } catch (e) {
+    toast(e.message || "Could not save that rating", "error");
+  }
+}
+
+async function _storeToggleFavorite() {
+  if (!_storeCurrent) return;
+  const slug = _storeCurrent.slug;
+  const next = !_storeFavs.has(slug);
+  try {
+    if (next) await api(`/api/store/${encodeURIComponent(slug)}/favorite`, "POST", { favorite: true }, true);
+    else await api(`/api/store/${encodeURIComponent(slug)}/favorite`, "DELETE", null, true);
+    if (next) _storeFavs.add(slug); else _storeFavs.delete(slug);
+    const fav = document.getElementById("storeFavBtn");
+    if (fav) fav.textContent = next ? "Saved ✓" : "Save";
+    toast(next ? "Saved to your library" : "Removed from your library", "success");
+  } catch (e) {
+    toast(e.message || "Could not update your library", "error");
+  }
+}
+
+/* Deploy = hand the listing's file to the ONE Add Bot wizard. The store
+   records the install, then the wizard does exactly what it does for a
+   pasted file: verify the token, deploy, open the bot. */
+async function _storeDeployCurrent() {
+  if (!_storeCurrent || _storeDeploying) return;
+  const slug = _storeCurrent.slug;
+  _storeDeploying = true;
+  const btn = document.getElementById("storeDeployBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
+  try {
+    const res = await api(`/api/store/${encodeURIComponent(slug)}/install`, "POST", { job_id: null }, true);
+    const item = (res && res.item) || {};
+    if (!item.code) throw new Error("That listing has no code.");
+    closeModal("storeModal");
+    _storeTaken.add(slug);
+    openAddBot();
+    // The wizard renders on the next tick; wait for it before filling code.
+    await new Promise(resolve => setTimeout(resolve, 160));
+    if ((_jobCmGetValue() || "").trim() && !confirm("Replace the current code with this store bot?")) return;
+    _jobCmSetValue(item.code);
+    const lang = document.getElementById("jobLang");
+    if (lang) { lang.value = item.language || "python"; _jobCmSetMode(item.language || "python"); }
+    const name = document.getElementById("jobName");
+    if (name && !name.value.trim()) name.value = (item.title || slug).replace(/ bot$/i, "");
+    _renderTemplateConfig(item.env_fields || [], item.after_deploy || "");
+    _rsTemplateEnvValues = _collectTemplateEnv(false) || {};
+    _setRunSpaceSourceMode("template");
+    const selected = document.getElementById("rsSelectedTemplate");
+    if (selected) selected.textContent = `${item.title || slug} from the Store`;
+    _rsBotAnalysis = null;
+    _setBotWizardStage("code");
+    toast(`Deploying ${item.title || slug}…`, "info");
+    await _analyzeRunSpaceBot();
+    renderStore();
+  } catch (e) {
+    toast(e.message || "Could not deploy that listing", "error");
+  } finally {
+    _storeDeploying = false;
+    const again = document.getElementById("storeDeployBtn");
+    if (again) { again.disabled = false; again.textContent = "Deploy this bot"; }
+  }
+}
+
+/* ---------------- publish a listing ---------------- */
+
+function _storeOpenPublish() {
+  const select = document.getElementById("storePubCategory");
+  if (select && !select.options.length) {
+    const allowed = (_storeFacets && _storeFacets.allowed) ||
+      ["Community", "Channels", "Rewards", "Commerce", "Files", "Media & AI", "AI & Support", "Utilities", "Tools"];
+    allowed.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name; opt.textContent = name;
+      select.appendChild(opt);
+    });
+    select.value = "Utilities";
+  }
+  const state = document.getElementById("storePubState");
+  if (state) { state.textContent = ""; state.className = "store-form-state"; }
+  openModal("storePublishModal");
+}
+
+async function _storeSubmitListing() {
+  const state = document.getElementById("storePubState");
+  const btn = document.getElementById("storePubSubmit");
+  const code = (document.getElementById("storePubCode") || {}).value || "";
+  const payload = {
+    title: ((document.getElementById("storePubTitle") || {}).value || "").trim(),
+    summary: ((document.getElementById("storePubSummary") || {}).value || "").trim(),
+    category: (document.getElementById("storePubCategory") || {}).value || "Utilities",
+    difficulty: (document.getElementById("storePubDifficulty") || {}).value || "Intermediate",
+    version: ((document.getElementById("storePubVersion") || {}).value || "1.0.0").trim(),
+    tags: ((document.getElementById("storePubTags") || {}).value || "").split(",").map(t => t.trim()).filter(Boolean),
+    features: ((document.getElementById("storePubFeatures") || {}).value || "").split("\n").map(f => f.trim()).filter(Boolean),
+    setup_notes: ((document.getElementById("storePubSetup") || {}).value || "").trim(),
+    description: ((document.getElementById("storePubSummary") || {}).value || "").trim(),
+    env_fields: [],
+    code,
+  };
+  if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+  if (state) { state.className = "store-form-state"; state.textContent = "Checking the file…"; }
+  try {
+    const result = await api("/api/store/items", "POST", payload, true);
+    if (state) {
+      state.className = "store-form-state is-ok";
+      state.textContent = "Submitted — an owner reviews new listings before they go live.";
+    }
+    toast("Submitted for review", "success");
+    closeModal("storePublishModal");
+    ["storePubTitle", "storePubSummary", "storePubTags", "storePubFeatures", "storePubSetup", "storePubCode"]
+      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+    loadStore(true);
+  } catch (e) {
+    if (state) { state.className = "store-form-state is-error"; state.textContent = e.message || "Submission failed."; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Submit for review"; }
+  }
+}
+
+/* ---------------- my library ---------------- */
+
+async function _storeOpenLibrary() {
+  const host = document.getElementById("storeLibrary");
+  if (!host) return;
+  host.textContent = "";
+  try {
+    const data = await api("/api/store/mine/library", "GET", null, true);
+    const section = (title, rows, render) => {
+      const box = _storeEl("div", "");
+      box.appendChild(_storeEl("h4", "", title));
+      if (!rows.length) box.appendChild(_storeEl("div", "store-lib-row", "Nothing here yet."));
+      rows.forEach(row => box.appendChild(render(row)));
+      host.appendChild(box);
+    };
+    section("Saved", data.favorites || [], item => {
+      const row = _storeEl("div", "store-lib-row");
+      const left = _storeEl("span", "");
+      left.appendChild(_storeEl("b", "", item.title));
+      left.appendChild(_storeEl("small", "", "  " + item.category));
+      const open = _storeEl("button", "btn-ghost sm", "Open");
+      open.type = "button";
+      open.onclick = () => { closeModal("storeLibraryModal"); openStoreItem(item.slug); };
+      row.append(left, open);
+      return row;
+    });
+    section("Deployed", data.installs || [], row => {
+      const line = _storeEl("div", "store-lib-row");
+      const left = _storeEl("span", "");
+      left.appendChild(_storeEl("b", "", row.title || row.item_slug));
+      left.appendChild(_storeEl("small", "", `  v${row.version || "1.0.0"} · ${row.created_at || ""}`));
+      line.append(left, _storeEl("span", "store-status is-published", "installed"));
+      return line;
+    });
+    section("Published by you", data.submissions || [], row => {
+      const line = _storeEl("div", "store-lib-row");
+      const left = _storeEl("span", "");
+      left.appendChild(_storeEl("b", "", row.title));
+      left.appendChild(_storeEl("small", "", `  ${row.install_count} installs · ${row.review_note || "no note"}`));
+      line.append(left, _storeEl("span", "store-status is-" + row.status, row.status));
+      return line;
+    });
+    openModal("storeLibraryModal");
+  } catch (e) {
+    toast(e.message || "Could not load your library", "error");
+  }
+}
+
+/* ---------------- wiring ---------------- */
+(function _initStore() {
+  function wire() {
+    const search = document.getElementById("storeSearch");
+    if (search) {
+      search.addEventListener("input", () => {
+        clearTimeout(_storeSearchTimer);
+        _storeSearchTimer = setTimeout(() => { _storeQuery = search.value.trim(); loadStore(true); }, 260);
+      });
+    }
+    document.querySelectorAll("#storeSorts .store-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll("#storeSorts .store-chip").forEach(c => c.classList.remove("is-active"));
+        chip.classList.add("is-active");
+        _storeSort = chip.dataset.sort || "popular";
+        loadStore(true);
+      });
+    });
+    const deploy = document.getElementById("storeDeployBtn");
+    if (deploy) deploy.addEventListener("click", _storeDeployCurrent);
+    const fav = document.getElementById("storeFavBtn");
+    if (fav) fav.addEventListener("click", _storeToggleFavorite);
+    const copy = document.getElementById("storeCopyCode");
+    if (copy) copy.addEventListener("click", async () => {
+      const text = (document.getElementById("storeDetailCode") || {}).textContent || "";
+      try { await navigator.clipboard.writeText(text); toast("Code copied", "success"); }
+      catch (e) { toast("Select the code and copy it manually", "info"); }
+    });
+    const publish = document.getElementById("btnStorePublish");
+    if (publish) publish.addEventListener("click", async () => { await loadStore(); _storeOpenPublish(); });
+    const submit = document.getElementById("storePubSubmit");
+    if (submit) submit.addEventListener("click", _storeSubmitListing);
+    const library = document.getElementById("btnStoreLibrary");
+    if (library) library.addEventListener("click", _storeOpenLibrary);
+    // Mobile / menu entry point: the bottom nav stays Bots + Add + Account,
+    // so the store is reached from the one Bots menu (and the desktop tab).
+    const inMenu = document.getElementById("btnStoreInMenu");
+    if (inMenu) inMenu.addEventListener("click", () => switchTab("store"));
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(wire, 50));
+  else setTimeout(wire, 50);
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   AUTH SCREENS — brand panel + password reveal.
+
+   Both are pure presentation bolted onto screens whose behaviour already
+   works, so neither may be able to break a form:
+
+     · The panel is cloned from <template id="authAside"> into every .auth
+       screen at boot. One source, seven screens, no drift. If this never
+       runs, the card is still complete and simply centred.
+     · The reveal button changes the input's type in place. Handlers read
+       the input by id, so the id never moves and no submit path changes.
+   ══════════════════════════════════════════════════════════════════════ */
+(function _initAuthScreens() {
+  function injectPanel() {
+    const tpl = document.getElementById("authAside");
+    if (!tpl || !tpl.content) return;
+    document.querySelectorAll(".auth").forEach((screen) => {
+      if (screen.querySelector(".auth-aside")) return;
+      screen.insertBefore(tpl.content.cloneNode(true), screen.firstChild);
+    });
+  }
+
+  function wireReveal() {
+    document.querySelectorAll(".pw-toggle").forEach((btn) => {
+      if (btn.dataset.pwWired) return;
+      btn.dataset.pwWired = "1";
+      btn.addEventListener("click", () => {
+        const input = document.getElementById(btn.dataset.pw);
+        if (!input) return;
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        btn.textContent = showing ? "Show" : "Hide";
+        btn.setAttribute("aria-pressed", showing ? "false" : "true");
+        // Keep the caret where the reader left it instead of at the start.
+        try { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+      });
+    });
+  }
+
+  function go() { injectPanel(); wireReveal(); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(go, 20));
+  else setTimeout(go, 20);
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   OVERVIEW — the analytics dashboard.
+
+   A metric, its change against the previous period, and the shape of the
+   recent days. The chart is hand-drawn SVG rather than a chart library:
+   the product ships one stylesheet and no runtime dependencies, and four
+   numbers plus one area chart do not justify adding either.
+
+   Two honesty rules the rendering follows:
+     · a null delta prints "new", never a fabricated +100%
+     · a zero day is a point on the line, not a gap in it
+   ══════════════════════════════════════════════════════════════════════ */
+let _ovDays = 14;
+let _ovData = null;
+let _ovLoading = false;
+
+const OV_SVG = "http://www.w3.org/2000/svg";
+
+function _ovEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function _ovSvg(tag, attrs) {
+  const node = document.createElementNS(OV_SVG, tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => node.setAttribute(k, String(v)));
+  return node;
+}
+
+function _ovFmt(n) {
+  const v = Number(n || 0);
+  if (v >= 1000000) return (v / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (v >= 1000) return (v / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(v);
+}
+
+function _ovDeltaChip(delta) {
+  const chip = _ovEl("span", "ov-delta");
+  if (delta === null || delta === undefined) {
+    chip.classList.add("is-new");
+    chip.textContent = "new";
+    return chip;
+  }
+  const up = delta >= 0;
+  chip.classList.add(up ? "is-up" : "is-down");
+  chip.textContent = (up ? "▲ " : "▼ ") + Math.abs(delta) + "%";
+  return chip;
+}
+
+/* Sparkline: a polyline scaled to the card, with the last point marked so a
+   flat line and a line that ends flat are not the same picture. */
+function _ovSparkline(values) {
+  const w = 104, h = 30, pad = 3;
+  const svg = _ovSvg("svg", { viewBox: `0 0 ${w} ${h}`, class: "ov-spark", "aria-hidden": "true" });
+  const max = Math.max(1, ...values);
+  const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
+  const pts = values.map((v, i) => [pad + i * step, h - pad - (v / max) * (h - pad * 2)]);
+  svg.appendChild(_ovSvg("polyline", {
+    points: pts.map(p => p.join(",")).join(" "),
+    fill: "none", stroke: "currentColor", "stroke-width": "1.6",
+    "stroke-linejoin": "round", "stroke-linecap": "round",
+  }));
+  if (pts.length) {
+    const last = pts[pts.length - 1];
+    svg.appendChild(_ovSvg("circle", { cx: last[0], cy: last[1], r: "2.2", fill: "currentColor" }));
+  }
+  return svg;
+}
+
+/* Area chart: grid lines from the chart-grid token, two series, and x labels
+   thinned so a 30-day range does not print 30 overlapping dates. */
+function _ovChart(series) {
+  const host = document.getElementById("ovChart");
+  if (!host) return;
+  host.textContent = "";
+  if (!series || !series.length) { host.appendChild(_ovEl("p", "ov-empty", "No activity yet.")); return; }
+
+  const w = 720, h = 220, padL = 34, padR = 12, padT = 14, padB = 26;
+  const svg = _ovSvg("svg", { viewBox: `0 0 ${w} ${h}`, class: "ov-svg", role: "img",
+                              "aria-label": "Deploys and new bots per day" });
+  const defs = _ovSvg("defs");
+  const grad = _ovSvg("linearGradient", { id: "ovFill", x1: "0", y1: "0", x2: "0", y2: "1" });
+  grad.appendChild(_ovSvg("stop", { offset: "0%", "stop-color": "var(--acc)", "stop-opacity": ".28" }));
+  grad.appendChild(_ovSvg("stop", { offset: "100%", "stop-color": "var(--acc)", "stop-opacity": "0" }));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  const max = Math.max(1, ...series.map(d => Math.max(d.deploys, d.new_bots)));
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const x = i => padL + (series.length > 1 ? (i * innerW) / (series.length - 1) : innerW / 2);
+  const y = v => padT + innerH - (v / max) * innerH;
+
+  // Grid + y labels: four steps, so the reader can estimate a value.
+  for (let g = 0; g <= 4; g++) {
+    const value = Math.round((max / 4) * g);
+    const gy = y(value);
+    svg.appendChild(_ovSvg("line", { x1: padL, y1: gy, x2: w - padR, y2: gy,
+                                     stroke: "var(--chart-grid)", "stroke-width": "1" }));
+    const label = _ovSvg("text", { x: padL - 8, y: gy + 4, "text-anchor": "end",
+                                   class: "ov-axis" });
+    label.textContent = String(value);
+    svg.appendChild(label);
+  }
+
+  const line = key => series.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(" ");
+  const area = key => `${line(key)} L${x(series.length - 1).toFixed(1)},${(padT + innerH).toFixed(1)}` +
+                      ` L${x(0).toFixed(1)},${(padT + innerH).toFixed(1)} Z`;
+
+  svg.appendChild(_ovSvg("path", { d: area("deploys"), fill: "url(#ovFill)" }));
+  svg.appendChild(_ovSvg("path", { d: line("deploys"), fill: "none", stroke: "var(--acc)",
+                                   "stroke-width": "2", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  svg.appendChild(_ovSvg("path", { d: line("new_bots"), fill: "none", stroke: "var(--ok)",
+                                   "stroke-width": "1.6", "stroke-dasharray": "4 3",
+                                   "stroke-linejoin": "round" }));
+
+  // Hover targets: one invisible column per day, so the tooltip follows the
+  // pointer instead of requiring a 3-pixel bullseye.
+  const every = Math.ceil(series.length / 7);
+  series.forEach((d, i) => {
+    const band = innerW / series.length;
+    const rect = _ovSvg("rect", { x: x(i) - band / 2, y: padT, width: band, height: innerH,
+                                  fill: "transparent" });
+    const tip = _ovSvg("title");
+    tip.textContent = `${d.label}: ${d.deploys} deploys, ${d.new_bots} new bots`;
+    rect.appendChild(tip);
+    svg.appendChild(rect);
+    if (i % every === 0 || i === series.length - 1) {
+      const label = _ovSvg("text", { x: x(i), y: h - 8, "text-anchor": "middle", class: "ov-axis" });
+      label.textContent = d.label;
+      svg.appendChild(label);
+    }
+  });
+
+  host.appendChild(svg);
+}
+
+function _ovKpiCard(kpi, spark) {
+  const card = _ovEl("div", "ov-kpi");
+  const top = _ovEl("div", "ov-kpi-top");
+  top.appendChild(_ovEl("span", "ov-kpi-label", kpi.label));
+  top.appendChild(_ovDeltaChip(kpi.delta));
+  card.appendChild(top);
+  const row = _ovEl("div", "ov-kpi-row");
+  row.appendChild(_ovEl("b", "ov-kpi-value", _ovFmt(kpi.value)));
+  if (spark && spark.length > 1) row.appendChild(_ovSparkline(spark));
+  card.appendChild(row);
+  card.appendChild(_ovEl("p", "ov-kpi-sub", kpi.sub || ""));
+  return card;
+}
+
+function renderOverview(data) {
+  _ovData = data;
+  const sub = document.getElementById("ovSub");
+  if (sub) sub.textContent = `${data.range.start} → ${data.range.end}, against the previous ${data.days} days`;
+  const label = document.getElementById("ovRangeLabel");
+  if (label) label.textContent = String(data.days);
+
+  const kpis = document.getElementById("ovKpis");
+  if (kpis) {
+    kpis.textContent = "";
+    const sparkFor = { deploys: data.series.map(d => d.deploys),
+                       bots: data.series.map(d => d.new_bots),
+                       new_bots: data.series.map(d => d.new_bots) };
+    data.kpis.forEach(kpi => kpis.appendChild(_ovKpiCard(kpi, sparkFor[kpi.key] || [])));
+  }
+
+  _ovChart(data.series);
+  const chartSub = document.getElementById("ovChartSub");
+  if (chartSub) chartSub.textContent = `${data.totals.deploys} deploys · ${data.totals.new_bots} new bots`;
+
+  const top = document.getElementById("ovTopBots");
+  if (top) {
+    top.textContent = "";
+    if (!data.top_bots.length) top.appendChild(_ovEl("p", "ov-empty", "No bots yet — deploy one and it shows up here."));
+    data.top_bots.forEach(bot => {
+      const row = _ovEl("button", "ov-row");
+      row.type = "button";
+      const left = _ovEl("span", "ov-row-main");
+      left.appendChild(_ovEl("b", "", bot.name));
+      left.appendChild(_ovEl("small", "", bot.username ? "@" + bot.username : bot.language));
+      const right = _ovEl("span", "ov-row-side");
+      right.appendChild(_ovEl("span", "ov-pill" + (bot.live ? " is-live" : ""), bot.live ? "live" : "stopped"));
+      right.appendChild(_ovEl("span", "ov-count", bot.actions + (bot.actions === 1 ? " action" : " actions")));
+      row.append(left, right);
+      row.onclick = () => switchTab("jobs");
+      top.appendChild(row);
+    });
+  }
+
+  const recent = document.getElementById("ovRecent");
+  if (recent) {
+    recent.textContent = "";
+    if (!data.recent.length) recent.appendChild(_ovEl("p", "ov-empty", "Nothing deployed yet."));
+    data.recent.forEach(item => {
+      const row = _ovEl("div", "ov-row");
+      const left = _ovEl("span", "ov-row-main");
+      left.appendChild(_ovEl("b", "", item.job_name || "bot"));
+      left.appendChild(_ovEl("small", "", (item.action || "") + (item.username ? " · @" + item.username : "")));
+      row.append(left, _ovEl("span", "ov-when", (item.created_at || "").slice(5, 16)));
+      recent.appendChild(row);
+    });
+  }
+}
+
+async function loadOverview(force) {
+  if (_ovLoading) return;
+  if (_ovData && !force && _ovData.days === _ovDays) return;
+  _ovLoading = true;
+  try {
+    const data = await api(`/api/analytics/overview?days=${_ovDays}`, "GET", null, true);
+    renderOverview(data);
+  } catch (e) {
+    const sub = document.getElementById("ovSub");
+    if (sub) sub.textContent = "Could not load your numbers.";
+  } finally {
+    _ovLoading = false;
+  }
+}
+
+(function _initOverview() {
+  function wire() {
+    document.querySelectorAll("#ovRanges .ov-range").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#ovRanges .ov-range").forEach(b => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+        _ovDays = parseInt(btn.dataset.days, 10) || 14;
+        loadOverview(true);
+      });
+    });
+    const refresh = document.getElementById("ovRefresh");
+    if (refresh) refresh.addEventListener("click", () => loadOverview(true));
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(wire, 40));
+  else setTimeout(wire, 40);
 })();

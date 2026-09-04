@@ -119,9 +119,21 @@ check("memory is shown against a ceiling, not as a raw number",
 # ---------------------------------------------------------------------------
 print("[3] a REAL job, measured end to end")
 # ---------------------------------------------------------------------------
+# Add Bot requires a server-issued Telegram verification proof. Telegram itself
+# is replaced only at this network boundary; the runner/job remains real.
+from services import telegram_detector as _td  # noqa: E402
+class _TgResp:
+    status_code = 200
+    def json(self): return {"ok": True, "result": {"id": 777, "is_bot": True, "username": "AdminTestBot"}}
+_td.requests.post = lambda *a, **k: _TgResp()
+_test_bot_token = "123456789:AA" + "x" * 32
+_proof = c.post("/api/telegram-bot/verify", headers=AH,
+                json={"token": _test_bot_token}).json()["telegram_verification_id"]
 r = c.post("/api/jobs", headers=AH, json={
     "name": "realbot", "language": "python",
-    "code": "import time\nprint('hello from the bot', flush=True)\nwhile True:\n    time.sleep(1)\n"})
+    "code": "import time\nprint('hello from the bot', flush=True)\nwhile True:\n    time.sleep(1)\n",
+    "env": {"BOT_TOKEN": _test_bot_token},
+    "telegram_verification_id": _proof})
 check("job created", r.status_code in (200, 201), str(r.status_code))
 for j in R._jobs.values():
     j["libs"] = ["pyTelegramBotAPI", "requests", "numpy"]

@@ -14,6 +14,7 @@ class JobCreateRequest(BaseModel):
     repo_url: Optional[str] = None
     entry: Optional[str] = None
     env: Optional[dict] = None
+    telegram_verification_id: Optional[str] = None
 
 
 class JobUpdateRequest(BaseModel):
@@ -23,6 +24,7 @@ class JobUpdateRequest(BaseModel):
     repo_url: Optional[str] = None
     entry: Optional[str] = None
     env: Optional[dict] = None
+    telegram_verification_id: Optional[str] = None
 
 
 class EntryPinPayload(BaseModel):
@@ -44,6 +46,10 @@ from fastapi.responses import StreamingResponse
 
 from services import runner_client
 from services import limits
+from services import abuse_control
+from services import telegram_detector
+from services import secrets_store
+from services import bot_templates
 from services.runner_client import MAX_JOBS_PER_USER
 
 logger = logging.getLogger("codenest.runspace")
@@ -53,10 +59,10 @@ logger = logging.getLogger("codenest.runspace")
 SSE_POLL_INTERVAL_S = 1.5
 SSE_MAX_LIFETIME_S = float(os.getenv("SSE_MAX_LIFETIME_S", "900"))  # 15 min, then reconnect
 
-# Cross-account fingerprint/IP cluster limiting is written and tested
-# (services/limits.py) but intentionally DISABLED: current scope is a simple
-# per-account cap. Set CLUSTER_LIMITS_ENABLED=1 to switch it back on.
-CLUSTER_LIMITS_ENABLED = os.getenv("CLUSTER_LIMITS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+# Cross-account limits are on by default. Operators can explicitly disable
+# them, but the safe production default prevents account farms from multiplying
+# the ordinary per-account allowance.
+CLUSTER_LIMITS_ENABLED = os.getenv("CLUSTER_LIMITS_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 
 router = APIRouter()
 
@@ -65,6 +71,59 @@ class ExecuteCodeRequest(BaseModel):
     language: str
     code: str
     stdin: Optional[str] = None
+
+
+class TelegramTokenVerify(BaseModel):
+    token: str
+
+
+class TelegramCodeAnalyze(BaseModel):
+    code: str
+    language: Optional[str] = "python"
+
+
+@router.get("/api/telegram-bot/templates")
+def telegram_bot_templates(authorization: Optional[str] = Header(None)):
+    get_current_user_and_session(authorization)
+    return {"templates": bot_templates.list_templates()}
+
+
+@router.get("/api/telegram-bot/templates/{template_id}")
+def telegram_bot_template(template_id: str, authorization: Optional[str] = Header(None)):
+    get_current_user_and_session(authorization)
+    item = bot_templates.get_template(template_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    return item
+
+
+@router.post("/api/telegram-bot/analyze")
+def analyze_telegram_bot(payload: TelegramCodeAnalyze,
+                         authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    rate_limit_user(user["id"], "telegram_analyze")
+    if not (payload.code or "").strip():
+        raise HTTPException(status_code=400, detail="Paste or upload the bot code first.")
+    return telegram_detector.analyze_code(payload.code, payload.language or "python")
+
+
+@router.post("/api/telegram-bot/verify")
+def verify_telegram_bot(payload: TelegramTokenVerify,
+                        authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    rate_limit_user(user["id"], "telegram_verify")
+    token = (payload.token or "").strip()
+    if not telegram_detector.TOKEN_RE.fullmatch(token):
+        raise HTTPException(status_code=400, detail="That does not look like a Telegram bot token.")
+    meta = telegram_detector.inspect_bot(token, timeout=2)
+    if meta.get("check_status") == "invalid_token":
+        raise HTTPException(status_code=400, detail="Telegram rejected this token. Copy a fresh token from @BotFather.")
+    if meta.get("check_status") != "verified" or not meta.get("username"):
+        raise HTTPException(status_code=503, detail="Telegram could not verify the bot right now. Try again shortly.")
+    out = telegram_detector.public_fields(meta)
+    out["telegram_verification_id"] = telegram_detector.issue_verification(user["id"], token, meta)
+    out["expires_in"] = 900
+    return out
 
 
 @router.post("/api/execute")
@@ -169,7 +228,7 @@ def _row_env(row) -> dict:
     """Env vars saved for a job row (empty when unset / unparsable)."""
     try:
         raw = dict(row).get("env")
-        return json.loads(raw) if raw else {}
+        return secrets_store.unpack_env(raw)
     except Exception:
         return {}
 
@@ -190,7 +249,7 @@ def _restore_then_restart(job_id: int, info: dict, worker: str = None) -> dict:
         return info
     try:
         from services import snapshots
-        res = snapshots.restore_snapshot(job_id, rid, overwrite=True)
+        res = snapshots.restore_snapshot(job_id, rid, overwrite=True, worker=worker)
         if res.get("restored"):
             r = runner_client._runner_http("POST", f"/internal/jobs/{rid}/restart", worker=worker)
             if r.status_code == 200:
@@ -210,6 +269,101 @@ _ENV_BLOCKED = {
     "PYTHONSTARTUP", "PYTHONHOME", "BASH_ENV", "ENV", "SHELL", "IFS",
     "RUNNER_SERVICE_SECRET", "DATABASE_URL",
 }
+
+
+def _telegram_columns(meta):
+    return (1 if meta.get("detected") else 0, meta.get("username"),
+            meta.get("bot_id"), meta.get("check_status"), meta.get("verified_at"))
+
+
+def _reject_duplicate_bot_token(fingerprint, exclude_job_id=None):
+    """One Telegram token may have only one deployed poller on CodeNest."""
+    conn = get_db_connection()
+    try:
+        sql = ("SELECT id,runner_job_id FROM jobs WHERE telegram_token_fingerprint=? "
+               "AND runner_job_id IS NOT NULL")
+        params = [fingerprint]
+        if exclude_job_id is not None:
+            sql += " AND id != ?"
+            params.append(exclude_job_id)
+        rows = [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
+    finally:
+        conn.close()
+    if not rows:
+        return
+    live = limits.running_runner_ids()
+    # Fail closed when the runner cannot answer: launching a duplicate is more
+    # damaging than asking the owner to stop/delete the existing deployment.
+    if not live or any(r.get("runner_job_id") in live for r in rows):
+        raise HTTPException(
+            status_code=409,
+            detail="This Telegram token is already attached to another deployed bot. Stop or delete that bot before reusing the token.",
+        )
+
+
+def _create_revision(conn, user_id, job_id, language, code, action="deploy", status="building"):
+    row = conn.execute("SELECT COALESCE(MAX(version),0)+1 AS v FROM bot_revisions WHERE job_id=?",
+                       (job_id,)).fetchone()
+    version = int(dict(row)["v"])
+    cur = conn.execute(
+        "INSERT INTO bot_revisions (job_id,user_id,version,action,language,code,status,created_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (job_id, user_id, version, action, language, code, status, now_utc_str()),
+    )
+    return cur.lastrowid, version
+
+
+def _finish_revision(revision_id, status, error=""):
+    safe_error = telegram_detector.TOKEN_RE.sub("[redacted]", str(error or ""))[:500]
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE bot_revisions SET status=?,error=?,promoted_at=? WHERE id=?",
+            (status, safe_error or None, now_utc_str() if status == "healthy" else None,
+             revision_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _record_deploy_event(conn, user_id, job_id, action, job_name, meta, created_at):
+    conn.execute(
+        "INSERT INTO job_deploy_events (user_id,job_id,action,job_name,"
+        "telegram_bot_detected,telegram_bot_username,telegram_bot_id,"
+        "telegram_check_status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (user_id, job_id, action, job_name, 1 if meta.get("detected") else 0,
+         meta.get("username"), meta.get("bot_id"), meta.get("check_status"), created_at),
+    )
+
+
+def _attach_telegram_public(row):
+    row.pop("telegram_token_fingerprint", None)
+    row.update(telegram_detector.public_fields({
+        "detected": bool(row.get("telegram_bot_detected")),
+        "username": row.get("telegram_bot_username"),
+        "bot_id": row.get("telegram_bot_id"),
+        "check_status": row.get("telegram_check_status"),
+        "verified_at": row.get("telegram_verified_at"),
+    }))
+    return row
+
+
+_SECRET_MASK = "••••••••"
+_SECRET_KEY_RE = re.compile(r"(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)", re.I)
+
+
+def _public_env(values):
+    return {k: (_SECRET_MASK if _SECRET_KEY_RE.search(k) else v)
+            for k, v in dict(values or {}).items()}
+
+
+def _restore_masked_env(values, existing):
+    out = dict(values or {})
+    for key, value in list(out.items()):
+        if value == _SECRET_MASK and key in existing:
+            out[key] = existing[key]
+    return out
 
 
 def _clean_env_map(raw) -> dict:
@@ -238,6 +392,7 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
     # in services/limits.py and is re-enabled with CLUSTER_LIMITS_ENABLED=1.
     fp = normalise_fingerprint(request.headers.get("X-Fingerprint", "")[:4000])
     ip = client_ip(request)
+    abuse_control.enforce(fingerprint=fp, ip=ip, action="job")
 
     conn = get_db_connection()
     try:
@@ -278,27 +433,39 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
         # count. If the runner is unreachable we fall back to the row count
         # rather than letting the cap disappear entirely.
         rows = conn.execute(
-            "SELECT runner_job_id FROM jobs WHERE user_id = ?", (user["id"],)
+            "SELECT runner_job_id,desired_state FROM jobs WHERE user_id = ?", (user["id"],)
         ).fetchall()
         live_ids = limits.running_runner_ids()
         if live_ids:
             active = sum(1 for r in rows if dict(r).get("runner_job_id") in live_ids)
         else:
-            active = len(rows)
+            active = sum(1 for r in rows if dict(r).get("desired_state") != "stopped")
         if active >= MAX_JOBS_PER_USER:
             conn.close()
             raise HTTPException(
                 status_code=429,
-                detail=(f"You already have {active} of {MAX_JOBS_PER_USER} RunSpace jobs "
-                        f"running — stop one before starting another."),
+                detail=(f"You already have {active} of {MAX_JOBS_PER_USER} Telegram bots "
+                        f"running — stop one before adding another bot."),
             )
     except HTTPException:
         raise
 
     env_map = _clean_env_map(payload.env)
+    verified_token = str(env_map.get("BOT_TOKEN") or "").strip()
+    bot_meta = telegram_detector.validate_verification(
+        user["id"], payload.telegram_verification_id, verified_token)
+    if not bot_meta:
+        raise HTTPException(status_code=400,
+                            detail="Verify your Telegram bot token first, then add the bot.")
+    token_fingerprint = telegram_detector.token_fingerprint(verified_token)
+    _reject_duplicate_bot_token(token_fingerprint)
+    code_analysis = telegram_detector.analyze_code(
+        payload.code or "", payload.language or "python")
+    canonical_code, env_map = telegram_detector.secure_bot_source(
+        payload.code or "", env_map, verified_token, payload.language or "python")
     body = {
         "language": payload.language or "python",
-        "code": payload.code or "",
+        "code": canonical_code,
         "name": f"u{user['id']}-{name}",
         "env": env_map,
     }
@@ -322,14 +489,30 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
     try:
         cursor = conn.execute(
             """
-            INSERT INTO jobs (user_id, name, language, code, runner_job_id, env, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs (user_id, name, language, code, runner_job_id, env,
+                telegram_bot_detected,telegram_bot_username,telegram_bot_id,
+                telegram_check_status,telegram_verified_at,telegram_token_fingerprint,
+                telegram_framework,telegram_update_mode,telegram_token_source,created_at,updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user["id"], name, payload.language, payload.code, info["id"],
-             json.dumps(env_map) if env_map else None, now, now),
+            (user["id"], name, payload.language, canonical_code, info["id"],
+             secrets_store.pack_env(env_map), *_telegram_columns(bot_meta), token_fingerprint,
+             code_analysis["framework"], code_analysis["update_mode"],
+             code_analysis["token_source"], now, now),
         )
+        revision_id, version = _create_revision(
+            conn, user["id"], cursor.lastrowid, payload.language, canonical_code,
+            action="deploy", status="healthy")
+        conn.execute("UPDATE bot_revisions SET promoted_at=? WHERE id=?", (now, revision_id))
+        _record_deploy_event(conn, user["id"], cursor.lastrowid, "run", name, bot_meta, now)
         conn.commit()
+        telegram_detector.consume_verification(payload.telegram_verification_id)
         info["job_db_id"] = cursor.lastrowid
+        info["revision"] = version
+        info.update(telegram_detector.public_fields(bot_meta))
+        info.update({"telegram_framework": code_analysis["framework"],
+                     "telegram_update_mode": code_analysis["update_mode"],
+                     "telegram_token_source": code_analysis["token_source"]})
         # Remember WHICH worker accepted this job. Every later restart / stop /
         # log call reads it back, so a job on worker-B is never addressed to
         # worker-A once a second worker exists.
@@ -342,94 +525,181 @@ def create_job(payload: JobCreateRequest, request: Request, authorization: Optio
 
 @router.get("/api/jobs")
 def list_jobs(authorization: Optional[str] = Header(None)):
+    """Return saved bot metadata without waiting for runner networks.
+
+    Runner probing used to happen synchronously here. With multiple sleeping
+    runners that turned one database list into 20 seconds per node — the
+    reported two-minute “My bots” spinner. Live Telegram/process health already
+    refreshes asynchronously for the selected bot, so the list endpoint must
+    remain a single local database query.
+    """
     user, _ = get_current_user_and_session(authorization)
     conn = get_db_connection()
     try:
-        rows = conn.execute("SELECT * FROM jobs WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE user_id = ? ORDER BY id DESC", (user["id"],)
+        ).fetchall()
     finally:
         conn.close()
 
-    # Live status from the runner — best effort (it may be asleep/restarted).
-    live, runner_state = {}, "ok"
-    runner_ok = False          # did the runner actually answer?
-    try:
-        resp = runner_client._runner_http("GET", "/internal/jobs")
-        if resp.status_code == 200:
-            live = {j["id"]: j for j in resp.json().get("jobs", [])}
-            runner_ok = True
-        else:
-            runner_state = "Waking up your RunSpace... this can take up to a minute on the free tier"
-    except HTTPException as e:
-        runner_state = e.detail
-
     jobs = []
-    for r in rows:
-        r = dict(r)
-        rid = r.get("runner_job_id")
-        if rid and rid in live:
-            info = live[rid]
-            r.update({"status": info["status"], "uptime_s": info.get("uptime_s", 0),
-                      "restarts": info.get("restarts", 0), "port": info.get("port"),
-                      "cpu_pct": info.get("cpu_pct"), "mem_mb": info.get("mem_mb")})
-            r.update(runner_client._job_web_fields(info, _worker_of(r)))     # web / web_url / access
-        elif runner_ok:
-            # The runner answered and did not list this job -> genuinely down.
-            r.update({"status": "offline", "uptime_s": 0, "restarts": 0})
-        else:
-            # Runner unreachable: we do NOT know the state. Saying "offline"
-            # here is what made running jobs appear stopped after a tab switch.
-            r.update({"status": "unknown", "status_stale": True})
-        r["env"] = _row_env(r)          # saved env vars (Details page)
-        r.pop("code", None)  # never ship stored code back in list payloads
-        jobs.append(r)
-    return {"jobs": jobs, "runner": runner_state, "max_per_user": MAX_JOBS_PER_USER}
+    for stored in rows:
+        row = dict(stored)
+        row["status"] = "stopped" if row.get("desired_state") == "stopped" else "running"
+        row["status_stale"] = True
+        row["env"] = _public_env(_row_env(row))
+        _attach_telegram_public(row)
+        row.pop("code", None)
+        jobs.append(row)
+    return {"jobs": jobs, "runner": "background", "max_per_user": MAX_JOBS_PER_USER}
 
 
 @router.get("/api/jobs/{job_id}")
 def get_job(job_id: int, authorization: Optional[str] = Header(None)):
-    """Return a single job WITH its saved code (for the Edit button)."""
+    """Return saved code immediately; live health refreshes in background."""
     user, _ = get_current_user_and_session(authorization)
-    row = _get_own_job(job_id, user)
-    row = dict(row)
-    # Attach live status. CRITICAL: never report a RUNNING job as "offline"
-    # just because the runner was momentarily unreachable (free-tier cold
-    # start returns 503). That lie is what made a tab show "not running" after
-    # switching away and back. "unknown" tells the client to keep what it has
-    # and retry, instead of painting a wrong state.
+    row = dict(_get_own_job(job_id, user))
+    row["status"] = "stopped" if row.get("desired_state") == "stopped" else "running"
+    row["status_stale"] = True
+    row["env"] = _public_env(_row_env(row))
+    _attach_telegram_public(row)
+    return row
+
+
+@router.get("/api/jobs/{job_id}/telegram-health")
+def telegram_job_health(job_id: int, authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    rate_limit_user(user["id"], "telegram_health")
+    row = dict(_get_own_job(job_id, user))
+    token = str(_row_env(row).get("BOT_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(status_code=404, detail="This bot has no configured BOT_TOKEN.")
+    health = telegram_detector.telegram_delivery_health(
+        token, row.get("telegram_update_mode") or "unknown")
+    health.update({"process_status": "offline", "runtime_conflict": False,
+                   "checked_at": now_utc_str()})
     rid = row.get("runner_job_id")
-    row["status_stale"] = False
     if rid:
         try:
             resp = runner_client._runner_http("GET", f"/internal/jobs/{rid}", worker=_worker_of(row))
             if resp.status_code == 200:
-                info = resp.json()
-                row["status"] = info.get("status")
-                row["uptime_s"] = info.get("uptime_s", 0)
-                row["restarts"] = info.get("restarts", 0)
-                row["port"] = info.get("port")
-                row["cpu_pct"] = info.get("cpu_pct")
-                row["mem_mb"] = info.get("mem_mb")
-                # Populate web URL fields
-                info2 = dict(info)
-                info2.update(runner_client._job_web_fields(info, _worker_of(row)))
-                row["web"] = info2.get("web")
-                row["web_url"] = info2.get("web_url")
-                row["web_private_url"] = info2.get("web_private_url")
-                row["web_public"] = info2.get("web_public", True)
-            elif resp.status_code == 404:
-                # Runner is up and says this job does not exist -> truly gone.
-                row["status"] = "offline"
-            else:
-                row["status"] = "unknown"
-                row["status_stale"] = True
-        except HTTPException:
-            # Runner unreachable / waking up — we simply do not know yet.
-            row["status"] = "unknown"
-            row["status_stale"] = True
+                live = resp.json() or {}
+                health["process_status"] = live.get("status") or "unknown"
+                logs = str(live.get("logs") or "").lower()
+                conflict = ("terminated by other getupdates" in logs or
+                            "terminated by other getupdates request" in logs or
+                            ("409 conflict" in logs and "getupdates" in logs))
+                unauthorized = ("unauthorized" in logs and "telegram" in logs)
+                health["runtime_conflict"] = conflict
+                if conflict:
+                    health["delivery_status"] = "duplicate_poller"
+                elif unauthorized:
+                    health["delivery_status"] = "invalid_token"
+                elif (health["delivery_status"] == "telegram_ready" and
+                      health["process_status"] == "running"):
+                    health["delivery_status"] = "running_unconfirmed"
+        except Exception:
+            health["process_status"] = "unknown"
+    return health
+
+
+@router.get("/api/jobs/{job_id}/revisions")
+def list_bot_revisions(job_id: int, authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    _get_own_job(job_id, user)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id,version,action,language,status,error,created_at,promoted_at "
+            "FROM bot_revisions WHERE job_id=? AND user_id=? ORDER BY version DESC LIMIT 50",
+            (job_id, user["id"]),
+        ).fetchall()
+        current = conn.execute(
+            "SELECT version FROM bot_revisions WHERE job_id=? AND status='healthy' "
+            "AND promoted_at IS NOT NULL ORDER BY promoted_at DESC,id DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        return {"revisions": [dict(r) for r in rows],
+                "current_revision": dict(current)["version"] if current else None}
+    finally:
+        conn.close()
+
+
+@router.post("/api/jobs/{job_id}/revisions/{revision_id}/rollback")
+def rollback_bot_revision(job_id: int, revision_id: int,
+                          authorization: Optional[str] = Header(None)):
+    user, _ = get_current_user_and_session(authorization)
+    row = dict(_get_own_job(job_id, user))
+    conn = get_db_connection()
+    try:
+        rev = conn.execute(
+            "SELECT id,version,language,code,status FROM bot_revisions "
+            "WHERE id=? AND job_id=? AND user_id=?",
+            (revision_id, job_id, user["id"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found.")
+    rev = dict(rev)
+    if rev.get("status") != "healthy":
+        raise HTTPException(status_code=409, detail="Only a previously healthy revision can be restored.")
+    rid = row.get("runner_job_id")
+    if not rid:
+        raise HTTPException(status_code=409, detail="Restart this bot once before rolling it back.")
+    env = _row_env(row)
+    body = {"name": row["name"], "language": rev["language"],
+            "code": rev["code"], "env": env}
+    try:
+        resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", body,
+                                          worker=_worker_of(row))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Runner is unreachable; the current revision was kept.")
+    new_worker = _worker_of(row)
+    new_runner_id = rid
+    if resp.status_code == 200:
+        info = resp.json()
+    elif resp.status_code == 404:
+        resp = runner_client._runner_http("POST", "/internal/jobs", {
+            **body, "name": f"u{user['id']}-{row['name']}"})
+        if resp.status_code != 201:
+            raise HTTPException(status_code=502, detail="Runner rejected rollback; the current revision was kept.")
+        info = resp.json()
+        new_runner_id = info["id"]
+        new_worker = getattr(resp, "placed_on", None)
+        info = _restore_then_restart(job_id, info, new_worker)
     else:
-        row["status"] = "offline"
-    row["env"] = _row_env(row)
-    return row
+        raise HTTPException(status_code=502, detail="Runner rejected rollback; the current revision was kept.")
+
+    analysis = telegram_detector.analyze_code(rev["code"], rev["language"])
+    now = now_utc_str()
+    meta = {"detected": bool(row.get("telegram_bot_detected")),
+            "username": row.get("telegram_bot_username"),
+            "bot_id": row.get("telegram_bot_id"),
+            "check_status": row.get("telegram_check_status"),
+            "verified_at": row.get("telegram_verified_at")}
+    conn = get_db_connection()
+    try:
+        new_revision_id, version = _create_revision(
+            conn, user["id"], job_id, rev["language"], rev["code"],
+            action=f"rollback_to_v{rev['version']}", status="healthy")
+        conn.execute("UPDATE bot_revisions SET promoted_at=? WHERE id=?", (now, new_revision_id))
+        conn.execute(
+            "UPDATE jobs SET language=?,code=?,runner_job_id=?,worker_url=?,desired_state='running',"
+            "telegram_framework=?,telegram_update_mode=?,telegram_token_source=?,updated_at=? WHERE id=?",
+            (rev["language"], rev["code"], new_runner_id, new_worker,
+             analysis["framework"], analysis["update_mode"], analysis["token_source"],
+             now, job_id),
+        )
+        _record_deploy_event(conn, user["id"], job_id, "rollback", row["name"], meta, now)
+        conn.commit()
+    finally:
+        conn.close()
+    info.update({"job_db_id": job_id, "revision": version,
+                 "rolled_back_from": rev["version"]})
+    info.update(telegram_detector.public_fields(meta))
+    info.update(runner_client._job_web_fields(info, new_worker))
+    return info
 
 
 # ── FILE BROWSER ───────────────────────────────────────────────────────────
@@ -718,7 +988,7 @@ def create_job_snapshot(job_id: int, authorization: Optional[str] = Header(None)
     if not rid:
         raise HTTPException(status_code=409, detail="Job is not deployed yet.")
     from services import snapshots
-    res = snapshots.save_snapshot(job_id, rid)
+    res = snapshots.save_snapshot(job_id, rid, worker=_worker_of(row))
     if not res.get("saved"):
         reason = res.get("reason") or "nothing to back up"
         # "no data files" is a normal state for a bot that hasn't written
@@ -742,7 +1012,7 @@ def restore_job_snapshot(job_id: int, authorization: Optional[str] = Header(None
     from services import snapshots
     if not snapshots.load_snapshot(job_id):
         raise HTTPException(status_code=404, detail="No backup stored for this job.")
-    res = snapshots.restore_snapshot(job_id, rid, overwrite=True)
+    res = snapshots.restore_snapshot(job_id, rid, overwrite=True, worker=_worker_of(row))
     if not res.get("restored"):
         raise HTTPException(status_code=502,
                             detail=f"Restore failed — {res.get('reason') or 'unknown error'}.")
@@ -808,12 +1078,19 @@ def stop_job(job_id: int, authorization: Optional[str] = Header(None)):
         # likely one to be sitting idle when the next deploy wipes the disk.
         try:
             from services import snapshots
-            snapshots.save_snapshot(job_id, rid)
+            snapshots.save_snapshot(job_id, rid, worker=_worker_of(row))
         except Exception as exc:
             logger.warning("pre-stop snapshot failed for job %s: %s", job_id, exc)
         resp = runner_client._runner_http("POST", f"/internal/jobs/{rid}/stop", worker=_worker_of(row))
         if resp.status_code not in (200, 404):
             raise HTTPException(status_code=502, detail="Runner refused to stop the job.")
+    conn = get_db_connection()
+    try:
+        conn.execute("UPDATE jobs SET desired_state='stopped',updated_at=? WHERE id=?",
+                     (now_utc_str(), job_id))
+        conn.commit()
+    finally:
+        conn.close()
     return {"status": "stopped"}
 
 
@@ -868,7 +1145,22 @@ def restart_job(job_id: int, request: Request, authorization: Optional[str] = He
             conn.close()
         _restore_then_restart(job_id, info, getattr(resp, "placed_on", None))
 
+    meta = {
+        "detected": bool(row.get("telegram_bot_detected")),
+        "username": row.get("telegram_bot_username"), "bot_id": row.get("telegram_bot_id"),
+        "check_status": row.get("telegram_check_status"),
+        "verified_at": row.get("telegram_verified_at"),
+    }
+    conn = get_db_connection()
+    try:
+        conn.execute("UPDATE jobs SET desired_state='running',updated_at=? WHERE id=?",
+                     (now_utc_str(), job_id))
+        _record_deploy_event(conn, user["id"], job_id, "restart", row["name"], meta, now_utc_str())
+        conn.commit()
+    finally:
+        conn.close()
     info["job_db_id"] = job_id
+    info.update(telegram_detector.public_fields(meta))
     info.update(runner_client._job_web_fields(info, _worker_of(row)))
     return info
 
@@ -890,15 +1182,36 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     if not rid:
         raise HTTPException(status_code=409, detail="Job has no runner id — press Restart once, then retry edit.")
 
-    # Persist the new code/name/language in our DB FIRST (source of truth
-    # for future restarts after a full runner redeploy).
+    # Build a candidate revision first. The jobs row remains the last healthy
+    # source of truth until the runner accepts this candidate.
     new_name = (payload.name or row["name"]).strip()[:60]
     new_lang = (payload.language or row["language"]).strip()
     new_code = payload.code if payload.code is not None else row["code"]
     new_repo = (payload.repo_url or "").strip()
     new_entry = (payload.entry or "").strip()
     # env omitted from the request => keep what is already saved.
-    new_env = _clean_env_map(payload.env) if payload.env is not None else _row_env(row)
+    existing_env = _row_env(row)
+    new_env = (_restore_masked_env(_clean_env_map(payload.env), existing_env)
+               if payload.env is not None else existing_env)
+    verified_token = str(new_env.get("BOT_TOKEN") or "").strip()
+    if payload.telegram_verification_id:
+        bot_meta = telegram_detector.validate_verification(
+            user["id"], payload.telegram_verification_id, verified_token)
+    else:
+        bot_meta = ({"detected": bool(row.get("telegram_bot_detected")),
+                     "username": row.get("telegram_bot_username"),
+                     "bot_id": row.get("telegram_bot_id"),
+                     "check_status": row.get("telegram_check_status"),
+                     "verified_at": row.get("telegram_verified_at")}
+                    if verified_token and row.get("telegram_bot_detected") else None)
+    if not bot_meta:
+        raise HTTPException(status_code=400,
+                            detail="Verify your Telegram bot token before saving this bot.")
+    token_fingerprint = telegram_detector.token_fingerprint(verified_token)
+    _reject_duplicate_bot_token(token_fingerprint, exclude_job_id=job_id)
+    code_analysis = telegram_detector.analyze_code(new_code, new_lang)
+    new_code, new_env = telegram_detector.secure_bot_source(
+        new_code, new_env, verified_token, new_lang)
     now = now_utc_str()
     if new_name != (row["name"] or ""):
         conn0 = get_db_connection()
@@ -911,13 +1224,12 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
                 raise HTTPException(status_code=409, detail=f"You already have a job named \u201c{new_name}\u201d \u2014 choose a different name.")
         finally:
             conn0.close()
+    # Create an immutable candidate revision, but DO NOT promote it or replace
+    # the job's source until the runner accepts the deployment.
     conn = get_db_connection()
     try:
-        conn.execute(
-            "UPDATE jobs SET name = ?, language = ?, code = ?, env = ?, updated_at = ? WHERE id = ?",
-            (new_name, new_lang, new_code,
-             json.dumps(new_env) if new_env else None, now, job_id),
-        )
+        revision_id, revision_version = _create_revision(
+            conn, user["id"], job_id, new_lang, new_code, action="update")
         conn.commit()
     finally:
         conn.close()
@@ -928,7 +1240,7 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     # data recoverable. Best-effort — a failed backup must not block the edit.
     try:
         from services import snapshots
-        snapshots.save_snapshot(job_id, rid)
+        snapshots.save_snapshot(job_id, rid, worker=_worker_of(row))
     except Exception as exc:
         logger.warning("pre-update snapshot failed for job %s: %s", job_id, exc)
 
@@ -937,7 +1249,13 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
     if new_repo:
         patch_body["repo_url"] = new_repo
         if new_entry: patch_body["entry"] = new_entry
-    resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", patch_body, worker=_worker_of(row))
+    new_runner_id = rid
+    new_worker = _worker_of(row)
+    try:
+        resp = runner_client._runner_http("PATCH", f"/internal/jobs/{rid}", patch_body, worker=_worker_of(row))
+    except Exception as exc:
+        _finish_revision(revision_id, "failed", "Runner unreachable")
+        raise
     if resp.status_code == 200:
         info = resp.json()
     elif resp.status_code == 404:
@@ -953,15 +1271,11 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
                 detail = resp2.json().get("detail", "Runner rejected the job.")
             except Exception:
                 detail = "Runner rejected the job."
+            _finish_revision(revision_id, "failed", detail)
             raise HTTPException(status_code=502, detail=detail)
         info = resp2.json()
-        conn = get_db_connection()
-        try:
-            conn.execute("UPDATE jobs SET runner_job_id = ?, worker_url = ?, updated_at = ? WHERE id = ?",
-                         (info["id"], getattr(resp2, "placed_on", None), now_utc_str(), job_id))
-            conn.commit()
-        finally:
-            conn.close()
+        new_runner_id = info["id"]
+        new_worker = getattr(resp2, "placed_on", None)
         # Same cold-start recovery as restart_job(): the new workspace is
         # empty, so replay the snapshot we just took (or an older one).
         info = _restore_then_restart(job_id, info, getattr(resp2, "placed_on", None))
@@ -970,10 +1284,38 @@ def update_job(job_id: int, payload: JobUpdateRequest, request: Request, authori
             detail = resp.json().get("detail", "Runner rejected the update.")
         except Exception:
             detail = "Runner rejected the update."
+        _finish_revision(revision_id, "failed", detail)
         raise HTTPException(status_code=502, detail=detail)
 
+    # Runner accepted the candidate. Promote source/config atomically now.
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE jobs SET name=?,language=?,code=?,env=?,runner_job_id=?,worker_url=?,desired_state='running',"
+            "telegram_bot_detected=?,telegram_bot_username=?,telegram_bot_id=?,"
+            "telegram_check_status=?,telegram_verified_at=?,telegram_token_fingerprint=?,"
+            "telegram_framework=?,telegram_update_mode=?,telegram_token_source=?,updated_at=? WHERE id=?",
+            (new_name, new_lang, new_code, secrets_store.pack_env(new_env),
+             new_runner_id, new_worker, *_telegram_columns(bot_meta), token_fingerprint,
+             code_analysis["framework"], code_analysis["update_mode"],
+             code_analysis["token_source"], now, job_id),
+        )
+        conn.execute("UPDATE bot_revisions SET status='healthy',error=NULL,promoted_at=? WHERE id=?",
+                     (now, revision_id))
+        _record_deploy_event(conn, user["id"], job_id, "update", new_name, bot_meta, now)
+        conn.commit()
+    finally:
+        conn.close()
+
+    if payload.telegram_verification_id:
+        telegram_detector.consume_verification(payload.telegram_verification_id)
     info["job_db_id"] = job_id
-    info.update(runner_client._job_web_fields(info, _worker_of(row)))
+    info["revision"] = revision_version
+    info.update(runner_client._job_web_fields(info, new_worker))
+    info.update(telegram_detector.public_fields(bot_meta))
+    info.update({"telegram_framework": code_analysis["framework"],
+                 "telegram_update_mode": code_analysis["update_mode"],
+                 "telegram_token_source": code_analysis["token_source"]})
     return info
 
 

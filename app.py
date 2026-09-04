@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from services import secrets_store, runner_client
 from database import DIALECT, init_db  # noqa: F401  (init_db already ran via routes.deps)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -64,7 +65,28 @@ async def _self_ping_loop():
 
 @app.on_event("startup")
 async def startup_event():
+    # Encrypt any pre-existing plaintext bot environments before serving user
+    # traffic. Local SQLite remains zero-config; production health reports a
+    # missing key explicitly.
+    try:
+        from services import secrets_store
+        secrets_store.migrate_job_envs()
+    except Exception as exc:
+        logger.error("Bot secret migration failed: %s", exc)
+    try:
+        from services import retention
+        retention.cleanup()
+    except Exception as exc:
+        logger.warning("Retention cleanup failed: %s", exc)
     asyncio.create_task(_self_ping_loop())
+    # A full Render deploy kills every subprocess. Desired-running bots are
+    # recreated from their saved source/env after secret migration completes;
+    # this runs in the background so the website still starts immediately.
+    try:
+        from services import job_recovery
+        asyncio.create_task(job_recovery.recover_background())
+    except Exception as exc:
+        logger.warning("Bot recovery scheduler failed: %s", exc)
     # Telegram server-alive bot — starts automatically if TELEGRAM_PING_BOT_TOKEN is set
     try:
         from services.pingbot import start_bot as _start_pingbot
@@ -125,11 +147,16 @@ def _enable_embedded_runner() -> bool:
 
 EMBEDDED_RUNNER = _enable_embedded_runner()
 
+_cors_origins = [x.strip().rstrip("/") for x in
+                 os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if x.strip()]
+for _origin in (os.getenv("SITE_BASE_URL", ""), os.getenv("RENDER_EXTERNAL_URL", "")):
+    if _origin.strip().rstrip("/") and _origin.strip().rstrip("/") not in _cors_origins:
+        _cors_origins.append(_origin.strip().rstrip("/"))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Fingerprint"],
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -257,7 +284,7 @@ for _p, _fn in _NEGOTIATED.items():
 
 # Section URLs with NO API collision can serve the shell directly.
 CLIENT_ONLY_PATHS = [
-    "dashboard", "code", "jobs", "runspace", "activity",
+    "dashboard", "code", "bots", "activity", "store",
     "sign-in", "sign-up", "login", "forgot",
 ]
 for _p in CLIENT_ONLY_PATHS:
@@ -287,13 +314,36 @@ def read_admin(request: Request):
         headers={"Cache-Control": "no-store"},
     )
 
-# /runspace/{username}/{job-slug} → SPA shell; frontend routes to jobs tab and
-# selects the matching job (deep-linking per job).
-@app.get("/runspace/{username}/{slug:path}", include_in_schema=False)
-def read_runspace_deep(username: str, slug: str):
+# Bots is the one canonical product URL, including per-bot deep links.
+@app.get("/bots/{slug}", include_in_schema=False)
+def read_bot_job(slug: str):
     if not INDEX_FILE.exists():
         raise HTTPException(status_code=404, detail="index.html not found.")
     return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
+@app.get("/bots/{username}/{slug:path}", include_in_schema=False)
+def read_bot_deep(username: str, slug: str):
+    if not INDEX_FILE.exists():
+        raise HTTPException(status_code=404, detail="index.html not found.")
+    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
+# Old links remain safe, but immediately leave the retired RunSpace URL.
+@app.get("/runspace", include_in_schema=False)
+@app.get("/jobs", include_in_schema=False)
+def redirect_old_bots_root():
+    return RedirectResponse("/bots", status_code=308)
+
+
+@app.get("/runspace/{slug}", include_in_schema=False)
+def redirect_runspace_job(slug: str):
+    return RedirectResponse("/bots/" + slug, status_code=308)
+
+
+@app.get("/runspace/{username}/{slug:path}", include_in_schema=False)
+def redirect_runspace_deep(username: str, slug: str):
+    return RedirectResponse("/bots/" + username + "/" + slug, status_code=308)
 
 # Back-compat heal: a frontend bug once produced published-page links like
 # /code/s/<token> (the tab path was glued onto the origin). Redirect any
@@ -384,12 +434,64 @@ def _bot_identity():
     return out
 
 
+def _token_fingerprint():
+    """A comparable digest of the deployed token; never the token itself."""
+    try:
+        from services import miniapp_auth
+        return miniapp_auth.token_fingerprint()
+    except Exception:
+        return {"configured": None}
+
+
+def _token_live():
+    """Re-test the configured token against Telegram, not the boot cache."""
+    try:
+        from services import miniapp_auth
+        return miniapp_auth.token_live()
+    except Exception:
+        return {"ok": None, "reason": "unavailable"}
+
+
+def _token_sources():
+    """Which env var the bot token came from, and whether a second disagrees.
+
+    A conflict here is invisible from a hosting dashboard — both variables
+    look set and correct — while only one of them is in force. Reporting it
+    turns "I replaced the token and nothing changed" into one glance. Only
+    the public bot-id half of each token is ever shown.
+    """
+    try:
+        from services import miniapp_auth
+        return miniapp_auth.token_sources()
+    except Exception:
+        return {"error": "unavailable"}
+
+
+def _miniapp_url():
+    """Where the bot's 'Open CodeNest' button points, or why it cannot."""
+    try:
+        from services.pingbot import SITE_BASE
+    except Exception:
+        return {"ok": False, "reason": "unavailable"}
+    if not SITE_BASE:
+        return {"ok": False, "reason": "not_configured",
+                "fix": "Set SITE_BASE_URL to this service's public https URL."}
+    if not SITE_BASE.startswith("https://"):
+        # Telegram refuses a web_app button on a non-https URL, so the Mini
+        # App cannot open at all — it silently degrades to a browser link.
+        return {"ok": False, "reason": "not_https", "url": SITE_BASE,
+                "fix": "Telegram requires https:// for a Mini App button."}
+    return {"ok": True, "url": f"{SITE_BASE}/bots"}
+
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "database": DIALECT,
-        "runner": "embedded" if EMBEDDED_RUNNER else "remote",
+        "runner": "embedded" if runner_client.embedded_mode() else "remote",
+        "bot_secrets_encrypted": secrets_store.configured(),
+        "production_isolation": "unsafe-embedded" if runner_client.embedded_mode() else "remote-runner",
         "ping_bot": "running" if bool(os.getenv("BOT_TOKEN", "").strip()
                                        or os.getenv("TELEGRAM_PING_BOT_TOKEN", "").strip()) else "not configured",
         # Which bot this server verifies Mini App sign-ins for. The bot ID half
@@ -401,6 +503,36 @@ def health():
         # Open the Mini App from THIS bot or sign-in fails with bad_hash.
         # Public information, and the one thing needed to diagnose it.
         "telegram_bot": _bot_identity(),
+        # THE SAME QUESTION, ASKED FRESH. telegram_bot above is cached from a
+        # single getMe at boot, so it keeps reporting the bot it saw then —
+        # even if the token was replaced in the dashboard afterwards, or the
+        # boot-time check never reached Telegram. That gap is how this page
+        # could look completely healthy while every Mini App sign-in failed.
+        # ok:true = the token is valid right now; ok:false = Telegram rejects
+        # it; ok:null = Telegram unreachable, which is not a verdict.
+        "telegram_token_live": _token_live(),
+        # THE ONE THING THAT WAS STILL UNCHECKABLE. Diagnosis can now show
+        # that the running token is not the one BotFather holds — but the
+        # owner could not verify that themselves, because the secret must
+        # never be printed. This is a salted-free one-way digest of the whole
+        # token: run the printed command on the token BotFather shows you and
+        # compare sha256_12. Equal -> the right value is deployed. Different
+        # -> this process is running something else (a second variable, an
+        # environment group, a stale build, a truncated paste), and revoking
+        # the token again will not help.
+        "telegram_token_fingerprint": _token_fingerprint(),
+        # THE URL THE BOT'S BUTTON ACTUALLY OPENS. A deployment that never set
+        # SITE_BASE_URL used to fall back to a hardcoded host belonging to a
+        # different install, so the button opened someone else's site and
+        # sign-in failed there with a bot mismatch — while every check here
+        # said "ok". Reporting the resolved value makes that visible in one
+        # request instead of being invisible until a user complains.
+        "miniapp_url": _miniapp_url(),
+        # WHICH env var is actually in force. BOT_TOKEN silently outranks
+        # TELEGRAM_PING_BOT_TOKEN, so two names holding two different bots
+        # looked fine from the dashboard while sign-ins were checked against
+        # the one the owner thought they had replaced.
+        "telegram_token_source": _token_sources(),
         "brevo_api_key_set": bool(os.getenv("BREVO_API_KEY", "").strip()),
         "sender_email_set": bool(os.getenv("SENDER_EMAIL", "").strip()),
     }
@@ -428,11 +560,12 @@ from routes.code_editor import router as code_editor_router
 from routes.runspace import router as runspace_router
 from routes.admin import router as admin_router
 from routes.ping import router as ping_router
+from routes.store import router as store_router
 from services.term_proxy import router as term_router
 
 for _r in (auth_router, profile_router, dashboard_router,
            code_editor_router, runspace_router, admin_router,
-           ping_router, term_router):
+           ping_router, term_router, store_router):
     app.include_router(_r)
 
 

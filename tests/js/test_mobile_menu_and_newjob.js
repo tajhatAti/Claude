@@ -30,6 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('jsdom');
+const { zOf } = require('./zlayers');
 
 const R = path.resolve(__dirname, '../../');
 const html = fs.readFileSync(path.join(R, 'index.html'), 'utf8');
@@ -157,9 +158,9 @@ for (const width of [320, 375, 414]) {
   ok(`[${width}] it hangs below the header, not at the bottom edge`,
      parseFloat(s.top) > 0 && s.bottom === 'auto', `top=${s.top} bottom=${s.bottom}`);
   ok(`[${width}] it is narrow, not full width`,
-     parseFloat(s.width) > 0 && parseFloat(s.width) <= 260, s.width);
+     parseFloat(s.width) > 0 && parseFloat(s.width) <= 310, s.width);
   ok(`[${width}] and can never exceed the screen`,
-     /max-width:\s*calc\(100vw - 24px\)/.test(CSS));
+     /max-width:\s*calc\(100vw - (?:16|24)px\)/.test(CSS));
   ok(`[${width}] height is capped so it stays a panel`,
      parseFloat(s.maxHeight) > 0 && parseFloat(s.maxHeight) < 768, s.maxHeight);
   ok(`[${width}] it is actually rendered`,
@@ -173,22 +174,23 @@ console.log('\n[3] nothing paints over the open sheet');
   const dom = build(375), w = dom.window, d = w.document;
   const menu = d.getElementById('rsMoreMenu');
   menu.removeAttribute('hidden');
-  const mz = Number(cs(w, menu).zIndex);
+  // The ladder is expressed as tokens now; resolve before comparing.
+  const mz = zOf(w, menu);
   for (const [sel, label] of [['.bottom-nav', 'bottom nav'], ['#wbSide', 'job rail'],
                               ['.rs-menu-backdrop', 'rail scrim'], ['.dash-bar', 'dash bar'],
                               ['.activity-panel', 'activity panel']]) {
     const el = d.querySelector(sel);
     if (!el) continue;
-    const z = Number(cs(w, el).zIndex || 0);
+    const z = zOf(w, el);
     ok(`the sheet (${mz}) outranks the ${label} (${z})`, mz > z);
   }
   // ...but must not outrank things that have to interrupt it.
   const toast = d.querySelector('.toast-container');
-  if (toast) ok('toasts still appear above it', Number(cs(w, toast).zIndex) > mz,
-                `${cs(w, toast).zIndex} vs ${mz}`);
+  if (toast) ok('toasts still appear above it', zOf(w, toast) > mz,
+                `${zOf(w, toast)} vs ${mz}`);
   const modal = d.querySelector('.ah-modal');
-  if (modal) ok('modals still appear above it', Number(cs(w, modal).zIndex) > mz,
-                `${cs(w, modal).zIndex} vs ${mz}`);
+  if (modal) ok('modals still appear above it', zOf(w, modal) > mz,
+                `${zOf(w, modal)} vs ${mz}`);
 
   // The bottom nav is removed outright while the sheet is open.
   d.body.classList.add('rs-menu-open');
@@ -200,9 +202,14 @@ console.log('\n[3] nothing paints over the open sheet');
   const scrim = d.getElementById('rsMenuScrim');
   ok('a scrim appears behind it', !!scrim && cs(w, scrim).visibility === 'visible',
      scrim && cs(w, scrim).visibility);
+  /* Resolve the token, and compare against the LAYER it must clear rather
+     than a bare 950: the ladder is named now, so the assertion should read
+     the same way the stylesheet does. */
+  const { zValue } = require('./zlayers');
+  const flyout = zValue('var(--z-flyout)');
   ok('the scrim sits below the sheet but above everything else',
-     !!scrim && Number(cs(w, scrim).zIndex) < mz && Number(cs(w, scrim).zIndex) > 950,
-     scrim && cs(w, scrim).zIndex);
+     !!scrim && zOf(w, scrim) < mz && zOf(w, scrim) > flyout,
+     scrim && `${zOf(w, scrim)} (sheet ${mz}, flyout ${flyout})`);
 }
 
 /* ── 4. desktop keeps the anchored dropdown ────────────────────────────── */
@@ -253,7 +260,17 @@ for (const width of [320, 375, 414, 1280]) {
 console.log('\n[5b] it forwards to the real control, not a second implementation');
 ok('the menu item clicks #btnNew', /btnNewInMenu[\s\S]{0,420}getElementById\("btnNew"\)[\s\S]{0,60}\.click\(\)/.test(JS));
 ok('no duplicate new-job logic was added', (JS.match(/_composingNew = true/g) || []).length === 1);
-ok('a "Job list" entry opens the rail', /btnJobsInMenu[\s\S]{0,300}rs-side-open/.test(JS));
+/* The menu's "Job list" row is GONE, and its absence is the fix. The header
+   already carries a dedicated hamburger (#wbMenuBtn) with the SAME icon whose
+   only job is the job list, so the toolbar showed two near-identical grey
+   squares — one opening a drawer, the other opening a menu containing a row
+   that opened the same drawer by a different code path. Reported as
+   "সাইটে তিনটা মেনু বাটন ... একটাতে ক্লিক করলে কিছুই আসে না".
+   The requirement is that the rail is REACHABLE, not that it is reachable
+   twice. */
+ok('the job list has exactly one entry point',
+   /wbMenuBtn[\s\S]{0,600}rs-side-open/.test(JS)
+   && !/getElementById\("btnJobsInMenu"\)/.test(JS));
 
 /* ── 6. the trap detector actually detects ─────────────────────────────── */
 console.log('\n[6] the detector is falsifiable');

@@ -94,41 +94,21 @@
   // are still genuinely inside Telegram. Guard every call.
   const has = (fn) => !!(TG && typeof TG[fn] === "function");
 
-  /* ---- 2. theme ------------------------------------------------------
-   * Telegram hands over the colours of the user's OWN client theme. Mapping
-   * them onto the existing CSS custom properties is what makes the app look
-   * like part of Telegram instead of a website in a frame — and it is why
-   * this is a theming change, not a redesign: the same variables the site
-   * already uses just take different values. */
-  function applyTheme() {
-    const p = ((TG && TG.themeParams) || {});
-    const root = document.documentElement;
-    const map = {
-      bg_color: ["--bg", "--panel-0"],
-      secondary_bg_color: ["--panel", "--panel-2"],
-      text_color: ["--ink"],
-      hint_color: ["--muted", "--ink-2"],
-      link_color: ["--acc"],
-      button_color: ["--acc"],
-      destructive_text_color: ["--red"],
-    };
-    let applied = 0;
-    Object.keys(map).forEach(function (key) {
-      const val = p[key];
-      if (!val || !/^#[0-9a-f]{3,8}$/i.test(val)) return;   // never inject raw
-      map[key].forEach(function (cssVar) {
-        root.style.setProperty(cssVar, val);
-        applied += 1;
-      });
-    });
-    // colorScheme is authoritative even when themeParams is sparse, and the
-    // site already has a full dark palette keyed off this attribute.
-    if (TG && TG.colorScheme) root.setAttribute("data-theme", TG.colorScheme);
-    return applied;
-  }
-
-  applyTheme();
-  if (has("onEvent")) { try { TG.onEvent("themeChanged", applyTheme); } catch (e) {} }
+  /* ---- 2. product colour -------------------------------------------
+   * Telegram themeParams are client chrome colours, not product colours.
+   * Mapping a user's Telegram button/background colour onto --bg/--acc made
+   * the entire app blue in some Android themes and triggered a full style
+   * recalculation on every theme event. Keep the same neutral CodeNest
+   * palette as the website and only tell Telegram's surrounding chrome which
+   * solid colour to use. */
+  const PRODUCT_BG = "#090909";
+  const root = document.documentElement;
+  root.setAttribute("data-theme", "dark");
+  try {
+    if (has("setHeaderColor")) TG.setHeaderColor(PRODUCT_BG);
+    if (has("setBackgroundColor")) TG.setBackgroundColor(PRODUCT_BG);
+    if (has("setBottomBarColor")) TG.setBottomBarColor(PRODUCT_BG);
+  } catch (e) {}
 
   /* ---- 3. viewport --------------------------------------------------- */
   if (has("ready")) { try { TG.ready(); } catch (e) {} }
@@ -141,11 +121,23 @@
 
   /* Telegram's viewport is not the window: the keyboard and the drag-to-close
    * gesture change it. Editors sized with 100vh overflow their container. */
-  function syncViewport() {
+  let viewportFrame = 0;
+  let lastViewportHeight = 0;
+  function commitViewport() {
     const h = TG && (TG.viewportStableHeight || TG.viewportHeight);
-    if (h) document.documentElement.style.setProperty("--tg-vh", h + "px");
+    if (h && Math.abs(h - lastViewportHeight) > 1) {
+      lastViewportHeight = h;
+      document.documentElement.style.setProperty("--tg-vh", h + "px");
+    }
   }
-  syncViewport();
+  function syncViewport() {
+    if (viewportFrame) return;
+    viewportFrame = requestAnimationFrame(function () {
+      viewportFrame = 0;
+      commitViewport();
+    });
+  }
+  commitViewport();
   if (has("onEvent")) { try { TG.onEvent("viewportChanged", syncViewport); } catch (e) {} }
 
   /* ---- 1. auto-login -------------------------------------------------
@@ -171,19 +163,71 @@
     //
     // `API` is the empty string anyway, so a leading "/" is the same request
     // with no cross-file dependency to get wrong.
-    let res;
-    try {
-      res = await fetch("/auth/telegram/miniapp", {
+
+    /* THE REQUEST HAD NO DEADLINE, AND ON A SLEEPING SERVER THAT IS THE BUG.
+     *
+     * Render's free plan stops an idle service and only starts it again on
+     * the first request, which then takes 30-60s to answer. fetch() has no
+     * default timeout, so this promise simply never settled: .then() never
+     * ran, done() never ran, and the Mini App sat there. Reproduced against
+     * the real boot with a 30s-delayed login — for the entire wait the phone
+     * showed a dashboard skeleton reading "Hello, User" with no data and no
+     * spinner, because index.html's 4-second splash safety net had already
+     * fired. Nothing was broken; nothing said so either. That is exactly
+     * "open the Mini App and nothing happens".
+     *
+     * A deadline plus ONE automatic retry fixes the common case outright: the
+     * first request is what wakes the service, and by the time it is retried
+     * the service is usually up. Only if that also fails does the user see
+     * anything, and then it is a real message with a real button.
+     *
+     * AbortController rather than Promise.race: race leaves the original
+     * request running and a second attempt would queue behind it on the same
+     * connection, which is what made the retry pointless in testing.
+     */
+    const attempt = (timeoutMs) => {
+      const ac = (typeof AbortController === "function") ? new AbortController() : null;
+      const timer = ac ? setTimeout(() => { try { ac.abort(); } catch (e) {} }, timeoutMs) : null;
+      return fetch("/auth/telegram/miniapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ init_data: initData,
                                init_data_alt: candidates.slice(1),
                                fingerprint: fp }),
-      });
+        signal: ac ? ac.signal : undefined,
+      }).finally(() => { if (timer) clearTimeout(timer); });
+    };
+
+    let res;
+    try {
+      // 20s: long enough that a merely slow reply is not thrown away, short
+      // enough that a phone is not left staring at nothing.
+      res = await attempt(20000);
     } catch (e) {
-      // A genuine transport failure — this is the ONLY case where "couldn't
-      // connect" is the truth, so it is the only case that says it.
-      return { ok: false, status: 0, detail: "" };
+      // Report progress BEFORE the retry — a wait the user can see is a wait
+      // the user will sit through. pro.js paints this on the splash.
+      try {
+        if (typeof window.__tgBootNote === "function") {
+          window.__tgBootNote("Waking the server… this takes up to a minute "
+                              + "on the free tier.");
+        }
+      } catch (e2) {}
+      try {
+        // The second attempt gets longer: the first one paid the cold start.
+        res = await attempt(45000);
+      } catch (e3) {
+        // A genuine transport failure — this is the ONLY case where "couldn't
+        // connect" is the truth, so it is the only case that says it.
+        const aborted = e3 && (e3.name === "AbortError");
+        return {
+          ok: false,
+          status: 0,
+          detail: aborted
+            ? "The server did not answer in time. It may still be waking up — "
+              + "tap Try again in a few seconds."
+            : "",
+        };
+      }
     }
     if (!res.ok) {
       // Carry the server's own wording up to the caller. A single

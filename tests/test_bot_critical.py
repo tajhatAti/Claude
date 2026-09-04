@@ -117,7 +117,7 @@ check("bot_ops has no update_code()", "def update_code(" not in _src_ops)
 # bot.
 for _keep in ("/apps", "/logs", "/restart", "/stop", "/delete", "/rename",
               "/status"):
-    check(f"{_keep} still works", f'startswith("{_keep}")' in _src_pb)
+    check(f"{_keep} still works", f'"{_keep}": lambda:' in _src_pb)
 
 # --- /start must not print a literal backslash-n ---------------------------
 _src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",

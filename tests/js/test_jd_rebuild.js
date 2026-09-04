@@ -73,7 +73,14 @@ ok('JS writes the pill class', /"jd-pill "/.test(JS));
 ok('exactly ONE primary button in the header',
    !!head && head.querySelectorAll('.jd-primary').length === 1,
    head && String(head.querySelectorAll('.jd-primary').length));
-ok('theme toggle present', !!d.getElementById('jdThemeToggle'));
+/* The theme toggle is GONE, and its absence is the fix. It set data-theme and
+   swapped its own icon; app.css maps both values to the same dark palette
+   ("One product, one theme") because RunSpace and Code Studio are hardcoded
+   dark surfaces. Resolving --bg/--fg/--card under each value gives identical
+   results, so pressing it changed nothing a user could see — which reads as a
+   broken app, not a design choice. Assert it stays gone until a real light
+   theme exists to switch to. */
+ok('no dead theme toggle in the header', !d.getElementById('jdThemeToggle'));
 ok('overflow menu present', !!d.getElementById('jdMoreBtn') && !!d.getElementById('jdMoreMenu'));
 ['jdRestart', 'jdStop', 'jdDelete'].forEach(id => {
   const el = d.getElementById(id);
@@ -87,8 +94,8 @@ ok('destructive action is styled as destructive',
 // ── 4. tab row is a NEW component ───────────────────────────────────────
 console.log('[4] pill tab row');
 const tabEls = panel ? [...panel.querySelectorAll('.jd-tab')] : [];
-ok('six tabs', tabEls.length === 6, String(tabEls.length));
-['Code', 'Logs', 'Env', 'Files', 'Metrics', 'Settings'].forEach(label =>
+ok('eight tabs', tabEls.length === 8, String(tabEls.length));
+['Overview', 'Code', 'Logs', 'Env', 'Files', 'Metrics', 'Settings'].forEach(label =>
   ok(`tab "${label}" exists`, tabEls.some(t => t.textContent.trim() === label)));
 ok('tabs are pill-shaped', /\.jd-tab \{[^}]*border-radius:\s*var\(--r-pill\)/.test(CSS));
 ok('exactly one tab starts active',
@@ -107,15 +114,15 @@ ok('every tab points at its panel', tabEls.every(t => {
 // ── 5. panels are mutually exclusive ────────────────────────────────────
 console.log('[5] one view at a time');
 const panels = panel ? [...panel.querySelectorAll('.jd-panel')] : [];
-ok('six panels', panels.length === 6, String(panels.length));
+ok('eight panels', panels.length === 8, String(panels.length));
 ok('exactly one panel is active', panels.filter(p => p.classList.contains('is-active')).length === 1);
-ok('the other five are hidden', panels.filter(p => p.hidden).length === 5,
+ok('the other seven are hidden', panels.filter(p => p.hidden).length === 7,
    String(panels.filter(p => p.hidden).length));
 ok('hidden panels are display:none in CSS', /\.jd-panel \{[^}]*display:\s*none/.test(CSS));
 ok('tab router exists', /function jdSwitchTab\(/.test(JS));
 ok('router toggles BOTH the class and the hidden attribute',
    /p\.classList\.toggle\("is-active", on\)/.test(JS) && /p\.hidden = !on/.test(JS));
-ok('opening the page resets to Code', /jdSwitchTab\("code"\)/.test(JS));
+ok('opening the page resets to Overview', /jdSwitchTab\("overview"\)/.test(JS));
 ok('arrow keys move between tabs', /ArrowRight/.test(JS) && /ArrowLeft/.test(JS));
 
 // ── 6. Code tab has a real terminal ─────────────────────────────────────

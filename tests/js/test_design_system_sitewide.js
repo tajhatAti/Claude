@@ -46,7 +46,16 @@ const SYNTAX = /\.cm-|\.CodeMirror|token|highlight|\.hljs|xterm|ansi|\.t-(out|er
 
 // ── 1. one accent, readable from everywhere ─────────────────────────────
 console.log('\n[1] single accent token');
-ok('--accent is declared on :root', /:root\s*\{[^}]*--accent:\s*#[0-9a-f]{6}/i.test(CLASSIC));
+/* The point of this check is "there is ONE accent", not "it is spelled as a
+   hex literal here". --accent was declared twice at :root — once as
+   var(--acc) and once as #ffffff — which agreed only by coincidence: change
+   --acc and the hardcoded copy silently keeps the old colour. It is an alias
+   now, so accept either form and additionally require that the value it
+   resolves to has exactly one definition. */
+ok('--accent is declared on :root',
+   /:root\s*\{[^}]*--accent:\s*(?:#[0-9a-f]{3,8}|var\(--acc\))/i.test(CLASSIC));
+ok('...and the accent has a single source of truth',
+   (CLASSIC.match(/:root\s*\{[^}]*--accent:\s*#[0-9a-f]{3,8}/gi) || []).length <= 1);
 ok('light theme overrides it for contrast',
    /html\[data-theme="light"\]\s*\{[^}]*--accent:/.test(CLASSIC));
 // The dark accent on white is only 2.2:1, so a single value cannot serve both.

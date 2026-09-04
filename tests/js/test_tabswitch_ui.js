@@ -44,21 +44,26 @@ check("bar CSS never transitions width",
   !/\.rs-progress-fill \{[^}]*transition:[^;]*width/.test(css));
 check("bar is thin and pinned to the top",
   /\.rs-progress \{[^}]*height: 3px/.test(css) && /\.rs-progress \{[^}]*top: 0/.test(css));
-const z = css.match(/\.rs-progress \{[^}]*z-index:\s*(\d+)/);
-check("bar sits above the Details page (2400)", z && Number(z[1]) > 2400, z && z[1]);
+/* Named layer ladder — see tests/js/zlayers.js. The progress bar must outrank
+   the Details page; both are now tokens, so compare the resolved layers. */
+const { zValue } = require('./zlayers');
+const z = css.match(/\.rs-progress \{[^}]*z-index:\s*([^;]+);/);
+const barZ = z && zValue(z[1]);
+check("bar sits above the Details page",
+  barZ > zValue('var(--z-panel)'), String(barZ));
 
 // ---- §3 status animation ------------------------------------------------
 check("status dots cross-fade rather than flip",
   /#tab-jobs \.rs-status-dot,[\s\S]{0,220}transition: background-color \.18s/.test(css));
-check("running dot pulses on a ~1.8s cycle",
-  /animation: rsStatusPulse 1\.8s ease-in-out infinite/.test(css));
-check("pulse animates opacity/transform only",
-  /@keyframes rsStatusPulse \{[^}]*opacity[\s\S]{0,120}transform: scale/.test(css));
+check("running dots stay static (no continuous animation tax)",
+  /\.jstatus-dot\.running \{[\s\S]{0,180}animation: none/.test(css));
+check("old infinite pulse is removed",
+  !/animation: rsStatusPulse 1\.8s ease-in-out infinite/.test(css));
 check("'checking' is visually distinct from stopped",
   /\.jstatus-dot\.checking,[\s\S]{0,160}background: var\(--warn\)/.test(css));
-check("label cross-fades when the status changes",
+check("label feedback stays compositor-only",
   /_reflectJobStatus\._last !== st\.label/.test(js) &&
-  /classList\.add\("status-changed"\)/.test(js));
+  /b\.animate\(\[\{opacity:/.test(js) && !/void b\.offsetWidth/.test(js));
 check("reduced-motion disables the pulse",
   /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,260}jd-badge \{ animation: none/.test(css));
 

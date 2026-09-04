@@ -76,7 +76,9 @@ const src = [
   extract('renderAdminUsers'),
   'function renderAdminStats(){} function renderAdminSpark(){}',
   'function renderAdminReports(){} function renderAdminAudit(){}',
-  'function renderAdminLibs(){}',
+  'function renderAdminLibs(){} function renderAdminBotUsage(){} function _wireAdminBotUsage(){}',
+  'function renderAdminRisk(){} function _wireAdminRisk(){} function renderAdminTelegramJobs(){} function renderAdminRunners(){} function _wireAdminRunners(){}',
+  'function _loadAdminRiskData(){return Promise.resolve([{}, {}, {}, {}]);}',
   'let _admLastOk = 0;',
   extract('_admPreserve'),
   extract('_admMarkFresh'),
@@ -174,7 +176,7 @@ const during = app.calls.length;
 app.release();
 await Promise.all([p1, p2, p3]);
 ok('three overlapping refreshes issue ONE round of requests',
-   during === 6, `${during} calls`);
+   during === 9, `${during} calls`);
 ok('the in-flight guard exists in the shipped source', /_admInFlight/.test(JS));
 
 // ── 4. the freshness label ──────────────────────────────────────────────

@@ -68,9 +68,9 @@ def delete_account(payload: AccountDelete, authorization: Optional[str] = Header
         # Collect deployed job ids BEFORE deleting rows, so the processes can
         # be stopped afterwards (a deleted account must never leave code
         # running on the runner — abuse hole otherwise).
-        rids = [dict(r)["runner_job_id"] for r in conn.execute(
-            "SELECT runner_job_id FROM jobs WHERE user_id = ? AND runner_job_id IS NOT NULL",
-            (user["id"],)).fetchall() if dict(r).get("runner_job_id")]
+        runner_jobs = [dict(r) for r in conn.execute(
+            "SELECT runner_job_id,worker_url FROM jobs WHERE user_id=? AND runner_job_id IS NOT NULL",
+            (user["id"],)).fetchall()]
         # Delete owned data (kept domains); running processes are stopped below.
         for table in ("jobs", "snippets", "user_2fa", "user_preferences",
                       "login_history", "sessions"):
@@ -79,9 +79,9 @@ def delete_account(payload: AccountDelete, authorization: Optional[str] = Header
         conn.commit()
     finally:
         conn.close()
-    for rid in rids:
+    for item in runner_jobs:
         try:
-            runner_client._runner_http("POST", f"/internal/jobs/{rid}/stop")
+            runner_client._runner_http("POST", f"/internal/jobs/{item['runner_job_id']}/stop", worker=item.get("worker_url"))
         except Exception:
             pass
     return {"message": "Account deleted permanently."}

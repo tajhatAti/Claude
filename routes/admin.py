@@ -1,18 +1,24 @@
 """Admin console (owner-only, 404-stealth for everyone else) plus the
-public abuse inbox. Destructive actions re-verify the admin's own 2FA."""
+public abuse inbox. Moderation actions are session-authenticated and audited."""
 from typing import Optional, List
+import secrets as _secrets
+from urllib.parse import urlparse
+import ipaddress
+import socket
+import time
+import requests
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from routes.deps import *  # shared kernel (config, helpers, models)
 
 
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from services import runner_client
 from services import limits
+from services import secrets_store
 from services.runner_client import MAX_JOBS_PER_USER
-from services.twofa import _verify_second_factor
 
 # "Active now" window. Long enough that someone reading logs still counts,
 # short enough that it means present rather than "visited today".
@@ -55,16 +61,17 @@ def _stop_user_jobs_best_effort(user_id: int):
     try:
         conn = get_db_connection()
         try:
-            rows = conn.execute(
-                "SELECT runner_job_id FROM jobs WHERE user_id=? AND runner_job_id IS NOT NULL",
+            rows = [dict(r) for r in conn.execute(
+                "SELECT runner_job_id,worker_url FROM jobs WHERE user_id=? AND runner_job_id IS NOT NULL",
                 (user_id,),
-            ).fetchall()
-            rids = [dict(r)["runner_job_id"] for r in rows if dict(r).get("runner_job_id")]
+            ).fetchall()]
+            conn.execute("UPDATE jobs SET desired_state='stopped' WHERE user_id=?",(user_id,))
+            conn.commit()
         finally:
             conn.close()
-        for rid in rids:
+        for item in rows:
             try:
-                runner_client._runner_http("POST", f"/internal/jobs/{rid}/stop")
+                runner_client._runner_http("POST", f"/internal/jobs/{item['runner_job_id']}/stop", worker=item.get("worker_url"))
             except Exception:
                 pass
     except Exception:
@@ -82,6 +89,26 @@ class AbuseReportIn(BaseModel):
     reason: Optional[str] = ""
 
 
+class AdminBlockIn(BaseModel):
+    scope: str
+    value: str
+    duration_hours: Optional[int] = 24
+    reason: Optional[str] = ""
+    code: Optional[str] = None
+
+
+class AdminBlockRemove(BaseModel):
+    code: Optional[str] = None
+
+
+class AdminRunnerIn(BaseModel):
+    label: str
+    url: str
+    secret: str
+
+
+class AdminRunnerToggle(BaseModel):
+    enabled: bool
 
 
 @router.get("/admin/panel-html", include_in_schema=False)
@@ -101,6 +128,188 @@ def admin_panel_html(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=404, detail="Not found.")
     return HTMLResponse(frag.read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-store"})
+
+
+@router.get("/admin/runners")
+def admin_runners(authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id,label,url,enabled,created_at,updated_at FROM runner_nodes ORDER BY id"
+        ).fetchall()]
+        for row in rows:
+            row["assigned_jobs"] = dict(conn.execute(
+                "SELECT COUNT(*) AS c FROM jobs WHERE worker_url=? AND runner_job_id IS NOT NULL",
+                (row["url"],)).fetchone())["c"]
+    finally:
+        conn.close()
+    health = runner_client.worker_health(max_age_s=ADMIN_HEALTH_MAX_AGE_S) or {}
+    for row in rows:
+        h = health.get(row["url"]) or {}
+        row.update(online=bool(h.get("online")), jobs=h.get("jobs", 0),
+                   capacity=h.get("capacity", 0), mem_mb=h.get("mem_mb", 0),
+                   safe_mb=h.get("safe_mb", 0), full=bool(h.get("full")))
+    env_nodes = [u for u in runner_client.runner_pool()
+                 if not any(r["url"] == u for r in rows)]
+    embedded = None
+    if runner_client.embedded_mode() or runner_client._has_embedded_assignments():
+        try:
+            h = runner_client._runner_http("GET", "/health", worker="embedded").json()
+            embedded = {"online": True, "jobs": h.get("jobs", 0),
+                        "capacity": h.get("capacity", 0), "mem_mb": h.get("mem_mb", 0),
+                        "safe_mb": h.get("safe_mb", 0)}
+        except Exception:
+            embedded = {"online": False, "jobs": 0, "capacity": 0, "mem_mb": 0, "safe_mb": 0}
+    return {"runners": rows, "environment_runners": env_nodes,
+            "embedded": embedded,
+            "total_enabled": sum(1 for r in rows if r["enabled"]) + len(env_nodes) + (1 if embedded else 0),
+            "setup": {"root_directory": "runner", "runtime": "Docker",
+                      "health_path": "/health", "secret_variable": "RUNNER_SERVICE_SECRET",
+                      "public_url_variable": "PUBLIC_BASE_URL"}}
+
+
+@router.post("/admin/runners/generate-secret")
+def admin_runner_secret(authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    return {"secret": _secrets.token_urlsafe(48),
+            "note": "Shown once. Set this as RUNNER_SERVICE_SECRET on the new runner."}
+
+
+@router.post("/admin/runners")
+def admin_add_runner(payload: AdminRunnerIn,
+                     authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    if not secrets_store.configured():
+        raise HTTPException(status_code=409,
+                            detail="Configure JOB_SECRETS_KEY before storing runner credentials.")
+    label = (payload.label or "").strip()[:60] or "Runner"
+    url = (payload.url or "").strip().rstrip("/")
+    secret = (payload.secret or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Paste the runner's public https:// URL.")
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, 443)}
+        if not addresses or any(ipaddress.ip_address(ip).is_private or
+                                ipaddress.ip_address(ip).is_loopback or
+                                ipaddress.ip_address(ip).is_link_local
+                                for ip in addresses):
+            raise ValueError("private address")
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Runner URL must resolve to a public service.")
+    if len(secret) < 24:
+        raise HTTPException(status_code=400, detail="Runner secret must be at least 24 characters.")
+    # A free Render runner can answer 502/503 while the first request wakes it.
+    # One-shot validation misdiagnosed that temporary response as “not a
+    # runner”. Retry only transient statuses; a real 404/401 returns at once.
+    health = None
+    for attempt in range(4):
+        try:
+            health = requests.get(url + "/health", timeout=12)
+            if health.status_code == 200:
+                break
+            if health.status_code not in (408, 425, 429, 500, 502, 503, 504):
+                break
+        except requests.RequestException:
+            pass
+        if attempt < 3:
+            time.sleep(2)
+    if health is None:
+        raise HTTPException(status_code=400, detail="Runner is unreachable after four attempts. Confirm the Render service is Live, then open its /health URL.")
+    if health.status_code != 200:
+        if health.status_code == 404:
+            detail = "The /health endpoint returned 404. Deploy the repository with Root Directory set to runner, not the main website."
+        elif health.status_code in (502, 503, 504):
+            detail = "Render is still starting the runner. Open /health until it returns status 200, then try again."
+        else:
+            detail = f"Runner /health returned HTTP {health.status_code}; expected 200."
+        raise HTTPException(status_code=400, detail=detail)
+    try:
+        auth_check = requests.get(url + "/internal/jobs",
+                                  headers={"Authorization": "Bearer " + secret}, timeout=12)
+    except requests.RequestException:
+        raise HTTPException(status_code=400, detail="Runner health works, but its authenticated endpoint did not respond.")
+    if auth_check.status_code in (401, 403):
+        raise HTTPException(status_code=400, detail="Runner is healthy, but the secret does not match RUNNER_SERVICE_SECRET on that Render service.")
+    if auth_check.status_code == 503:
+        try:
+            remote_detail = str((auth_check.json() or {}).get("detail") or "")
+        except Exception:
+            remote_detail = ""
+        if "secret not configured" in remote_detail.lower():
+            raise HTTPException(status_code=400, detail="Runner is healthy, but RUNNER_SERVICE_SECRET is missing in the runner's Render Environment. Add it there and redeploy.")
+    if auth_check.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Runner authentication test returned HTTP {auth_check.status_code}; expected 200.")
+    had_remote_pool = bool(runner_client.runner_pool())
+    conn = get_db_connection()
+    try:
+        existing = conn.execute("SELECT id FROM runner_nodes WHERE url=?", (url,)).fetchone()
+        now = now_utc_str()
+        encrypted = secrets_store.pack_env({"secret": secret})
+        if existing:
+            conn.execute("UPDATE runner_nodes SET label=?,encrypted_secret=?,enabled=1,updated_at=? WHERE id=?",
+                         (label, encrypted, now, existing["id"]))
+            node_id = existing["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO runner_nodes (label,url,encrypted_secret,enabled,created_by,created_at,updated_at) "
+                "VALUES (?,?,?,1,?,?,?)", (label, url, encrypted, admin["id"], now, now))
+            node_id = cur.lastrowid
+        if not had_remote_pool:
+            # Preserve jobs already running in the in-process engine. New jobs
+            # use the remote pool; old ones remain explicitly addressable.
+            conn.execute("UPDATE jobs SET worker_url='embedded' "
+                         "WHERE worker_url IS NULL AND runner_job_id IS NOT NULL")
+        _admin_audit(conn, admin["id"], "runner_add", url, label)
+        conn.commit()
+    finally:
+        conn.close()
+    runner_client.invalidate_runner_registry()
+    return {"message": "Runner verified and added to the placement pool.", "id": node_id}
+
+
+@router.post("/admin/runners/{node_id}/toggle")
+def admin_toggle_runner(node_id: int, payload: AdminRunnerToggle,
+                        authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT id,label,url FROM runner_nodes WHERE id=?", (node_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Runner not found.")
+        conn.execute("UPDATE runner_nodes SET enabled=?,updated_at=? WHERE id=?",
+                     (1 if payload.enabled else 0, now_utc_str(), node_id))
+        _admin_audit(conn, admin["id"], "runner_enable" if payload.enabled else "runner_disable",
+                     row["url"], row["label"])
+        conn.commit()
+    finally:
+        conn.close()
+    runner_client.invalidate_runner_registry()
+    return {"message": "Runner enabled." if payload.enabled else "Runner drained. Existing jobs remain addressable."}
+
+
+@router.delete("/admin/runners/{node_id}")
+def admin_delete_runner(node_id: int, authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT id,label,url FROM runner_nodes WHERE id=?", (node_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Runner not found.")
+        assigned = dict(conn.execute(
+            "SELECT COUNT(*) AS c FROM jobs WHERE worker_url=? AND runner_job_id IS NOT NULL",
+            (row["url"],)).fetchone())["c"]
+        if assigned:
+            raise HTTPException(status_code=409,
+                                detail=f"This runner still owns {assigned} deployed job(s). Drain it instead of deleting it.")
+        conn.execute("DELETE FROM runner_nodes WHERE id=?", (node_id,))
+        _admin_audit(conn, admin["id"], "runner_delete", row["url"], row["label"])
+        conn.commit()
+    finally:
+        conn.close()
+    runner_client.invalidate_runner_registry()
+    return {"message": "Runner removed."}
 
 
 @router.get("/admin/telegram-diagnostic")
@@ -144,6 +353,26 @@ def admin_telegram_diagnostic(authorization: Optional[str] = Header(None)):
             f"the token belongs to @{out['bot_username']}. These must be the "
             f"same bot.")
     return out
+
+
+@router.get("/admin/bot-usage")
+def admin_bot_usage(days: int = 30, authorization: Optional[str] = Header(None)):
+    """Aggregated Telegram activity, including chats without an account."""
+    require_admin(authorization)
+    from services import bot_analytics
+    return bot_analytics.usage(days)
+
+
+@router.get("/admin/bot-usage.csv")
+def admin_bot_usage_csv(days: int = 30,
+                        authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    from services import bot_analytics
+    body = bot_analytics.usage_csv(days)
+    return Response(body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="telegram-bot-usage-{max(1, min(days, 365))}d.csv"',
+                             "Cache-Control": "no-store"})
 
 
 @router.get("/admin/overview")
@@ -201,6 +430,8 @@ def admin_overview_route(authorization: Optional[str] = Header(None)):
             "active_users": active_users,
             "active_window_min": ACTIVE_WINDOW_MIN,
             "telegram_linked": tg_linked,
+            "bot_secrets_encrypted": secrets_store.configured(),
+            "runner_isolation": "embedded" if runner_client.embedded_mode() else "remote",
         }
     finally:
         conn.close()
@@ -394,6 +625,48 @@ def admin_user_detail_route(user_id: int, authorization: Optional[str] = Header(
     }
 
 
+@router.get("/admin/telegram-jobs")
+def admin_telegram_jobs(authorization: Optional[str] = Header(None)):
+    """Detected Telegram bots and immutable run/update/restart history.
+
+    Raw tokens and source code are deliberately excluded.
+    """
+    require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT j.id,j.name,j.runner_job_id,j.telegram_bot_username,j.telegram_bot_id,"
+            "j.telegram_check_status,j.telegram_verified_at,j.telegram_framework,"
+            "j.telegram_update_mode,j.telegram_token_source,j.updated_at,u.id AS user_id,"
+            "u.username AS owner FROM jobs j JOIN users u ON u.id=j.user_id "
+            "WHERE j.telegram_bot_detected=1 ORDER BY j.updated_at DESC LIMIT 300"
+        ).fetchall()
+        events = conn.execute(
+            "SELECT e.id,e.action,e.job_id,e.job_name,e.telegram_bot_detected,"
+            "e.telegram_bot_username,e.telegram_bot_id,e.telegram_check_status,"
+            "e.created_at,u.id AS user_id,u.username AS owner "
+            "FROM job_deploy_events e JOIN users u ON u.id=e.user_id "
+            "ORDER BY e.id DESC LIMIT 300"
+        ).fetchall()
+        bots = [dict(r) for r in rows]
+        history = [dict(r) for r in events]
+    finally:
+        conn.close()
+    live = runner_client.fleet_jobs()
+    for bot in bots:
+        info = live.get(bot.get("runner_job_id")) or {}
+        bot["status"] = info.get("status") or "offline"
+        bot["uptime_s"] = info.get("uptime_s")
+        username = bot.get("telegram_bot_username")
+        bot["telegram_bot_url"] = f"https://t.me/{username}" if username else None
+    for event in history:
+        username = event.get("telegram_bot_username")
+        event["telegram_bot_url"] = f"https://t.me/{username}" if username else None
+    return {"bots": bots, "events": history,
+            "detected": len(bots),
+            "running": sum(1 for b in bots if b.get("status") == "running")}
+
+
 @router.get("/admin/jobs")
 def admin_jobs_route(authorization: Optional[str] = Header(None)):
     """Job METADATA only (+ live status/uptime from the runner, best-effort) —
@@ -404,7 +677,10 @@ def admin_jobs_route(authorization: Optional[str] = Header(None)):
         rows = conn.execute(
             """
             SELECT j.id, j.name, j.language, j.created_at, j.runner_job_id,
-                   j.worker_url, j.user_id,
+                   j.worker_url, j.user_id, j.telegram_bot_detected,
+                   j.telegram_bot_username, j.telegram_bot_id,
+                   j.telegram_check_status, j.telegram_verified_at,
+                   j.telegram_framework,j.telegram_update_mode,j.telegram_token_source,
                    u.username AS owner, u.telegram_id AS owner_telegram,
                    u.telegram_name AS owner_telegram_name,
                    u.is_suspended AS owner_suspended
@@ -444,6 +720,8 @@ def admin_jobs_route(authorization: Optional[str] = Header(None)):
         row["source"] = "telegram" if row.get("owner_telegram") else "website"
         row["source_inferred"] = True
         row["owner_telegram_name"] = row.get("owner_telegram_name")
+        bot_username = row.get("telegram_bot_username")
+        row["telegram_bot_url"] = f"https://t.me/{bot_username}" if bot_username else None
         row.pop("owner_telegram", None)
     return {"jobs": jobs}
 
@@ -469,6 +747,9 @@ def admin_job_detail_route(job_id: int, authorization: Optional[str] = Header(No
             """
             SELECT j.id, j.name, j.language, j.created_at, j.updated_at,
                    j.runner_job_id, j.worker_url, j.user_id,
+                   j.telegram_bot_detected,j.telegram_bot_username,j.telegram_bot_id,
+                   j.telegram_check_status,j.telegram_verified_at,j.telegram_framework,
+                   j.telegram_update_mode,j.telegram_token_source,
                    u.username AS owner, u.email AS owner_email,
                    u.telegram_id AS owner_telegram,
                    u.telegram_name AS owner_telegram_name,
@@ -486,11 +767,17 @@ def admin_job_detail_route(job_id: int, authorization: Optional[str] = Header(No
         job["owner_job_count"] = dict(conn.execute(
             "SELECT COUNT(*) AS c FROM jobs WHERE user_id = ?", (job["user_id"],)
         ).fetchone())["c"]
+        job["revisions"] = [dict(r) for r in conn.execute(
+            "SELECT version,action,status,error,created_at,promoted_at FROM bot_revisions "
+            "WHERE job_id=? ORDER BY version DESC LIMIT 20", (job_id,)
+        ).fetchall()]
     finally:
         conn.close()
 
     job["source"] = "telegram" if job.get("owner_telegram") else "website"
     job["source_inferred"] = True
+    bot_username = job.get("telegram_bot_username")
+    job["telegram_bot_url"] = f"https://t.me/{bot_username}" if bot_username else None
     job.pop("owner_telegram", None)
     worker = job.get("worker_url") or None
     job["worker"] = worker or "primary"
@@ -633,13 +920,8 @@ def admin_set_suspended(payload: AdminSuspend, authorization: Optional[str] = He
         raise HTTPException(status_code=400, detail="You cannot suspend your own account.")
     conn = get_db_connection()
     try:
-        # Destructive actions demand the admin's own second factor, every time.
-        row = conn.execute("SELECT is_enabled FROM user_2fa WHERE user_id=?", (admin["id"],)).fetchone()
-        if not row or not row["is_enabled"]:
-            raise HTTPException(
-                status_code=409,
-                detail="Enable 2FA on your admin account first — destructive actions require it.")
-        _verify_second_factor(conn, admin["id"], payload.code or "")
+        # The owner explicitly chose session-auth-only moderation actions.
+        # Authentication + admin role + audit logging still apply.
         target = conn.execute("SELECT id, username FROM users WHERE id=?", (payload.user_id,)).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -758,8 +1040,97 @@ def report_abuse_submit(payload: AbuseReportIn, request: Request):
 
 
 # ================================
-# GLOBAL SEARCH (snippets + RunSpace apps)
+# ABUSE CONTROLS — explicit, reversible, admin-only and audited
 # ================================
+
+@router.get("/admin/blocks")
+def admin_blocks(authorization: Optional[str] = Header(None)):
+    require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT b.id,b.scope,b.value,b.reason,b.created_at,b.expires_at,b.revoked_at,"
+            "u.username AS created_by_name FROM admin_blocks b "
+            "LEFT JOIN users u ON u.id=b.created_by ORDER BY b.id DESC LIMIT 200"
+        ).fetchall()
+        now = now_utc_str()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["active"] = not item.get("revoked_at") and (
+                not item.get("expires_at") or item["expires_at"] > now)
+            out.append(item)
+        return {"blocks": out, "active": sum(1 for x in out if x["active"])}
+    finally:
+        conn.close()
+
+
+@router.post("/admin/blocks")
+def admin_create_block(payload: AdminBlockIn,
+                       authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    scope = (payload.scope or "").strip().lower()
+    value = (payload.value or "").strip()
+    if scope not in ("ip", "fingerprint"):
+        raise HTTPException(status_code=400, detail="Block scope must be ip or fingerprint.")
+    if scope == "ip":
+        import ipaddress
+        try:
+            value = str(ipaddress.ip_address(value))
+        except ValueError:
+            # TestClient and some trusted-proxy deployments expose a stable
+            # non-IP network label. Never accept arbitrary long input.
+            if not value or len(value) > 100 or not re.match(r"^[A-Za-z0-9:._-]+$", value):
+                raise HTTPException(status_code=400, detail="Invalid IP address.")
+    elif not re.match(r"^[a-fA-F0-9]{64}$", value):
+        raise HTTPException(status_code=400, detail="Invalid device fingerprint.")
+    hours = int(payload.duration_hours or 0)
+    if hours < 0 or hours > 8760:
+        raise HTTPException(status_code=400, detail="Duration must be 1–8760 hours, or 0 for permanent.")
+    reason = (payload.reason or "").strip()[:300]
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Add a short reason for the audit trail.")
+    created = now_utc_str()
+    expires = ((now_utc() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+               if hours else None)
+    conn = get_db_connection()
+    try:
+        duplicate = conn.execute(
+            "SELECT id FROM admin_blocks WHERE scope=? AND value=? AND revoked_at IS NULL "
+            "AND (expires_at IS NULL OR expires_at > ?)", (scope, value, created)).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="That network or device is already blocked.")
+        cur = conn.execute(
+            "INSERT INTO admin_blocks (scope,value,reason,created_by,created_at,expires_at) "
+            "VALUES (?,?,?,?,?,?)", (scope, value, reason, admin["id"], created, expires))
+        _admin_audit(conn, admin["id"], "block_" + scope, value,
+                     f"until={expires or 'permanent'}; reason={reason}")
+        conn.commit()
+        return {"message": "Block is active.", "id": cur.lastrowid, "expires_at": expires}
+    finally:
+        conn.close()
+
+
+@router.post("/admin/blocks/{block_id}/remove")
+def admin_remove_block(block_id: int, payload: AdminBlockRemove,
+                       authorization: Optional[str] = Header(None)):
+    admin, _ = require_admin(authorization)
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT id,scope,value,revoked_at FROM admin_blocks WHERE id=?",
+                           (block_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Block not found.")
+        if row["revoked_at"]:
+            return {"message": "Block was already removed."}
+        conn.execute("UPDATE admin_blocks SET revoked_at=?,revoked_by=? WHERE id=?",
+                     (now_utc_str(), admin["id"], block_id))
+        _admin_audit(conn, admin["id"], "unblock_" + row["scope"], row["value"], "")
+        conn.commit()
+        return {"message": "Block removed."}
+    finally:
+        conn.close()
+
 
 @router.get("/admin/fingerprint-clusters")
 def get_fingerprint_clusters(authorization: Optional[str] = Header(None)):

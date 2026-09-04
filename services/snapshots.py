@@ -61,7 +61,7 @@ def _now() -> str:
 # --------------------------------------------------------------------------
 # storage
 # --------------------------------------------------------------------------
-def save_snapshot(job_id: int, runner_job_id: str) -> dict:
+def save_snapshot(job_id: int, runner_job_id: str, worker: str = None) -> dict:
     """Ask the runner to pack the workspace, store the result in Postgres."""
     if not SNAPSHOTS_ENABLED or not runner_job_id:
         return {"saved": False, "reason": "disabled"}
@@ -70,7 +70,7 @@ def save_snapshot(job_id: int, runner_job_id: str) -> dict:
 
     try:
         resp = runner_client._runner_http(
-            "GET", f"/internal/jobs/{runner_job_id}/snapshot")
+            "GET", f"/internal/jobs/{runner_job_id}/snapshot", worker=worker)
     except Exception as exc:  # runner down / restarting — try again later
         logger.info("snapshot: runner unreachable for job %s: %s", job_id, exc)
         return {"saved": False, "reason": "runner unreachable"}
@@ -156,7 +156,7 @@ def snapshot_meta(job_id: int) -> Optional[dict]:
 
 
 def restore_snapshot(job_id: int, runner_job_id: str,
-                     overwrite: bool = False) -> dict:
+                     overwrite: bool = False, worker: str = None) -> dict:
     """Push the stored workspace back to the runner. Best-effort by design."""
     if not SNAPSHOTS_ENABLED or not runner_job_id:
         return {"restored": 0, "reason": "disabled"}
@@ -168,6 +168,7 @@ def restore_snapshot(job_id: int, runner_job_id: str,
         resp = runner_client._runner_http(
             "POST", f"/internal/jobs/{runner_job_id}/snapshot/restore",
             {"tarball_b64": snap["tarball_b64"], "overwrite": bool(overwrite)},
+            worker=worker,
         )
     except Exception as exc:
         logger.warning("snapshot: restore call failed for job %s: %s", job_id, exc)
@@ -194,7 +195,7 @@ def _all_live_jobs() -> list:
     conn = get_db_connection()
     try:
         rows = conn.execute(
-            "SELECT id, runner_job_id FROM jobs WHERE runner_job_id IS NOT NULL "
+            "SELECT id,runner_job_id,worker_url FROM jobs WHERE runner_job_id IS NOT NULL "
             "AND runner_job_id != ''"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -210,7 +211,7 @@ def sweep_once() -> dict:
     saved = failed = 0
     for row in _all_live_jobs():
         try:
-            res = save_snapshot(int(row["id"]), row["runner_job_id"])
+            res = save_snapshot(int(row["id"]),row["runner_job_id"],worker=row.get("worker_url"))
             if res.get("saved"):
                 saved += 1
             else:

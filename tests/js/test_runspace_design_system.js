@@ -24,7 +24,7 @@ const tokenEnd = full.indexOf("*/", full.indexOf("DESIGN TOKENS")) + 2;
 const tokens = full.slice(0, full.indexOf("}", full.indexOf("--dur")) + 1);
 
 // Collect only the rules whose selector mentions a RunSpace surface.
-const postcss = require(path.join(process.env.NODE_PATH || '/tmp/csstest/node_modules', 'postcss'));
+const postcss = require('postcss');
 /* A rule belongs to RunSpace only if EVERY selector in it targets RunSpace.
  * Matching "any selector" swept in the app-wide pill rule -- which lists
  * .rs-chip alongside a dozen non-RunSpace classes -- and then reported its

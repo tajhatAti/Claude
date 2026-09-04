@@ -590,7 +590,17 @@ _SCHEMA_TABLES = [
         -- first in the pool, so with 2+ workers the site would report a
         -- perfectly healthy bot as dead. NULL = the single-worker default.
         worker_url TEXT,
+        desired_state TEXT NOT NULL DEFAULT 'running',
         env TEXT,
+        telegram_bot_detected INTEGER NOT NULL DEFAULT 0,
+        telegram_bot_username TEXT,
+        telegram_bot_id TEXT,
+        telegram_token_fingerprint TEXT,
+        telegram_check_status TEXT,
+        telegram_verified_at TEXT,
+        telegram_framework TEXT,
+        telegram_update_mode TEXT,
+        telegram_token_source TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -697,6 +707,191 @@ _SCHEMA_TABLES = [
         FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE CASCADE
     )
     """,
+    """
+    -- Admin-managed network/device blocks. A block prevents new signups and
+    -- new jobs; it does not treat a shared IP as proof or lock existing users
+    -- out of their data. Revocation is retained for the audit trail.
+    CREATE TABLE IF NOT EXISTS admin_blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scope TEXT NOT NULL,
+        value TEXT NOT NULL,
+        reason TEXT,
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT,
+        revoked_at TEXT,
+        revoked_by INTEGER,
+        FOREIGN KEY (created_by) REFERENCES users (id),
+        FOREIGN KEY (revoked_by) REFERENCES users (id)
+    )
+    """,
+    """
+    -- Dynamically managed runner services. Secrets are Fernet-encrypted; the
+    -- admin API never returns them after registration.
+    CREATE TABLE IF NOT EXISTS runner_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        encrypted_secret TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (created_by) REFERENCES users (id)
+    )
+    """,
+    """
+    -- Immutable source revisions. Environment secrets are deliberately not
+    -- duplicated here; rollback reuses the job's current encrypted env.
+    CREATE TABLE IF NOT EXISTS bot_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        action TEXT NOT NULL DEFAULT 'deploy',
+        language TEXT NOT NULL,
+        code TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        promoted_at TEXT,
+        FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        UNIQUE (job_id, version)
+    )
+    """,
+    """
+    -- Short-lived proof that an authenticated user verified a BotFather token
+    -- before creating a bot. Only a SHA-256 digest is stored, never the token.
+    CREATE TABLE IF NOT EXISTS telegram_token_verifications (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL,
+        bot_username TEXT NOT NULL,
+        bot_id TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    -- Immutable deployment history for the admin Telegram-bot view. This says
+    -- who ran/updated/restarted what without retaining a second copy of code
+    -- or any bot token.
+    CREATE TABLE IF NOT EXISTS job_deploy_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        job_id INTEGER,
+        action TEXT NOT NULL,
+        job_name TEXT NOT NULL,
+        telegram_bot_detected INTEGER NOT NULL DEFAULT 0,
+        telegram_bot_username TEXT,
+        telegram_bot_id TEXT,
+        telegram_check_status TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    -- Durable bot activity. chat_id is retained even when no site account is
+    -- linked, so the admin funnel includes the people who have not signed up.
+    CREATE TABLE IF NOT EXISTS bot_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        telegram_user_id TEXT,
+        user_id INTEGER,
+        display_name TEXT,
+        event_type TEXT NOT NULL,
+        command TEXT,
+        payload TEXT,
+        outcome TEXT NOT NULL DEFAULT 'ok',
+        error TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    -- Bot Store. One row = one complete bot product you can deploy in one tap.
+    -- `source` separates the built-in products (mirrored from
+    -- services/bot_templates on boot, so counts and ratings attach to them
+    -- like any other listing) from community submissions, which stay `pending`
+    -- until an owner approves them. `code` is always one complete, runnable
+    -- Python file — never a fragment and never a platform-specific dialect.
+    CREATE TABLE IF NOT EXISTS store_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL DEFAULT 'built-in',
+        builtin_id TEXT,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'Uncategorised',
+        tags TEXT NOT NULL DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'python',
+        framework TEXT NOT NULL DEFAULT '',
+        difficulty TEXT NOT NULL DEFAULT 'Intermediate',
+        features TEXT NOT NULL DEFAULT '',
+        setup_notes TEXT NOT NULL DEFAULT '',
+        env_fields TEXT NOT NULL DEFAULT '[]',
+        code TEXT NOT NULL DEFAULT '',
+        code_hash TEXT NOT NULL DEFAULT '',
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        status TEXT NOT NULL DEFAULT 'pending',
+        review_note TEXT NOT NULL DEFAULT '',
+        author_user_id INTEGER,
+        author_name TEXT NOT NULL DEFAULT 'CodeNest',
+        featured INTEGER NOT NULL DEFAULT 0,
+        install_count INTEGER NOT NULL DEFAULT 0,
+        rating_sum INTEGER NOT NULL DEFAULT 0,
+        rating_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        published_at TEXT,
+        FOREIGN KEY (author_user_id) REFERENCES users (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    -- Every deploy that started from a store listing. Kept per install (not as
+    -- a bare counter) so the owner console can show WHICH bot each person
+    -- took, and so an abusive listing can be traced to its installs.
+    CREATE TABLE IF NOT EXISTS store_installs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_slug TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        job_id INTEGER,
+        version TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (job_id) REFERENCES jobs (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    -- One rating per person per listing (the UNIQUE index is created in
+    -- init_db because an added constraint cannot live on an added column).
+    CREATE TABLE IF NOT EXISTS store_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_slug TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        rating INTEGER NOT NULL DEFAULT 5,
+        comment TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    -- Saved-for-later listings. A favourite is not an install: it only pins
+    -- the listing into the person's own library tab.
+    CREATE TABLE IF NOT EXISTS store_favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_slug TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
 ]
 
 
@@ -796,12 +991,67 @@ def init_db():
         # are — so this migration cannot strand a running bot.
         if not _column_exists(conn, "jobs", "worker_url"):
             conn.execute("ALTER TABLE jobs ADD COLUMN worker_url TEXT")
+        # Desired process state survives control-plane and runner redeploys.
+        # Existing deployed rows default to running, matching the platform's
+        # 24/7 promise; future Stop actions set this to stopped explicitly.
+        if not _column_exists(conn, "jobs", "desired_state"):
+            conn.execute("ALTER TABLE jobs ADD COLUMN desired_state TEXT NOT NULL DEFAULT 'running'")
+
+        # Telegram bot metadata is safe identity/status only. Raw tokens remain
+        # solely in the user's source/env and are never copied here.
+        for _col, _ddl in (
+            ("telegram_bot_detected", "INTEGER NOT NULL DEFAULT 0"),
+            ("telegram_bot_username", "TEXT"),
+            ("telegram_bot_id", "TEXT"),
+            ("telegram_token_fingerprint", "TEXT"),
+            ("telegram_check_status", "TEXT"),
+            ("telegram_verified_at", "TEXT"),
+            ("telegram_framework", "TEXT"),
+            ("telegram_update_mode", "TEXT"),
+            ("telegram_token_source", "TEXT"),
+        ):
+            if not _column_exists(conn, "jobs", _col):
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {_col} {_ddl}")
 
         # Same story for the sessions table.
         if not _column_exists(conn, "sessions", "fingerprint"):
             conn.execute("ALTER TABLE sessions ADD COLUMN fingerprint TEXT")
         if not _column_exists(conn, "sessions", "expires_at"):
             conn.execute("ALTER TABLE sessions ADD COLUMN expires_at TEXT")
+
+        # Read paths filter by time, then group by chat/command.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_created_at ON bot_events (created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_events_chat_id ON bot_events (chat_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_blocks_lookup "
+                     "ON admin_blocks (scope, value, revoked_at, expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_deploy_events_created "
+                     "ON job_deploy_events (created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_deploy_events_user "
+                     "ON job_deploy_events (user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tg_verify_user_expiry "
+                     "ON telegram_token_verifications (user_id, expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_tg_token_fingerprint "
+                     "ON jobs (telegram_token_fingerprint)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bot_revisions_job_version "
+                     "ON bot_revisions (job_id, version)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_runner_nodes_enabled "
+                     "ON runner_nodes (enabled)")
+
+        # Bot Store lookups: the catalog is filtered by status + sorted by
+        # installs, and every detail/library call resolves a listing by slug.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_items_status "
+                     "ON store_items (status, category)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_items_installs "
+                     "ON store_items (install_count)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_installs_user "
+                     "ON store_installs (user_id, item_slug)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_store_installs_slug "
+                     "ON store_installs (item_slug)")
+        # One rating and one favourite per person per listing.
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_store_reviews_one "
+                     "ON store_reviews (item_slug, user_id)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_store_favorites_one "
+                     "ON store_favorites (item_slug, user_id)")
 
         conn.commit()
     finally:

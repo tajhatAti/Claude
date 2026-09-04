@@ -277,8 +277,14 @@ _d = (login(init_data(token="9999999:AAsomeOtherBotTokenABCDEFGH123456")).json()
       or {}).get("detail") or ""
 check("a genuine bot mismatch reports the configured bot ID",
       "123456" in _d, _d)
-check("so the owner can compare it against BotFather in one glance",
-      "check that matches the bot" in _d, _d)
+# The INTENT is "the owner can act on this without guessing", not one exact
+# sentence. The wording changed when the message stopped saying "check that
+# matches" (a comparison the user has to work out) and started naming the step
+# that fixes it — send /start to the right bot, because the usual cause is an
+# old message button from a bot that has since been replaced. Assert the
+# actionable step, so a future improvement to the phrasing is not a failure.
+check("so the owner can act on it without guessing",
+      "/start" in _d and "bot ID" in _d, _d)
 
 # The bot ID half of a token is public — anyone who can message the bot sees
 # it. The SECRET half must never appear.
@@ -383,7 +389,12 @@ try:
            or {}).get("detail") or ""
     check("the error names the bot by @username, not just a number",
           "@AhadRealBot" in _dd, _dd)
-    check("and says what to do with it", "Open the Mini App from that bot" in _dd, _dd)
+    # Again the STEP, not the sentence. "Open the Mini App from that bot"
+    # assumed the user could tell which bot they had opened it from — and when
+    # the cause is a stale button in an old chat, they cannot. Naming /start
+    # gives them something to press.
+    check("and says what to do with it",
+          "/start" in _dd and "@AhadRealBot" in _dd, _dd)
     MA.whoami = lambda timeout_s=6.0: {"ok": True, "bot_id": 123456,
                                        "username": "AhadRealBot"}
     A._BOT_IDENTITY.update(checked=False, value=None)
@@ -501,24 +512,45 @@ _asrc = open(os.path.join(ROOT, "routes/auth.py"), encoding="utf-8").read()
 check("the culprit reaches the log", "culprit=%s" in _asrc)
 
 # ---------------------------------------------------------------------------
-print("[3h] a revoked token diagnoses ITSELF")
+print("[3h] a wrong-key bad_hash names the bot, and never blames the token")
 # ---------------------------------------------------------------------------
-# The production log ended here:
-#   fields=['auth_date','query_id','user']  culprit=None
-# An ordinary field set, and no field whose decoding differs. An HMAC can only
-# fail two ways — different DATA or a different KEY — and culprit=None rules
-# out the first. So the secret is wrong.
+# THIS BLOCK USED TO ASSERT THE OPPOSITE, AND IT WAS WRONG. It required a 503
+# reading "your Telegram token is out of date", produced by this guard:
 #
-# The trap: BotFather's "revoke" keeps the bot ID and changes only the secret.
-# getMe still succeeds, every bot_id comparison still matches, and the sign-in
-# still fails. Every check I had built compared IDs, so none of them could see
-# it. This one does not compare anything — it reasons from culprit + freshness.
-_srv = "8719137492:AAserverHasTheOldRevokedSecret1"
-_tg = "8719137492:AAtelegramSignsWithTheNewOne222"
+#     _id_agrees = str(getMe(OUR token).id) == id parsed from OUR OWN token
+#     if _tok_ok and _id_agrees and culprit is None and age < 300: -> 503
+#
+# Two separate faults, both reproduced:
+#
+#  1. _id_agrees is a TAUTOLOGY. Both sides derive from the same token, and
+#     Telegram can only answer getMe with the id inside the token it was
+#     called with. It is True for every live token and can detect nothing.
+#
+#  2. THE GUARD IS INVERTED with respect to its own purpose. Walked through
+#     both cases:
+#       * token really revoked -> the server's secret is dead -> getMe
+#         answers 401 -> whoami() reports rejected_by_telegram -> the
+#         identity dict has no "id" -> _id_agrees False -> the 503 does NOT
+#         fire. The case it was written for is the one it misses.
+#       * payload signed by a DIFFERENT bot (an old message button from a
+#         previous bot) -> our token is live -> _id_agrees True -> the 503
+#         DOES fire, telling the owner to re-copy a token that is perfectly
+#         fine. That is the reported bug: a new bot was created, the token
+#         was saved, and the message never changed.
+#
+# The old test passed only because it MOCKED whoami() into ok=True — an answer
+# a revoked token never produces. It encoded the bug rather than catching it.
+#
+# A genuinely revoked token is already handled, and better: whoami() returns
+# rejected_by_telegram and start_bot() logs "TELEGRAM TOKEN REJECTED by getMe"
+# at boot, before anyone tries to sign in.
+#
+# What the server can say honestly is which bot it accepts, so that is what is
+# asserted now. tests/test_badhash_verdict.py covers this in full.
+_srv = "8719137492:AAserverHoldsThisBotsSecret1234"
+_tg = "7111111111:AAaDifferentBotSignedThePayload"
 _prev = os.environ.get("TELEGRAM_PING_BOT_TOKEN", "")
 os.environ["TELEGRAM_PING_BOT_TOKEN"] = _srv
-# getMe SUCCEEDS and the id MATCHES — that is exactly what makes a revoked
-# token invisible to every id-based check.
 _prev_who = MA.whoami
 MA.whoami = lambda timeout_s=6.0: {"ok": True, "bot_id": 8719137492,
                                    "username": "mytestRenderBot"}
@@ -532,13 +564,15 @@ _sc = hmac.new(b"WebAppData", _tg.encode(), hashlib.sha256).digest()
 _f["hash"] = hmac.new(_sc, _cs.encode(), hashlib.sha256).hexdigest()
 
 _r = login(urlencode(_f))
-check("a revoked-token sign-in is a 503, not a generic 400",
-      _r.status_code == 503, str(_r.status_code))
+check("a wrong-key sign-in is a 400 (the request), not a 503 (the server)",
+      _r.status_code == 400, str(_r.status_code))
 _msg = (_r.json() or {}).get("detail") or ""
-check("the message says the TOKEN is out of date",
-      "out of date" in _msg.lower(), _msg)
-check("and names exactly where to fix it",
-      "BotFather" in _msg and "TELEGRAM_PING_BOT_TOKEN" in _msg, _msg)
+check("it does NOT blame a token Telegram has just confirmed is live",
+      "out of date" not in _msg.lower(), _msg)
+check("it names the bot this server accepts",
+      "mytestRenderBot" in _msg, _msg)
+check("and tells the user how to reach it",
+      "/start" in _msg, _msg)
 
 # The reasoning must not fire on anything else.
 # `except X as _e` UNBINDS the name at the end of the block in Python 3, so
@@ -583,17 +617,43 @@ except ValueError as e:
     ok = str(e) == "no_user"
 check("initData with no user (inline/channel open) is refused", ok)
 
-# Telegram is rolling out a `signature` field for third-party validation. It
-# is NOT part of the HMAC data-check string; leaving it in breaks every login.
-signed = init_data(extra=None)
-pairs = dict(x.split("=", 1) for x in signed.split("&"))
-with_sig = signed + "&signature=" + "abc123"
+# THIS BLOCK ASSERTED THE BUG, AND IS WHY THE BUG SHIPPED.
+#
+# It took a payload signed WITHOUT `signature`, glued `signature=abc123` on
+# afterwards, and required that to still verify. Telegram never produces such
+# a string — when it sends `signature`, that field is part of what it signed.
+# The only way to satisfy this test was to pop `signature` before hashing,
+# which is exactly the line that broke every real sign-in from a client new
+# enough to send the field. A test that can only be passed by breaking
+# production is worse than no test.
+#
+# Proven with Telegram's own @telegram-apps/init-data-node: sign a payload
+# containing `signature`, then recompute the hash both ways —
+#     HMAC WITH    signature -> bb7b679dc007...  == the library's hash
+#     HMAC WITHOUT signature -> 981c1132292c...  != the library's hash
+# The field belongs in the HMAC data-check string. It is excluded only from
+# the ED25519 third-party check, and conflating the two rules was the error.
+#
+# Rewritten to test the real contract, both directions.
+_sig = "zL-ucjNyREiHDE8aihFwpfR9aggP2xiAo3NSpfe-p7Ib"
+
+# 1. As Telegram actually sends it: signature present AND covered by the hash.
+_real = init_data(extra={"signature": _sig})
 try:
-    got = MA.verify_init_data(with_sig)
-    sig_ok = got["id"] == 555
-except ValueError as e:
-    sig_ok = False
-check("an added `signature` field does not break verification", sig_ok)
+    _got = MA.verify_init_data(_real)
+    _sig_ok = _got["id"] == 555
+except ValueError:
+    _sig_ok = False
+check("initData whose hash COVERS `signature` verifies", _sig_ok)
+
+# 2. The old test's own fixture — a signature bolted on after signing — is a
+# payload Telegram never emits, and must be refused.
+try:
+    MA.verify_init_data(init_data(extra=None) + "&signature=abc123")
+    _bolt_ok = False
+except ValueError:
+    _bolt_ok = True
+check("a `signature` glued on after signing is refused", _bolt_ok)
 
 def _reason(data, token=None):
     """The ValueError reason verify_init_data raises, or None on success."""

@@ -14,6 +14,7 @@ monkeypatch runner_client._runner_http — call it module-attr style.
 """
 import os
 import logging
+import time
 
 import requests
 from fastapi import HTTPException
@@ -24,6 +25,66 @@ logger = logging.getLogger("codenest-app")
 # runner's MAX_BG_JOBS, which is a per-container RAM limit. Env-tunable so the
 # ceiling can move with capacity without a code change.
 MAX_JOBS_PER_USER = int(os.getenv("MAX_JOBS_PER_USER", "3"))
+
+_registry_cache = {"at": 0.0, "nodes": []}
+
+
+def invalidate_runner_registry():
+    _registry_cache.update(at=0.0, nodes=[])
+    _health_cache.clear() if "_health_cache" in globals() else None
+    _fleet_cache.update(at=0.0, jobs=None) if "_fleet_cache" in globals() else None
+
+
+def managed_runner_nodes(refresh=False) -> list:
+    """Enabled DB-managed runners with decrypted server-side credentials."""
+    now = time.time()
+    if not refresh and now - _registry_cache["at"] < 10:
+        return list(_registry_cache["nodes"])
+    try:
+        from database import get_db_connection
+        from services import secrets_store
+        conn = get_db_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id,label,url,encrypted_secret,created_at,updated_at "
+                "FROM runner_nodes WHERE enabled=1 ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
+        nodes = []
+        for row in rows:
+            item = dict(row)
+            secret = secrets_store.unpack_env(item.pop("encrypted_secret", None)).get("secret", "")
+            if secret:
+                item["secret"] = secret
+                item["url"] = item["url"].rstrip("/")
+                nodes.append(item)
+        _registry_cache.update(at=now, nodes=nodes)
+        return list(nodes)
+    except Exception as exc:
+        logger.debug("managed runner registry unavailable: %s", exc)
+        return list(_registry_cache["nodes"])
+
+
+def _secret_for_runner(url):
+    clean = (url or "").rstrip("/")
+    for node in managed_runner_nodes():
+        if node["url"] == clean:
+            return node["secret"]
+    # Disabled means no NEW placement, not abandoning jobs already on it.
+    try:
+        from database import get_db_connection
+        from services import secrets_store
+        conn = get_db_connection()
+        try:
+            row = conn.execute("SELECT encrypted_secret FROM runner_nodes WHERE url=?", (clean,)).fetchone()
+        finally:
+            conn.close()
+        if row:
+            return secrets_store.unpack_env(dict(row)["encrypted_secret"]).get("secret", "")
+    except Exception:
+        pass
+    return os.getenv("RUNNER_SERVICE_SECRET", "").strip()
 
 
 def runner_pool() -> list:
@@ -48,6 +109,10 @@ def runner_pool() -> list:
         u = raw.strip().rstrip("/")
         if u and u not in urls:
             urls.append(u)
+    for node in managed_runner_nodes():
+        u = node["url"]
+        if u and u not in urls:
+            urls.append(u)
     return urls
 
 
@@ -56,7 +121,7 @@ def runner_cfg():
     runner; placement across the pool goes through _runner_http."""
     pool = runner_pool()
     url = pool[0] if pool else ""
-    secret = os.getenv("RUNNER_SERVICE_SECRET", "").strip()
+    secret = _secret_for_runner(url) if url else os.getenv("RUNNER_SERVICE_SECRET", "").strip()
     return url, secret
 
 
@@ -68,9 +133,9 @@ def embedded_mode() -> bool:
 def public_base_url() -> str:
     """Where /live/* is publicly reachable.
     Embedded → this main service. Remote → the runner service."""
-    runner_url = os.getenv("RUNNER_SERVICE_URL", "").strip().rstrip("/")
-    if runner_url:
-        return runner_url
+    pool = runner_pool()
+    if pool:
+        return pool[0]
     base = (
         os.getenv("SITE_BASE_URL", "").strip()
         or os.getenv("PUBLIC_BASE_URL", "").strip()
@@ -98,10 +163,9 @@ def _embedded_client():
 # ---------------------------------------------------------------------------
 # WORKER REGISTRY  —  cached health, least-loaded placement
 # ---------------------------------------------------------------------------
-# Deliberately in memory, not a database table. The set of workers is CONFIG
-# (an env var you edit in the Render dashboard), not user data; a table would
-# add CRUD, an admin UI and a migration while answering the same question.
-# The cache exists so job creation never waits on a health round-trip.
+# The pool is the union of environment-configured URLs and encrypted,
+# admin-managed runner_nodes. Registry/health caches keep placement fast while
+# allowing an owner to add capacity without redeploying the main site.
 _HEALTH_TTL_S = int(os.getenv("WORKER_HEALTH_TTL_S", "45"))
 _health_cache = {}          # url -> {"at": ts, "free": int, "load": float, "online": bool}
 
@@ -192,6 +256,19 @@ FLEET_CACHE_MS = int(os.getenv("FLEET_CACHE_MS", "3000"))
 _fleet_cache = {"at": 0.0, "jobs": None}
 
 
+def _has_embedded_assignments():
+    try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        try:
+            row = conn.execute("SELECT 1 FROM jobs WHERE worker_url='embedded' AND runner_job_id IS NOT NULL LIMIT 1").fetchone()
+            return bool(row)
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
 def fleet_jobs(refresh: bool = False) -> dict:
     """Every live job on EVERY worker, keyed by runner job id.
 
@@ -235,6 +312,15 @@ def fleet_jobs(refresh: bool = False) -> dict:
                 out[j.get("id")] = j
         except Exception as exc:
             logger.warning("fleet_jobs: %s unreachable (%s)", base, exc)
+    if _has_embedded_assignments():
+        try:
+            resp = _runner_http("GET", "/internal/jobs", worker="embedded")
+            if resp is not None and resp.status_code == 200:
+                for j in ((resp.json() or {}).get("jobs") or []):
+                    j["worker"] = "embedded"
+                    out[j.get("id")] = j
+        except Exception as exc:
+            logger.warning("fleet_jobs: embedded assignments unreachable (%s)", exc)
     _fleet_cache.update(at=now, jobs=out)
     return out
 
@@ -249,7 +335,7 @@ def _runner_http(method: str, path: str, json_body=None, worker: str = None):
     if method.upper() != "GET":
         _fleet_cache["jobs"] = None
 
-    if embedded_mode():
+    if (embedded_mode() and not worker) or worker == "embedded":
         secret = os.getenv("RUNNER_SERVICE_SECRET", "").strip()
         if not secret:
             raise HTTPException(status_code=503, detail="Runner is not configured.")
@@ -266,11 +352,15 @@ def _runner_http(method: str, path: str, json_body=None, worker: str = None):
             raise HTTPException(status_code=503, detail=f"Job engine error — please try again. ({type(exc).__name__})")
 
     pool = runner_pool()
-    runner_secret = os.getenv("RUNNER_SERVICE_SECRET", "").strip()
-    if not pool or not runner_secret:
-        raise HTTPException(status_code=503, detail="Jobs are not configured. Set RUNNER_SERVICE_URL and RUNNER_SERVICE_SECRET.")
+    if worker and not pool:
+        pool = [worker.rstrip("/")]
+    if not pool:
+        raise HTTPException(status_code=503, detail="Jobs are not configured. Add a runner in Admin or set RUNNER_SERVICE_URL.")
 
     def _call(base):
+        runner_secret = _secret_for_runner(base)
+        if not runner_secret:
+            raise requests.ConnectionError("runner credential missing")
         return requests.request(
             method, base + path,
             json=json_body,
@@ -347,8 +437,13 @@ def _job_web_fields(info: dict, worker: str = None) -> dict:
     404'd even though the bot was running fine.
     """
     slug = (info or {}).get("web_slug")
-    if embedded_mode():
-        base = public_base_url()
+    if embedded_mode() or worker == "embedded":
+        base = (
+            os.getenv("SITE_BASE_URL", "").strip()
+            or os.getenv("PUBLIC_BASE_URL", "").strip()
+            or os.getenv("RENDER_EXTERNAL_URL", "").strip()
+            or "http://127.0.0.1:{}".format(os.getenv("PORT", "8000"))
+        ).rstrip("/")
     else:
         base = (worker or "").rstrip("/") or runner_cfg()[0]
     if not slug or not base:
