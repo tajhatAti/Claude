@@ -2309,11 +2309,18 @@ function applyTheme(theme) {
 
 /* ==================== PROFILE ==================== */
 async function saveProfile() {
+  // The editable profile form was trimmed from the Account tab, but the
+  // helper is kept for any future inline edit. Never send empty strings for
+  // fields the UI no longer shows: the backend treats "" as "set to empty"
+  // (only null means "keep the existing value"), which would silently wipe a
+  // user's stored phone / custom code on the next save.
   const phoneEl = document.getElementById("profilePhone");
   const codeEl = document.getElementById("profileCode");
-  const phone = phoneEl ? phoneEl.value.trim() : "";
-  const custom_code = codeEl ? codeEl.value.trim() : "";
-  try { await api("/profile/update", "POST", { phone, custom_code }, true); toast("Profile saved!", "success"); }
+  const body = {};
+  if (phoneEl) body.phone = phoneEl.value.trim();
+  if (codeEl) body.custom_code = codeEl.value.trim();
+  if (!Object.keys(body).length) { toast("Nothing to save.", "info"); return; }
+  try { await api("/profile/update", "POST", body, true); toast("Profile saved!", "success"); }
   catch (err) { toast(err.message, "error"); }
 }
 
